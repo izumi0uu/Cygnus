@@ -1,0 +1,43 @@
+name: Diff Coverage
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  diff-coverage:
+    name: Diff coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install diff-cover when LCOV inputs exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          if python scripts/diff_coverage_gate.py --print-files | grep -q .; then
+            pip install 'diff-cover>=9.2.0'
+          else
+            echo "No LCOV inputs detected; skipping diff-cover install."
+          fi
+
+      - name: Enforce diff coverage when configured
+        env:
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+        run: python scripts/diff_coverage_gate.py

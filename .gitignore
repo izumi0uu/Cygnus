@@ -1,0 +1,11 @@
+# Local agent-control and doc artifacts for Cygnus
+AGENTS.md
+.codex/
+
+# Local product documentation drafts
+docs/
+README.md
+
+# Local test/runtime cache
+__pycache__/
+*.pyc

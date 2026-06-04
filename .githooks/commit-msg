@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+set -eu
+
+if command -v python3 >/dev/null 2>&1; then
+  python3 scripts/repo_guard.py validate-commit-file "$1"
+else
+  python scripts/repo_guard.py validate-commit-file "$1"
+fi

@@ -21,6 +21,12 @@ def sample_review_bundles() -> tuple[ProposalBundle, ...]:
         plans=("enterprise",),
         regions=("eu",),
     )
+    us_free = AudienceFilter(
+        visibility=Visibility.EXTERNAL,
+        product_lines=("billing",),
+        plans=("free",),
+        regions=("us",),
+    )
     internal_billing = AudienceFilter(
         visibility=Visibility.INTERNAL,
         product_lines=("billing",),
@@ -50,6 +56,30 @@ def sample_review_bundles() -> tuple[ProposalBundle, ...]:
         review_owner="knowledge-manager",
         why_now="The incident update source failed during an active customer-facing issue.",
     )
+    ticket_pressure_proposal = CompilationProposal(
+        proposal_id="cp-ticket-1",
+        object_type=KnowledgeObjectType.TROUBLESHOOTING_FLOW,
+        action=PlanAction.CREATE,
+        title="Billing verification tickets now repeat the same workaround path",
+        summary="Recurring escalations suggest a reusable troubleshooting flow should enter review.",
+        evidence_ids=("ev-ticket-cluster-1",),
+        urgency=UrgencyLevel.MEDIUM,
+        evidence_sufficiency=EvidenceSufficiency.PARTIAL,
+        review_owner="escalation-lead",
+        why_now="A repeated ticket cluster is consuming frontline handling time without a canonical flow.",
+    )
+    audience_mismatch_proposal = CompilationProposal(
+        proposal_id="cp-audience-1",
+        object_type=KnowledgeObjectType.POLICY_RULE,
+        action=PlanAction.UPDATE,
+        title="Refund policy answer is leaking enterprise exceptions to free-plan users",
+        summary="Audience split must be corrected before external publish continues unchanged.",
+        evidence_ids=("ev-policy-1",),
+        urgency=UrgencyLevel.HIGH,
+        evidence_sufficiency=EvidenceSufficiency.SUFFICIENT,
+        review_owner="support-ops",
+        why_now="A frontline rewrite shows the current answer path is crossing the wrong plan boundary.",
+    )
 
     return (
         ProposalBundle(
@@ -76,6 +106,29 @@ def sample_review_bundles() -> tuple[ProposalBundle, ...]:
             owner_state=OwnerState.UNASSIGNED,
         ),
         ProposalBundle(
+            proposal=audience_mismatch_proposal,
+            signal=ReviewSignal(
+                proposal_id="cp-audience-1",
+                risk_type=ReviewRiskType.AUDIENCE_MISMATCH,
+                affected_audiences=(us_free, eu_enterprise),
+                affected_surfaces=("help_center", "copilot", "macro"),
+                trigger_signals=("rewrite_cluster", "audience_boundary_conflict"),
+                recommended_actions=("open_review", "restrict_publish", "split_variant"),
+            ),
+            evidence=(
+                SupportEvidence(
+                    evidence_id="ev-policy-1",
+                    source_type=EvidenceSourceType.INTERNAL_SOP,
+                    source_ref="policy/refund-enterprise-exceptions",
+                    title="Refund exception policy",
+                    content="Enterprise-only exceptions must not appear in free-plan external answers.",
+                    audience_filter=internal_billing,
+                    freshness_state=FreshnessState.FRESH,
+                ),
+            ),
+            owner_state=OwnerState.ASSIGNED,
+        ),
+        ProposalBundle(
             proposal=drift_proposal,
             signal=ReviewSignal(
                 proposal_id="cp-drift-1",
@@ -97,6 +150,29 @@ def sample_review_bundles() -> tuple[ProposalBundle, ...]:
                 ),
             ),
             owner_state=OwnerState.ASSIGNED,
+        ),
+        ProposalBundle(
+            proposal=ticket_pressure_proposal,
+            signal=ReviewSignal(
+                proposal_id="cp-ticket-1",
+                risk_type=ReviewRiskType.TICKET_PRESSURE,
+                affected_audiences=(internal_billing,),
+                affected_surfaces=("copilot", "queue-sidebar"),
+                trigger_signals=("ticket_pressure", "rewrite_cluster"),
+                recommended_actions=("open_review", "assign_owner", "request_more_evidence"),
+            ),
+            evidence=(
+                SupportEvidence(
+                    evidence_id="ev-ticket-cluster-1",
+                    source_type=EvidenceSourceType.RESOLVED_TICKET,
+                    source_ref="cluster/billing-verification-2026w24",
+                    title="Billing verification cluster",
+                    content="Agents keep reconstructing the same workaround from memory during escalations.",
+                    audience_filter=internal_billing,
+                    freshness_state=FreshnessState.UNKNOWN,
+                ),
+            ),
+            owner_state=OwnerState.UNASSIGNED,
         ),
     )
 

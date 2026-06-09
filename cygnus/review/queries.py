@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from cygnus.review.briefing import ReviewCommandBrief, ReviewRiskItem, ReviewRiskType
-from cygnus.substrate.compilation_plan import CompilationProposal, UrgencyLevel
+from cygnus.substrate.compilation_plan import UrgencyLevel
 
 
 
@@ -10,13 +10,14 @@ def build_review_command_brief(
     brief_id: str,
     headline: str,
     items: tuple[ReviewRiskItem, ...],
+    sort_items: bool = True,
 ) -> ReviewCommandBrief:
-    ordered = tuple(sorted(items, key=_priority_sort_key))
+    ordered = tuple(sorted(items, key=_priority_sort_key)) if sort_items else tuple(items)
     return ReviewCommandBrief(
         brief_id=brief_id,
         headline=headline,
         priority_items=ordered,
-        summary_counts=_summary_counts(ordered),
+        summary_counts=summarize_review_items(ordered),
     )
 
 
@@ -40,7 +41,7 @@ def _priority_sort_key(item: ReviewRiskItem) -> tuple[int, int, str]:
 
 
 
-def _summary_counts(items: tuple[ReviewRiskItem, ...]) -> dict[str, int]:
+def summarize_review_items(items: tuple[ReviewRiskItem, ...]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for item in items:
         counts[item.risk_type.value] = counts.get(item.risk_type.value, 0) + 1

@@ -4,6 +4,14 @@ from cygnus.publish.actions import (
     PublishGovernanceResult,
     apply_publish_governance_actions,
 )
+from cygnus.publish.propagation import (
+    PropagationLedgerSummary,
+    PropagationStatus,
+    PublishPropagationLedger,
+    SurfacePropagationRecord,
+    SurfacePropagationUpdate,
+    build_publish_propagation_ledger,
+)
 from cygnus.publish.preview import (
     AudienceScopeSummary,
     BlastRadiusEffect,
@@ -24,14 +32,20 @@ __all__ = [
     "BlastRadiusImpact",
     "BlastRadiusPreview",
     "ChannelGateSummary",
+    "PropagationLedgerSummary",
+    "PropagationStatus",
     "PublishActionType",
     "PublishGovernanceAction",
     "PublishGovernanceActionType",
     "PublishGovernanceResult",
     "PublishBinding",
     "PublishConflict",
+    "PublishPropagationLedger",
     "PublishPreviewCandidate",
+    "SurfacePropagationRecord",
+    "SurfacePropagationUpdate",
     "apply_publish_governance_actions",
     "build_publish_blast_radius_preview",
     "build_publish_preview_candidate",
+    "build_publish_propagation_ledger",
 ]

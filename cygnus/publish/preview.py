@@ -88,6 +88,7 @@ class PublishPreviewCandidate:
     action_type: PublishActionType
     target_audiences: tuple[AudienceFilter, ...]
     target_channels: tuple[str, ...]
+    target_bindings: tuple[PublishBinding, ...] = field(default_factory=tuple)
     current_bindings: tuple[PublishBinding, ...] = field(default_factory=tuple)
     blocked_bindings: tuple[PublishConflict, ...] = field(default_factory=tuple)
 
@@ -102,12 +103,33 @@ class PublishPreviewCandidate:
             "target_channels",
             _normalize_strings(self.target_channels, label="target channel"),
         )
+        object.__setattr__(self, "target_bindings", tuple(self.target_bindings))
         object.__setattr__(self, "current_bindings", tuple(self.current_bindings))
         object.__setattr__(self, "blocked_bindings", tuple(self.blocked_bindings))
         if not self.target_audiences:
             raise ValueError("target_audiences must not be empty")
         if not self.target_channels:
             raise ValueError("target_channels must not be empty")
+        if not self.target_bindings:
+            object.__setattr__(
+                self,
+                "target_bindings",
+                tuple(
+                    PublishBinding(audience_filter=audience, channel=channel)
+                    for audience in self.target_audiences
+                    for channel in self.target_channels
+                ),
+            )
+        object.__setattr__(
+            self,
+            "target_audiences",
+            _bindings_to_audiences(self.target_bindings),
+        )
+        object.__setattr__(
+            self,
+            "target_channels",
+            _bindings_to_channels(self.target_bindings),
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -117,6 +139,7 @@ class PublishPreviewCandidate:
             "action_type": self.action_type.value,
             "target_audiences": [audience.to_dict() for audience in self.target_audiences],
             "target_channels": list(self.target_channels),
+            "target_bindings": [binding.to_dict() for binding in self.target_bindings],
             "current_bindings": [binding.to_dict() for binding in self.current_bindings],
             "blocked_bindings": [binding.to_dict() for binding in self.blocked_bindings],
         }
@@ -258,11 +281,7 @@ def build_publish_preview_candidate(
 
 
 def build_publish_blast_radius_preview(candidate: PublishPreviewCandidate) -> BlastRadiusPreview:
-    target_bindings = tuple(
-        PublishBinding(audience_filter=audience, channel=channel)
-        for audience in candidate.target_audiences
-        for channel in candidate.target_channels
-    )
+    target_bindings = candidate.target_bindings
     current_by_key = {binding.key: binding for binding in candidate.current_bindings}
     blocked_by_key = {binding.key: binding for binding in candidate.blocked_bindings}
 
@@ -428,3 +447,19 @@ def _audience_label(audience: AudienceFilter) -> str:
     if len(parts) == 1:
         parts.append("global")
     return " · ".join(parts)
+
+
+def _bindings_to_audiences(bindings: tuple[PublishBinding, ...]) -> tuple[AudienceFilter, ...]:
+    audiences: list[AudienceFilter] = []
+    for binding in bindings:
+        if binding.audience_filter not in audiences:
+            audiences.append(binding.audience_filter)
+    return tuple(audiences)
+
+
+def _bindings_to_channels(bindings: tuple[PublishBinding, ...]) -> tuple[str, ...]:
+    channels: list[str] = []
+    for binding in bindings:
+        if binding.channel not in channels:
+            channels.append(binding.channel)
+    return tuple(channels)

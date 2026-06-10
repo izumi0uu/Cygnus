@@ -4,6 +4,18 @@ from cygnus.review.drilldown import ReviewQueueDrilldownQuery, ReviewQueueDrilld
 from cygnus.review.fixtures import sample_review_bundles, sample_review_command_brief, sample_review_command_surface
 from cygnus.review.home import ReviewHomeQuery, get_review_home_surface
 from cygnus.review.item import AudienceImpact, EvidenceStrength, ReviewItemDetailSurface, RiskFrame, build_review_item_detail_surface
+from cygnus.review.queue import (
+    QueueCommand,
+    QueueCommandType,
+    QueueDependencyState,
+    QueueMutationResult,
+    ReviewQueueEntry,
+    ReviewQueueSurface,
+    UpstreamCommandTrace,
+    apply_queue_commands,
+    build_review_queue_surface,
+    get_review_queue_surface,
+)
 from cygnus.review.providers import build_review_command_surface, build_review_command_surface_from_bundles
 from cygnus.review.queries import build_review_command_brief, summarize_review_items
 from cygnus.review.service import ProposalBundle, ReviewSignal, assemble_review_command_brief, build_review_risk_item, rank_review_item
@@ -14,10 +26,16 @@ __all__ = [
     "EvidenceStrength",
     "OwnerState",
     "PriorityStackCard",
+    "QueueCommand",
+    "QueueCommandType",
+    "QueueDependencyState",
+    "QueueMutationResult",
     "ReviewItemDetailSurface",
     "ReviewItemQuery",
+    "ReviewQueueEntry",
     "ReviewQueueDrilldownQuery",
     "ReviewQueueDrilldownSurface",
+    "ReviewQueueSurface",
     "RiskFrame",
     "ReviewCommandBrief",
     "ReviewCommandSurface",
@@ -28,6 +46,9 @@ __all__ = [
     "build_review_command_brief",
     "build_review_item_detail_surface",
     "get_review_item_detail",
+    "apply_queue_commands",
+    "build_review_queue_surface",
+    "get_review_queue_surface",
     "get_review_queue_drilldown",
     "build_review_command_surface",
     "build_review_command_surface_from_bundles",
@@ -43,4 +64,5 @@ __all__ = [
     "sample_review_command_brief",
     "sample_review_command_surface",
     "summarize_review_items",
+    "UpstreamCommandTrace",
 ]

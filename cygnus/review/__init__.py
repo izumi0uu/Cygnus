@@ -4,6 +4,16 @@ from cygnus.review.drilldown import ReviewQueueDrilldownQuery, ReviewQueueDrilld
 from cygnus.review.fixtures import sample_review_bundles, sample_review_command_brief, sample_review_command_surface
 from cygnus.review.home import ReviewHomeQuery, get_review_home_surface
 from cygnus.review.item import AudienceImpact, EvidenceStrength, ReviewItemDetailSurface, RiskFrame, build_review_item_detail_surface
+from cygnus.review.pressure import (
+    PressureCommand,
+    PressureCommandType,
+    PressureMutationResult,
+    ReviewPressureLine,
+    ReviewPressureSurface,
+    apply_pressure_commands,
+    build_review_pressure_surface,
+    get_review_pressure_surface,
+)
 from cygnus.review.queue import (
     QueueCommand,
     QueueCommandType,
@@ -25,6 +35,9 @@ __all__ = [
     "AudienceImpact",
     "EvidenceStrength",
     "OwnerState",
+    "PressureCommand",
+    "PressureCommandType",
+    "PressureMutationResult",
     "PriorityStackCard",
     "QueueCommand",
     "QueueCommandType",
@@ -32,6 +45,8 @@ __all__ = [
     "QueueMutationResult",
     "ReviewItemDetailSurface",
     "ReviewItemQuery",
+    "ReviewPressureLine",
+    "ReviewPressureSurface",
     "ReviewQueueEntry",
     "ReviewQueueDrilldownQuery",
     "ReviewQueueDrilldownSurface",
@@ -45,7 +60,10 @@ __all__ = [
     "WhyNowFrame",
     "build_review_command_brief",
     "build_review_item_detail_surface",
+    "build_review_pressure_surface",
     "get_review_item_detail",
+    "get_review_pressure_surface",
+    "apply_pressure_commands",
     "apply_queue_commands",
     "build_review_queue_surface",
     "get_review_queue_surface",

@@ -1,5 +1,15 @@
 from cygnus.review.briefing import OwnerState, ReviewCommandBrief, ReviewRiskItem, ReviewRiskType, WhyNowFrame, risk_item_from_proposal
 from cygnus.review.detail import ReviewItemQuery, get_review_item_detail
+from cygnus.review.drift import (
+    DriftContext,
+    DriftGovernanceCommand,
+    DriftGovernanceCommandType,
+    DriftGovernanceResult,
+    DriftGovernanceSurface,
+    apply_drift_governance_commands,
+    build_drift_governance_surface,
+    get_drift_governance_surface,
+)
 from cygnus.review.drilldown import ReviewQueueDrilldownQuery, ReviewQueueDrilldownSurface, get_review_queue_drilldown
 from cygnus.review.fixtures import sample_review_bundles, sample_review_command_brief, sample_review_command_surface
 from cygnus.review.home import ReviewHomeQuery, get_review_home_surface
@@ -33,6 +43,11 @@ from cygnus.review.surface import PriorityStackCard, ReviewCommandSurface, Situa
 
 __all__ = [
     "AudienceImpact",
+    "DriftContext",
+    "DriftGovernanceCommand",
+    "DriftGovernanceCommandType",
+    "DriftGovernanceResult",
+    "DriftGovernanceSurface",
     "EvidenceStrength",
     "OwnerState",
     "PressureCommand",
@@ -59,9 +74,12 @@ __all__ = [
     "SituationFrame",
     "WhyNowFrame",
     "build_review_command_brief",
+    "build_drift_governance_surface",
     "build_review_item_detail_surface",
     "build_review_pressure_surface",
+    "get_drift_governance_surface",
     "get_review_item_detail",
+    "apply_drift_governance_commands",
     "get_review_pressure_surface",
     "apply_pressure_commands",
     "apply_queue_commands",

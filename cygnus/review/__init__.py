@@ -36,6 +36,17 @@ from cygnus.review.queue import (
     build_review_queue_surface,
     get_review_queue_surface,
 )
+from cygnus.review.source_blindness import (
+    SourceBlindnessCommand,
+    SourceBlindnessCommandType,
+    SourceBlindnessContext,
+    SourceBlindnessResult,
+    SourceBlindnessSurface,
+    SourceRepairDirective,
+    apply_source_blindness_commands,
+    build_source_blindness_surface,
+    get_source_blindness_surface,
+)
 from cygnus.review.providers import build_review_command_surface, build_review_command_surface_from_bundles
 from cygnus.review.queries import build_review_command_brief, summarize_review_items
 from cygnus.review.service import ProposalBundle, ReviewSignal, assemble_review_command_brief, build_review_risk_item, rank_review_item
@@ -72,16 +83,25 @@ __all__ = [
     "ReviewRiskItem",
     "ReviewRiskType",
     "SituationFrame",
+    "SourceBlindnessCommand",
+    "SourceBlindnessCommandType",
+    "SourceBlindnessContext",
+    "SourceBlindnessResult",
+    "SourceBlindnessSurface",
+    "SourceRepairDirective",
     "WhyNowFrame",
     "build_review_command_brief",
     "build_drift_governance_surface",
     "build_review_item_detail_surface",
     "build_review_pressure_surface",
+    "build_source_blindness_surface",
     "get_drift_governance_surface",
     "get_review_item_detail",
     "apply_drift_governance_commands",
     "get_review_pressure_surface",
     "apply_pressure_commands",
+    "get_source_blindness_surface",
+    "apply_source_blindness_commands",
     "apply_queue_commands",
     "build_review_queue_surface",
     "get_review_queue_surface",

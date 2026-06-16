@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cygnus — Command Brutalism · Style Tile</title>
+<style>
+  :root{
+    --radius:10px;
+    --paper:#FBFAF6; --surface:#FFFFFF;
+    --ink-900:#16110F; --ink-700:#3A332F; --ink-500:#6B635D; --ink-300:#A9A199; --ink-100:#ECE8E2;
+    --p50:#F6ECFF; --p100:#EBD6FF; --p200:#D9B3FF; --p300:#C285FF; --p400:#B55CFF;
+    --p500:#A826FF; --p600:#8C20D4; --p700:#7019AA; --p800:#551480; --p900:#3B0E5A;
+    --trust:#2D6FF0; --aligned:#1FA971; --caution:#E8930C; --critical:#DC2626;
+    --heat-urgent:#DC2626; --heat-high:#EA6A0C; --heat-medium:#E8930C; --heat-low:#2D6FF0;
+    --shadow-command:4px 4px 0 0 var(--p600);
+    --shadow-command-lg:6px 6px 0 0 var(--p600);
+    --shadow-ink:4px 4px 0 0 var(--ink-900);
+    --shadow-pressed:2px 2px 0 0 var(--p600);
+    --shadow-critical:4px 4px 0 0 #991B1B;
+    --ease:cubic-bezier(.2,.8,.2,1);
+    --font-display:"Space Grotesk","Geist",system-ui,sans-serif;
+    --font-sans:"Geist","Inter",system-ui,sans-serif;
+    --font-mono:"Geist Mono","JetBrains Mono",ui-monospace,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink-900);font-family:var(--font-sans);
+    padding:32px 40px 64px;}
+  h1{font-family:var(--font-display);font-weight:700;font-size:34px;letter-spacing:-.5px;margin:0}
+  .sub{color:var(--ink-500);font-size:14px;margin:6px 0 0}
+  .tonechip{display:inline-block;background:var(--p500);color:#fff;font-weight:600;font-size:12px;
+    padding:4px 10px;border:2px solid var(--ink-900);border-radius:8px;box-shadow:3px 3px 0 var(--p600);margin-left:10px;vertical-align:middle}
+  h2{font-family:var(--font-display);font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:1.5px;
+    color:var(--ink-700);margin:38px 0 14px;border-bottom:2px solid var(--ink-900);padding-bottom:6px}
+  .row{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start}
+  .sw{width:104px;border:2px solid var(--ink-900);border-radius:8px;overflow:hidden;background:#fff;box-shadow:3px 3px 0 var(--ink-900)}
+  .sw .chip{height:60px}
+  .sw .meta{padding:6px 8px;font-family:var(--font-mono);font-size:10px;line-height:1.5}
+  .sw .nm{font-weight:600;color:var(--ink-900)}
+  .sw .hx{color:var(--ink-500)}
+
+  /* buttons */
+  .btn{position:relative;display:inline-flex;align-items:center;gap:8px;height:42px;padding:0 20px;
+    border:2px solid var(--p700);border-radius:var(--radius);background:var(--p500);color:#fff;font-weight:600;font-size:14px;
+    cursor:pointer;box-shadow:var(--shadow-command);transition:transform .12s var(--ease),box-shadow .12s var(--ease),background .2s}
+  .btn:hover{background:var(--p400)}
+  .btn:active{transform:translate(2px,2px);box-shadow:var(--shadow-pressed)}
+  .btn.pressed{transform:translate(2px,2px);box-shadow:var(--shadow-pressed)}
+  .btn.secondary{background:#fff;color:var(--ink-900);border-color:var(--ink-900);box-shadow:var(--shadow-ink)}
+  .btn.secondary:hover{background:var(--ink-100)}
+  .btn.danger{background:var(--critical);border-color:#991B1B;box-shadow:var(--shadow-critical)}
+  .svgico{width:14px;height:14px;fill:currentColor}
+
+  /* risk card */
+  .cards{display:flex;gap:18px;flex-wrap:wrap}
+  .card{position:relative;width:340px;background:var(--surface);border:2px solid var(--ink-900);border-radius:var(--radius);
+    padding:14px 16px 14px 20px;box-shadow:var(--shadow-ink)}
+  .card.lead{box-shadow:var(--shadow-command-lg);border-color:var(--p700)}
+  .card .bar{position:absolute;left:0;top:0;bottom:0;width:8px;border-radius:8px 0 0 8px}
+  .card .top{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .card .title{font-weight:600;font-size:15px;line-height:1.3;margin:2px 0 10px}
+  .card .foot{display:flex;align-items:center;gap:8px}
+  .chip{font-family:var(--font-mono);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;
+    padding:3px 8px;border-radius:6px;border:2px solid var(--ink-900)}
+  .chip.urgent{background:var(--heat-urgent);color:#fff;border-color:#991B1B}
+  .chip.high{background:var(--heat-high);color:#fff;border-color:#9a4406}
+  .chip.medium{background:var(--heat-medium);color:var(--ink-900);border-color:#9a6206}
+  .chip.type{background:#fff;color:var(--ink-700)}
+  .chip.owner-gap{background:#FFF3D6;color:#7a5206;border-color:#9a6206}
+  .chip.assigned{background:#fff;color:var(--ink-500);border-style:dashed}
+  .cmd{margin-left:auto;font-family:var(--font-mono);font-size:11px;font-weight:600;background:var(--p500);color:#fff;
+    border:2px solid var(--p700);border-radius:7px;padding:3px 9px;box-shadow:2px 2px 0 var(--p600)}
+  .ico{color:var(--ink-300);font-size:16px}
+
+  /* typography specimen */
+  .typ div{margin:6px 0}
+  .t-d{font-family:var(--font-display);font-weight:700;font-size:28px}
+  .t-s{font-family:var(--font-sans);font-size:16px}
+  .t-m{font-family:var(--font-mono);font-size:13px;color:var(--ink-700)}
+
+  /* shadows */
+  .shbox{width:150px;height:64px;background:#fff;border:2px solid var(--ink-900);border-radius:var(--radius);
+    display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:10px;color:var(--ink-500)}
+  .note{font-size:12px;color:var(--ink-500);margin-top:8px}
+  .grid2{display:flex;gap:40px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+  <h1>Cygnus — Command Brutalism<span class="tonechip">主基调</span></h1>
+  <p class="sub">触感 · 敢用色 · 命令感 — 紫色硬阴影品牌层 + 治理语义层 + 指挥密度层 · Light "Paper" 默认</p>
+
+  <h2>Primary — 品牌紫(hue 276)</h2>
+  <div class="row">
+    <div class="sw"><div class="chip" style="background:#F6ECFF"></div><div class="meta"><div class="nm">50</div><div class="hx">#F6ECFF</div></div></div>
+    <div class="sw"><div class="chip" style="background:#EBD6FF"></div><div class="meta"><div class="nm">100</div><div class="hx">#EBD6FF</div></div></div>
+    <div class="sw"><div class="chip" style="background:#D9B3FF"></div><div class="meta"><div class="nm">200</div><div class="hx">#D9B3FF</div></div></div>
+    <div class="sw"><div class="chip" style="background:#C285FF"></div><div class="meta"><div class="nm">300</div><div class="hx">#C285FF</div></div></div>
+    <div class="sw"><div class="chip" style="background:#B55CFF"></div><div class="meta"><div class="nm">400</div><div class="hx">#B55CFF</div></div></div>
+    <div class="sw"><div class="chip" style="background:#A826FF"></div><div class="meta"><div class="nm">500 ★</div><div class="hx">#A826FF</div></div></div>
+    <div class="sw"><div class="chip" style="background:#8C20D4"></div><div class="meta"><div class="nm">600 ▣</div><div class="hx">#8C20D4</div></div></div>
+    <div class="sw"><div class="chip" style="background:#7019AA"></div><div class="meta"><div class="nm">700</div><div class="hx">#7019AA</div></div></div>
+    <div class="sw"><div class="chip" style="background:#551480"></div><div class="meta"><div class="nm">800</div><div class="hx">#551480</div></div></div>
+    <div class="sw"><div class="chip" style="background:#3B0E5A"></div><div class="meta"><div class="nm">900</div><div class="hx">#3B0E5A</div></div></div>
+  </div>
+  <p class="note">★ 品牌主色 · ▣ 硬阴影色（box-shadow: 4px 4px 0 #8C20D4）</p>
+
+  <h2>Neutrals — Paper / Ink</h2>
+  <div class="row">
+    <div class="sw"><div class="chip" style="background:#FBFAF6"></div><div class="meta"><div class="nm">paper</div><div class="hx">#FBFAF6</div></div></div>
+    <div class="sw"><div class="chip" style="background:#FFFFFF"></div><div class="meta"><div class="nm">surface</div><div class="hx">#FFFFFF</div></div></div>
+    <div class="sw"><div class="chip" style="background:#ECE8E2"></div><div class="meta"><div class="nm">ink-100</div><div class="hx">#ECE8E2</div></div></div>
+    <div class="sw"><div class="chip" style="background:#A9A199"></div><div class="meta"><div class="nm">ink-300</div><div class="hx">#A9A199</div></div></div>
+    <div class="sw"><div class="chip" style="background:#6B635D"></div><div class="meta"><div class="nm">ink-500</div><div class="hx">#6B635D</div></div></div>
+    <div class="sw"><div class="chip" style="background:#16110F"></div><div class="meta"><div class="nm">ink-900</div><div class="hx">#16110F</div></div></div>
+  </div>
+
+  <h2>治理语义 + Urgency Heat</h2>
+  <div class="row">
+    <div class="sw"><div class="chip" style="background:#2D6FF0"></div><div class="meta"><div class="nm">trust</div><div class="hx">#2D6FF0</div></div></div>
+    <div class="sw"><div class="chip" style="background:#1FA971"></div><div class="meta"><div class="nm">aligned</div><div class="hx">#1FA971</div></div></div>
+    <div class="sw"><div class="chip" style="background:#E8930C"></div><div class="meta"><div class="nm">caution</div><div class="hx">#E8930C</div></div></div>
+    <div class="sw"><div class="chip" style="background:#DC2626"></div><div class="meta"><div class="nm">critical</div><div class="hx">#DC2626</div></div></div>
+    <div class="sw"><div class="chip" style="background:#EA6A0C"></div><div class="meta"><div class="nm">heat-high</div><div class="hx">#EA6A0C</div></div></div>
+  </div>
+
+  <h2>命令按钮 — 触感(默认 / 按下 / 次要 / 危险)</h2>
+  <div class="row" style="align-items:center;gap:20px">
+    <button class="btn">Open Review
+      <svg class="svgico" viewBox="0 0 512 512"><path d="M256 48l160 96v224l-160 96L96 368V144z"/></svg>
+    </button>
+    <button class="btn pressed">Pressed ▾</button>
+    <button class="btn secondary">Assign Owner</button>
+    <button class="btn danger">Freeze External</button>
+  </div>
+  <p class="note">默认 4px 紫硬阴影；:active 位移 (2px,2px) + 阴影缩到 2px（实体按压）；hover 主色提亮；高风险（Freeze）红硬阴影、不加花哨揭示。</p>
+
+  <h2>Risk Card — Priority Stack(基调示范)</h2>
+  <div class="cards">
+    <div class="card lead">
+      <div class="bar" style="background:#DC2626"></div>
+      <div class="top">
+        <span class="chip urgent">urgent</span>
+        <span class="chip type">source_blindness</span>
+        <span class="ico">◉</span>
+      </div>
+      <div class="title">Known issue page is now partially blind due to source sync failure</div>
+      <div class="foot">
+        <span class="chip owner-gap">owner gap</span>
+        <span class="cmd">mark_urgent →</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="bar" style="background:#EA6A0C"></div>
+      <div class="top">
+        <span class="chip high">high</span>
+        <span class="chip type">audience_mismatch</span>
+        <span class="ico">§</span>
+      </div>
+      <div class="title">Refund policy answer is leaking enterprise exceptions to free-plan users</div>
+      <div class="foot">
+        <span class="chip assigned">@support-ops</span>
+        <span class="cmd">restrict_publish →</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div>
+      <h2>排版</h2>
+      <div class="typ">
+        <div class="t-d">Today’s highest-leverage risks</div>
+        <div class="t-s">Situation Frame body — sans 16 / 500. Coordinate before you edit.</div>
+        <div class="t-m">cp-source-1 · external · billing · eu · restrict_publish</div>
+      </div>
+    </div>
+    <div>
+      <h2>阴影</h2>
+      <div class="row">
+        <div class="shbox" style="box-shadow:var(--shadow-command)">command 4·4·0</div>
+        <div class="shbox" style="box-shadow:var(--shadow-ink)">ink 4·4·0</div>
+        <div class="shbox" style="box-shadow:var(--shadow-pressed)">pressed 2·2·0</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

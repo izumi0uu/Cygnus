@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from cygnus.recovery import DownstreamRealityCheckQuery, get_downstream_reality_check_surface
 from cygnus.review import get_review_home_surface
 
 app = FastAPI(
@@ -29,3 +30,11 @@ def healthz() -> dict[str, str]:
 def command_center() -> dict[str, object]:
     """Risk-ranked morning command brief for the Command Center surface."""
     return get_review_home_surface().to_dict()
+
+
+@app.get("/api/recovery/downstream-reality-check/{command_id}")
+def downstream_reality_check(command_id: str) -> dict[str, object]:
+    """Frontline recovery feedback for a specific governance command."""
+    return get_downstream_reality_check_surface(
+        DownstreamRealityCheckQuery(command_id=command_id)
+    ).to_dict()

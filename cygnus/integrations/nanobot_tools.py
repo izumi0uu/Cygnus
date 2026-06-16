@@ -5,6 +5,7 @@ from typing import Any
 
 from cygnus.domain import AudienceContext, LifecycleState, Visibility
 from cygnus.domain.objects import AnswerCard, EscalationRoute, KnowledgeObject, KnownIssuePage, PolicyRule, TroubleshootingFlow
+from cygnus.recovery import DownstreamRealityCheckQuery, get_downstream_reality_check_surface
 from cygnus.retrieval import (
     EvidenceIndex,
     KnowledgeObjectIndex,
@@ -235,6 +236,20 @@ def list_drift_alerts(*, filters: dict[str, Any] | None = None) -> dict[str, Any
     }
 
 
+def get_downstream_reality_check(*, command_id: str) -> dict[str, Any]:
+    surface = get_downstream_reality_check_surface(
+        DownstreamRealityCheckQuery(command_id=command_id)
+    )
+    payload = surface.to_dict()
+    return {
+        "status": "success",
+        "summary": f"Downstream reality check loaded for {command_id}",
+        "data": payload,
+        "warnings": [],
+        "errors": [],
+    }
+
+
 
 def build_default_tool_registry() -> ToolRegistry:
     registry = ToolRegistry()
@@ -264,6 +279,21 @@ def _tool_bindings() -> tuple[tuple[ToolDefinition, Any], ...]:
                 risk_level="R0",
             ),
             search_knowledge_objects,
+        ),
+        (
+            ToolDefinition(
+                name="get_downstream_reality_check",
+                description="Return frontline recovery feedback for a specific governance command.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "command_id": {"type": "string"},
+                    },
+                    "required": ["command_id"],
+                },
+                risk_level="R0",
+            ),
+            get_downstream_reality_check,
         ),
         (
             ToolDefinition(

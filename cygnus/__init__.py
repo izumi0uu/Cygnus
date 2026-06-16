@@ -14,6 +14,7 @@ from cygnus.domain import (
 )
 from cygnus.integrations import (
     build_default_tool_registry,
+    get_downstream_reality_check,
     get_source_trace,
     list_drift_alerts,
     propose_knowledge_object,
@@ -35,6 +36,7 @@ __all__ = [
     "LifecycleState",
     "PolicyRule",
     "build_default_tool_registry",
+    "get_downstream_reality_check",
     "get_source_trace",
     "list_drift_alerts",
     "propose_knowledge_object",

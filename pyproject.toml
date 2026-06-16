@@ -8,7 +8,10 @@ version = "0.1.0"
 description = "Support-domain core for the Cygnus support knowledge operating system."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+]
 
 [tool.setuptools.packages.find]
 include = ["cygnus*"]

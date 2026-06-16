@@ -1,6 +1,8 @@
 # Local agent-control and doc artifacts for Cygnus
 AGENTS.md
+CLAUDE.md
 .codex/
+.claude/
 
 # Local product documentation drafts
 DESIGN.md
@@ -10,3 +12,7 @@ README.md
 # Local test/runtime cache
 __pycache__/
 *.pyc
+
+# macOS + Python build artifacts
+.DS_Store
+*.egg-info/

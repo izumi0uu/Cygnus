@@ -1,18 +1,4 @@
-"""Cygnus support knowledge operating system."""
-
-from cygnus.domain import (
-    AnswerCard,
-    AudienceContext,
-    AudienceFilter,
-    AudienceVariant,
-    EscalationRoute,
-    KnownIssuePage,
-    LifecycleState,
-    PolicyRule,
-    TroubleshootingFlow,
-    Visibility,
-)
-from cygnus.integrations import (
+from cygnus.integrations.nanobot_tools import (
     build_default_tool_registry,
     get_source_trace,
     list_drift_alerts,
@@ -26,14 +12,6 @@ from cygnus.integrations import (
 )
 
 __all__ = [
-    "AnswerCard",
-    "AudienceContext",
-    "AudienceFilter",
-    "AudienceVariant",
-    "EscalationRoute",
-    "KnownIssuePage",
-    "LifecycleState",
-    "PolicyRule",
     "build_default_tool_registry",
     "get_source_trace",
     "list_drift_alerts",
@@ -43,7 +21,5 @@ __all__ = [
     "request_review",
     "search_knowledge_objects",
     "search_support_evidence",
-    "TroubleshootingFlow",
     "validate_publish_policy",
-    "Visibility",
 ]

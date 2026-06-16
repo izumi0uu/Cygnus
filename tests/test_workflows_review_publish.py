@@ -30,11 +30,17 @@ class ReviewPublishWorkflowTests(unittest.TestCase):
         workflow = ReviewPublishWorkflow(workflow_id="wf-1", proposals=(proposal,))
 
         workflow.advance(PipelinePhase.NORMALIZE)
+        workflow.advance(PipelinePhase.MAP_REDUCE)
         workflow.advance(PipelinePhase.PLAN)
         workflow.add_review_note("Need confirmation on external wording.")
 
         payload = workflow.to_dict()
         self.assertEqual(payload["current_phase"], "plan")
+        self.assertEqual(
+            payload["completed_phases"],
+            ["ingest", "normalize", "map_reduce"],
+        )
+        self.assertEqual(payload["resume_phase"], "plan")
+        self.assertFalse(payload["is_complete"])
         self.assertEqual(payload["proposals"][0]["object_type"], "known_issue_page")
         self.assertEqual(payload["review_notes"], ["Need confirmation on external wording."])
-

@@ -1,0 +1,162 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* 1. Tokens at root (Command Brutalism — light "paper" default) */
+:root {
+  --radius: 10px;
+
+  --paper: hsl(48 33% 97%);
+  --surface: hsl(0 0% 100%);
+  --surface-muted: hsl(40 20% 94%);
+  --background: var(--paper);
+  --foreground: hsl(20 14% 8%);
+  --muted-foreground: hsl(25 8% 40%);
+
+  --primary: hsl(276 100% 57%);
+  --primary-foreground: hsl(0 0% 100%);
+  --primary-active: hsl(276 74% 48%);
+  --primary-hover: hsl(276 100% 68%);
+  --border: hsl(20 14% 8%);
+
+  --trust: hsl(217 87% 56%);     --trust-foreground: hsl(0 0% 100%);
+  --aligned: hsl(152 69% 39%);   --aligned-foreground: hsl(0 0% 100%);
+  --caution: hsl(38 90% 48%);    --caution-foreground: hsl(20 14% 8%);
+  --critical: hsl(0 72% 51%);    --critical-foreground: hsl(0 0% 100%);
+
+  --heat-urgent: hsl(0 72% 51%);
+  --heat-high: hsl(24 90% 48%);
+  --heat-medium: hsl(38 90% 48%);
+  --heat-low: hsl(217 87% 56%);
+
+  --shadow-command: 4px 4px 0 0 var(--primary-active);
+  --shadow-command-lg: 6px 6px 0 0 var(--primary-active);
+  --shadow-ink: 4px 4px 0 0 var(--foreground);
+  --shadow-pressed: 2px 2px 0 0 var(--primary-active);
+  --shadow-critical: 4px 4px 0 0 hsl(0 63% 35%);
+  --ease-command: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Dark = long-session ops variant (same purple identity) */
+.dark {
+  --paper: hsl(276 30% 8%);
+  --surface: hsl(276 22% 12%);
+  --surface-muted: hsl(276 18% 18%);
+  --background: var(--paper);
+  --foreground: hsl(40 20% 94%);
+  --muted-foreground: hsl(35 10% 65%);
+
+  --primary: hsl(276 100% 68%);
+  --primary-foreground: hsl(276 70% 10%);
+  --primary-active: hsl(276 90% 60%);
+  --primary-hover: hsl(276 100% 76%);
+  --border: hsl(40 16% 80%);
+
+  --caution-foreground: hsl(20 14% 8%);
+  --shadow-ink: 4px 4px 0 0 hsl(276 90% 60%);
+}
+
+/* 2. Map variables to Tailwind utilities */
+@theme inline {
+  --radius-lg: var(--radius);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-border: var(--border);
+  --color-trust: var(--trust);
+  --color-aligned: var(--aligned);
+  --color-caution: var(--caution);
+  --color-critical: var(--critical);
+  --font-display: "Space Grotesk", "Geist", system-ui, sans-serif;
+  --font-sans: "Inter", "Geist", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Geist Mono", ui-monospace, monospace;
+}
+
+/* 3. Base */
+@layer base {
+  * { border-color: var(--border); }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    margin: 0;
+  }
+}
+
+/* 4. Signature Command Brutalism components */
+@layer components {
+  .btn-command {
+    display: inline-flex; align-items: center; gap: 8px;
+    height: 40px; padding: 0 18px;
+    border: 2px solid var(--primary-active); border-radius: var(--radius);
+    background: var(--primary); color: var(--primary-foreground);
+    font-weight: 600; font-size: 14px; cursor: pointer;
+    box-shadow: var(--shadow-command);
+    transition: transform .12s var(--ease-command), box-shadow .12s var(--ease-command), background .2s;
+  }
+  .btn-command:hover { background: var(--primary-hover); }
+  .btn-command:active { transform: translate(2px, 2px); box-shadow: var(--shadow-pressed); }
+  .btn-command:focus-visible { outline: none; box-shadow: var(--shadow-command), 0 0 0 3px hsl(276 100% 87%); }
+
+  .btn-secondary {
+    display: inline-flex; align-items: center; gap: 8px;
+    height: 40px; padding: 0 16px;
+    border: 2px solid var(--border); border-radius: var(--radius);
+    background: var(--surface); color: var(--foreground);
+    font-weight: 600; font-size: 14px; cursor: pointer;
+    box-shadow: var(--shadow-ink);
+    transition: transform .12s var(--ease-command), box-shadow .12s var(--ease-command);
+  }
+  .btn-secondary:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0 0 var(--foreground); }
+
+  .icon-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 34px; padding: 0 12px;
+    border: 2px solid var(--border); border-radius: 8px;
+    background: var(--surface); color: var(--foreground);
+    font-weight: 600; font-size: 12px; cursor: pointer;
+    box-shadow: 3px 3px 0 0 var(--foreground);
+    transition: transform .1s var(--ease-command), box-shadow .1s var(--ease-command);
+  }
+  .icon-btn:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 0 var(--foreground); }
+
+  .card-brutal {
+    position: relative;
+    background: var(--surface);
+    border: 2px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow-ink);
+  }
+  .card-lead { box-shadow: var(--shadow-command-lg); border-color: var(--primary-active); }
+
+  .chip {
+    display: inline-flex; align-items: center;
+    font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .5px;
+    padding: 3px 8px; border-radius: 6px; border: 2px solid var(--border);
+    background: var(--surface); color: var(--muted-foreground);
+  }
+  .heat-urgent { background: var(--heat-urgent); color: #fff; border-color: hsl(0 63% 35%); }
+  .heat-high   { background: var(--heat-high); color: #fff; border-color: hsl(24 80% 30%); }
+  .heat-medium { background: var(--heat-medium); color: hsl(20 14% 8%); border-color: hsl(38 80% 28%); }
+  .heat-low    { background: var(--heat-low); color: #fff; border-color: hsl(217 70% 35%); }
+  .chip-ownergap { background: hsl(40 90% 90%); color: hsl(28 80% 28%); border-color: hsl(38 80% 35%); }
+  .chip-assigned { border-style: dashed; }
+
+  .cmd-pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+    padding: 4px 10px; border-radius: 7px;
+    border: 2px solid var(--primary-active); background: var(--primary); color: var(--primary-foreground);
+    cursor: pointer; box-shadow: 2px 2px 0 0 var(--primary-active);
+    transition: transform .1s var(--ease-command), box-shadow .1s var(--ease-command);
+  }
+  .cmd-pill:active { transform: translate(2px, 2px); box-shadow: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn-command, .btn-secondary, .icon-btn, .cmd-pill { transition: background .2s; }
+  .btn-command:active, .btn-secondary:active, .icon-btn:active, .cmd-pill:active { transform: none; }
+}

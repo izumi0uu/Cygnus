@@ -6,7 +6,9 @@ from cygnus.domain.objects import (
     AnswerCard,
     AudienceVariant,
     EscalationRoute,
+    KnowledgeObject,
     KnownIssuePage,
+    KnowledgeObjectType,
     PolicyRule,
     TroubleshootingFlow,
 )
@@ -17,6 +19,8 @@ __all__ = [
     "AudienceFilter",
     "AudienceVariant",
     "EscalationRoute",
+    "KnowledgeObject",
+    "KnowledgeObjectType",
     "KnownIssuePage",
     "LifecycleState",
     "PolicyRule",

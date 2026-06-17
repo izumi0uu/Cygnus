@@ -16,3 +16,6 @@ __pycache__/
 # macOS + Python build artifacts
 .DS_Store
 *.egg-info/
+
+# Vendored commercial font (Thunder, Pangram Pangram) — kept local, not redistributed
+frontend/public/fonts/thunder.woff2

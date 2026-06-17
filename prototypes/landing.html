@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cygnus — Support Knowledge OS</title>
+<style>
+  @font-face{
+    font-family:"Thunder";
+    src:url("../frontend/public/fonts/thunder.woff2") format("woff2");
+    font-weight:400; font-style:normal; font-display:swap;
+  }
+  :root{
+    --bg:#121212; --ink:#F2EEE6; --muted:#8C867B; --line:rgba(255,255,255,.12);
+    --accent:#A826FF;
+    --font:"PingFang SC","Helvetica Neue",Helvetica,Arial,system-ui,sans-serif;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,monospace;
+    --ease:cubic-bezier(.19,1,.22,1);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased}
+  body{overflow-x:hidden}
+  a,button{color:inherit;text-decoration:none;font:inherit;background:none;border:none}
+  ::selection{background:var(--accent);color:#fff}
+
+  .nav{position:fixed;top:0;left:0;right:0;z-index:40;display:flex;align-items:center;gap:28px;padding:22px 36px}
+  .brand{font-weight:800;letter-spacing:.5px;font-size:18px}
+  .brand .dot{color:var(--accent)}
+  .nav .right{margin-left:auto;display:flex;gap:22px;align-items:center;font-size:13px;color:var(--muted)}
+  .nav .right button:hover{color:var(--ink)}
+  .nav .console{color:var(--ink);border:1px solid var(--line);border-radius:999px;padding:7px 16px;transition:border-color .2s}
+  .nav .console:hover{border-color:var(--accent)}
+
+  .wrap{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:46px;padding:120px 24px 60px;text-align:center}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:3px;text-transform:uppercase;color:var(--muted)}
+
+  /* fixed-height rail so a tile growing never reflows the layout above */
+  .tiles{position:relative;height:100px;display:flex;gap:8px;justify-content:center;align-items:center;cursor:none}
+  .tile{width:60px;height:60px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;
+    background:#1c1820;color:#cfcad0;cursor:pointer;
+    transition:width .2s ease-out,height .2s ease-out,color .2s}
+  .tile:hover{width:84px;height:84px;color:var(--accent)}
+
+  .cursor{position:absolute;left:0;top:0;width:56px;height:56px;border-radius:999px;background:var(--accent);
+    display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:10;
+    transform-origin:left top;transform:scale(0);transition:transform .18s var(--ease)}
+  .tiles:hover .cursor{transform:scale(1)}
+
+  .headline{position:relative;height:22vw;width:100%;overflow:hidden}
+  .layer{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+  .roll{font-family:"Thunder",system-ui,sans-serif;font-size:20vw;line-height:1;text-transform:uppercase;
+    letter-spacing:.05em;white-space:nowrap;display:inline-flex}
+  .ch{display:inline-block;will-change:transform}
+
+  .sub{max-width:560px;color:var(--muted);font-size:clamp(14px,1.5vw,17px);line-height:1.65}
+  .cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+  .btn{border-radius:999px;padding:13px 24px;font-size:14px;font-weight:600;transition:background .2s,border-color .2s}
+  .btn-primary{background:var(--accent);color:#fff}
+  .btn-primary:hover{background:#B968FF}
+  .btn-ghost{border:1px solid var(--line);color:var(--ink)}
+  .btn-ghost:hover{border-color:rgba(255,255,255,.4)}
+
+  .features{max-width:1100px;margin:0 auto;display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--line)}
+  .feat{padding:38px 28px;border-left:1px solid var(--line)}
+  .feat:first-child{border-left:none}
+  .feat .k{font-family:var(--mono);font-size:12px;color:var(--accent);letter-spacing:1px}
+  .feat h3{font-size:21px;font-weight:700;margin:14px 0 10px}
+  .feat p{color:var(--muted);font-size:14px;line-height:1.65}
+  footer{max-width:1100px;margin:0 auto;padding:28px 28px 60px;color:var(--muted);font-size:12px;font-family:var(--mono);display:flex;justify-content:space-between;border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+  <nav class="nav">
+    <div class="brand">CYGNUS<span class="dot">.</span></div>
+    <div class="right">
+      <button>EN / 中</button>
+      <a class="console">进入指挥中心</a>
+    </div>
+  </nav>
+
+  <main class="wrap">
+    <div class="eyebrow">Support Brain · 支持知识操作系统</div>
+
+    <div class="tiles" id="tiles">
+      <div class="cursor" id="cursor">
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
+          <path d="M6.52182 2.75026L12.8858 9.11422L15.253 0.38299L6.52182 2.75026Z" fill="#fff"/>
+          <path d="M0.333095 12.3331L3.30294 15.3029L10.3402 6.56864L9.0674 5.29585L0.333095 12.3331Z" fill="#fff"/>
+        </svg>
+      </div>
+    </div>
+
+    <div class="headline" id="headline"></div>
+
+    <p class="sub">把分散的支持知识收归为可信、可治理、可追溯的知识对象 —— 给人与 AI 一个统一的来源。</p>
+    <div class="cta">
+      <a class="btn btn-primary">进入指挥中心 →</a>
+      <a class="btn btn-ghost">查看文档</a>
+    </div>
+  </main>
+
+  <section class="features">
+    <div class="feat"><div class="k">01 / 编译</div><h3>把分散来源变成知识对象</h3><p>工单、release、SOP、incident —— 归一化、聚类，编译成结构化知识对象，而非匿名 chunk。</p></div>
+    <div class="feat"><div class="k">02 / 审阅 · 发布</div><h3>人在环的治理命令</h3><p>按风险重排审阅；发布前预览爆炸半径（受众 × 渠道），支持限制 / 拆分 / 暂停。</p></div>
+    <div class="feat"><div class="k">03 / 追溯</div><h3>每个答案都连着来源</h3><p>对象 → 证据 → 版本 → 发布记录，全链路可追溯；来源失效即治理失明。</p></div>
+  </section>
+  <footer><span>CYGNUS · Arkon-enhanced support knowledge OS</span><span>© 2026</span></footer>
+
+  <script>
+    const DEFAULT = 'CYGNUS';
+    const members = [
+      { name:'ANSWER', glyph:'▤' }, { name:'FLOW', glyph:'⑂' }, { name:'POLICY', glyph:'§' },
+      { name:'KNOWN', glyph:'◉' }, { name:'ESCALATE', glyph:'↯' }, { name:'AUDIENCE', glyph:'◈' },
+    ];
+    const STEP = 0.055, DUR = 0.8, EASE = 'cubic-bezier(.19,1,.22,1)';
+    const headline = document.getElementById('headline');
+    let current = null;
+
+    const delay = (i, len) => (STEP * Math.abs(i - Math.floor(len / 2))) + 's';
+
+    function makeLayer(word, accent, fromBelow){
+      const layer = document.createElement('div'); layer.className = 'layer';
+      const roll = document.createElement('div'); roll.className = 'roll';
+      roll.style.color = accent ? 'var(--accent)' : 'var(--ink)';
+      [...word].forEach((c)=>{
+        const s = document.createElement('span'); s.className = 'ch';
+        s.textContent = c === ' ' ? ' ' : c;
+        s.style.transform = `translateY(${fromBelow ? 100 : -100}%)`;
+        roll.appendChild(s);
+      });
+      layer.appendChild(roll);
+      return layer;
+    }
+
+    function rollTo(word, accent){
+      if(word === current) return;
+      current = word;
+      [...headline.children].forEach(layer=>{
+        const chs = [...layer.querySelectorAll('.ch')];
+        chs.forEach((s,i)=>{
+          s.style.transition = `transform ${DUR}s ${EASE}`;
+          s.style.transitionDelay = delay(i, chs.length);
+          s.style.transform = 'translateY(-100%)';
+        });
+        setTimeout(()=>layer.remove(), (DUR + 0.5) * 1000);
+      });
+      const layer = makeLayer(word, accent, true);
+      headline.appendChild(layer);
+      requestAnimationFrame(()=>{
+        const chs = [...layer.querySelectorAll('.ch')];
+        chs.forEach((s,i)=>{
+          s.style.transition = `transform ${DUR}s ${EASE}`;
+          s.style.transitionDelay = delay(i, chs.length);
+          s.style.transform = 'translateY(0)';
+        });
+      });
+    }
+
+    const tiles = document.getElementById('tiles');
+    members.forEach(m=>{
+      const el = document.createElement('div'); el.className = 'tile'; el.textContent = m.glyph;
+      el.addEventListener('mouseenter', ()=>rollTo(m.name, true));
+      el.addEventListener('mouseleave', ()=>rollTo(DEFAULT, false));
+      tiles.appendChild(el);
+    });
+
+    const cursor = document.getElementById('cursor');
+    tiles.addEventListener('pointermove', e=>{
+      const r = tiles.getBoundingClientRect();
+      cursor.style.left = (e.clientX - r.left) + 'px';
+      cursor.style.top = (e.clientY - r.top) + 'px';
+    });
+
+    if(location.hash === '#mid'){
+      const layer = makeLayer('ESCALATE', true, true);
+      headline.appendChild(layer);
+      [...layer.querySelectorAll('.ch')].forEach((s,i,arr)=>{
+        const d = Math.abs(i - Math.floor(arr.length/2));
+        s.style.transform = `translateY(${Math.max(0, Math.min(100, d * 34))}%)`;
+      });
+      current = 'ESCALATE';
+      cursor.style.left = '720px'; cursor.style.top = '64px'; cursor.style.transform = 'scale(1)';
+    } else {
+      const layer = makeLayer(DEFAULT, false, false);
+      headline.appendChild(layer);
+      layer.querySelectorAll('.ch').forEach(s=>s.style.transform = 'translateY(0)');
+      current = DEFAULT;
+    }
+  </script>
+</body>
+</html>

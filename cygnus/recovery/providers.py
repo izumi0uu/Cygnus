@@ -15,6 +15,7 @@ from cygnus.recovery.window import (
     ResidualRisk,
     build_recovery_window_surface,
 )
+from cygnus.recovery.overview import GovernanceOverviewSurface, build_governance_overview_surface
 
 
 def build_downstream_reality_check(
@@ -41,5 +42,18 @@ def build_recovery_window(
         before_metrics=before_metrics,
         after_metrics=after_metrics,
         alignment_planes=alignment_planes,
+        residual_risks=residual_risks,
+    )
+
+
+def build_governance_overview(
+    *,
+    command_refs: Iterable[GovernanceCommandRef],
+    recovery_windows: Iterable[RecoveryWindowSurface],
+    residual_risks: Iterable[ResidualRisk],
+) -> GovernanceOverviewSurface:
+    return build_governance_overview_surface(
+        command_refs=command_refs,
+        recovery_windows=recovery_windows,
         residual_risks=residual_risks,
     )

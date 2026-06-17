@@ -15,6 +15,7 @@ from cygnus.domain import (
 from cygnus.integrations import (
     build_default_tool_registry,
     get_downstream_reality_check,
+    get_governance_overview,
     get_recovery_window,
     get_source_trace,
     list_drift_alerts,
@@ -38,6 +39,7 @@ __all__ = [
     "PolicyRule",
     "build_default_tool_registry",
     "get_downstream_reality_check",
+    "get_governance_overview",
     "get_recovery_window",
     "get_source_trace",
     "list_drift_alerts",

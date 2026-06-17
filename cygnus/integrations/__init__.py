@@ -1,6 +1,7 @@
 from cygnus.integrations.nanobot_tools import (
     build_default_tool_registry,
     get_downstream_reality_check,
+    get_governance_overview,
     get_recovery_window,
     get_source_trace,
     list_drift_alerts,
@@ -16,6 +17,7 @@ from cygnus.integrations.nanobot_tools import (
 __all__ = [
     "build_default_tool_registry",
     "get_downstream_reality_check",
+    "get_governance_overview",
     "get_recovery_window",
     "get_source_trace",
     "list_drift_alerts",

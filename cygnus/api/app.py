@@ -5,9 +5,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from cygnus.recovery import (
     DownstreamRealityCheckQuery,
+    GovernanceOverviewQuery,
     RecoveryWindowQuery,
     get_downstream_reality_check_surface,
+    get_governance_overview_surface,
     get_recovery_window_surface,
+    sample_recovery_command_refs,
 )
 from cygnus.review import get_review_home_surface
 
@@ -50,4 +53,14 @@ def recovery_window(command_id: str) -> dict[str, object]:
     """Before/after recovery proof for a specific governance command."""
     return get_recovery_window_surface(
         RecoveryWindowQuery(command_id=command_id)
+    ).to_dict()
+
+
+@app.get("/api/recovery/overview")
+def governance_overview() -> dict[str, object]:
+    """Compare open loops to choose the next highest-leverage command."""
+    return get_governance_overview_surface(
+        GovernanceOverviewQuery(
+            command_ids=tuple(ref.command_id for ref in sample_recovery_command_refs())
+        )
     ).to_dict()

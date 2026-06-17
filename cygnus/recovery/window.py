@@ -178,6 +178,7 @@ class BeforeAfterAlignmentView:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ResidualRisk:
+    command_id: str
     risk_id: str
     label: str
     severity: str
@@ -190,6 +191,8 @@ class ResidualRisk:
     evidence_refs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        if not self.command_id.strip():
+            raise ValueError("command_id must not be blank")
         if not self.risk_id.strip():
             raise ValueError("risk_id must not be blank")
         if not self.label.strip():
@@ -214,6 +217,7 @@ class ResidualRisk:
 
     def to_dict(self) -> dict[str, object]:
         return {
+            "command_id": self.command_id,
             "risk_id": self.risk_id,
             "label": self.label,
             "severity": self.severity,

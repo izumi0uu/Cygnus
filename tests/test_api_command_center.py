@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import unittest
 
-from cygnus.api.app import command_center, downstream_reality_check, healthz, recovery_window
+from cygnus.api.app import (
+    command_center,
+    downstream_reality_check,
+    governance_overview,
+    healthz,
+    recovery_window,
+)
 
 
 class CommandCenterApiTests(unittest.TestCase):
@@ -30,6 +36,15 @@ class CommandCenterApiTests(unittest.TestCase):
         self.assertIn("before_after_alignment_view", payload)
         self.assertIn("rewrite_delta", payload)
         self.assertIn("closure_judge", payload)
+
+    def test_governance_overview_payload_shape(self) -> None:
+        payload = governance_overview()
+        self.assertEqual(payload["surface_id"], "governance-overview")
+        self.assertIn("open_loops", payload)
+        self.assertIn("open_loop_ranks", payload)
+        self.assertIn("highest_leverage_command", payload)
+        self.assertEqual(len(payload["open_loops"]), 2)
+        self.assertEqual(payload["highest_leverage_command"], "cmd-restrict-2")
 
 
 if __name__ == "__main__":

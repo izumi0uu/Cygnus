@@ -7,8 +7,10 @@ from cygnus.domain import AudienceContext, LifecycleState, Visibility
 from cygnus.domain.objects import AnswerCard, EscalationRoute, KnowledgeObject, KnownIssuePage, PolicyRule, TroubleshootingFlow
 from cygnus.recovery import (
     DownstreamRealityCheckQuery,
+    GovernanceOverviewQuery,
     RecoveryWindowQuery,
     get_downstream_reality_check_surface,
+    get_governance_overview_surface,
     get_recovery_window_surface,
 )
 from cygnus.retrieval import (
@@ -269,6 +271,20 @@ def get_recovery_window(*, command_id: str) -> dict[str, Any]:
     }
 
 
+def get_governance_overview(*, command_ids: list[str]) -> dict[str, Any]:
+    surface = get_governance_overview_surface(
+        GovernanceOverviewQuery(command_ids=tuple(command_ids))
+    )
+    payload = surface.to_dict()
+    return {
+        "status": "success",
+        "summary": "Governance overview loaded",
+        "data": payload,
+        "warnings": [],
+        "errors": [],
+    }
+
+
 
 def build_default_tool_registry() -> ToolRegistry:
     registry = ToolRegistry()
@@ -328,6 +344,21 @@ def _tool_bindings() -> tuple[tuple[ToolDefinition, Any], ...]:
                 risk_level="R0",
             ),
             get_recovery_window,
+        ),
+        (
+            ToolDefinition(
+                name="get_governance_overview",
+                description="Compare multiple open loops and choose the next highest-leverage command.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "command_ids": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["command_ids"],
+                },
+                risk_level="R0",
+            ),
+            get_governance_overview,
         ),
         (
             ToolDefinition(

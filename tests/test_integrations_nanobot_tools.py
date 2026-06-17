@@ -5,6 +5,7 @@ import unittest
 from cygnus.integrations.nanobot_tools import (
     build_default_tool_registry,
     get_downstream_reality_check,
+    get_recovery_window,
     get_source_trace,
     list_drift_alerts,
     propose_knowledge_object,
@@ -55,6 +56,7 @@ class NanobotToolIntegrationTests(unittest.TestCase):
         )
         drift = list_drift_alerts()
         reality = get_downstream_reality_check(command_id="cmd-publish-1")
+        recovery = get_recovery_window(command_id="cmd-publish-1")
 
         self.assertEqual(retrieval["status"], "success")
         self.assertEqual(retrieval["data"]["results"][0]["object_type"], "answer_card")
@@ -74,6 +76,11 @@ class NanobotToolIntegrationTests(unittest.TestCase):
             reality["data"]["reality_check_strip"]["command_id"],
             "cmd-publish-1",
         )
+        self.assertEqual(recovery["status"], "success")
+        self.assertEqual(
+            recovery["data"]["closure_judge"]["recommendation"],
+            "continue_with_lightweight_follow_up",
+        )
 
     def test_default_registry_exposes_governed_tool_surface(self) -> None:
         registry = build_default_tool_registry()
@@ -81,6 +88,7 @@ class NanobotToolIntegrationTests(unittest.TestCase):
 
         self.assertIn("search_knowledge_objects", definitions)
         self.assertIn("get_downstream_reality_check", definitions)
+        self.assertIn("get_recovery_window", definitions)
         self.assertIn("read_knowledge_object", definitions)
         self.assertIn("get_source_trace", definitions)
         self.assertIn("publish_knowledge_object", definitions)

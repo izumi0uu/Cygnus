@@ -5,6 +5,12 @@ from cygnus.recovery.reality_check import (
     FeedbackSignalType,
     GovernanceCommandRef,
 )
+from cygnus.recovery.window import (
+    AlignmentPlaneChange,
+    RecoveryMetricSnapshot,
+    ResidualRisk,
+    TruthPlaneState,
+)
 
 
 def sample_reality_check_command_ref() -> GovernanceCommandRef:
@@ -77,5 +83,162 @@ def sample_reality_check_feedback() -> tuple[DownstreamFeedbackSignal, ...]:
             event_at="2026-06-16T09:33:00Z",
             source_refs=("conversation/free-us-1",),
             follow_up_actions=("inspect_unresolved_sessions",),
+        ),
+    )
+
+
+def sample_recovery_metrics_before() -> tuple[RecoveryMetricSnapshot, ...]:
+    return (
+        RecoveryMetricSnapshot(
+            metric_key="rewrite_count",
+            label="Rewrite Delta",
+            value=11,
+            explanation="Manual rewrites were still common before the publish command.",
+        ),
+        RecoveryMetricSnapshot(
+            metric_key="drift_count",
+            label="Drift Delta",
+            value=4,
+            explanation="Multiple downstream surfaces were still carrying stale billing wording.",
+        ),
+        RecoveryMetricSnapshot(
+            metric_key="escalation_count",
+            label="Escalation Delta",
+            value=7,
+            explanation="Escalations stayed above baseline before the latest command was issued.",
+        ),
+        RecoveryMetricSnapshot(
+            metric_key="coverage_gap_count",
+            label="Coverage Gap Delta",
+            value=3,
+            explanation="Three audience branches still lacked governed support coverage.",
+        ),
+        RecoveryMetricSnapshot(
+            metric_key="publish_conflict_count",
+            label="Publish Conflict Delta",
+            value=2,
+            explanation="Internal and external surfaces still disagreed on the latest governed wording.",
+        ),
+    )
+
+
+def sample_recovery_metrics_after() -> tuple[RecoveryMetricSnapshot, ...]:
+    return (
+        RecoveryMetricSnapshot(
+            metric_key="rewrite_count",
+            label="Rewrite Delta",
+            value=5,
+            explanation="Rewrites dropped after the publish command but have not disappeared.",
+        ),
+        RecoveryMetricSnapshot(
+            metric_key="drift_count",
+            label="Drift Delta",
+            value=2,
+            explanation="Drift pressure dropped, but two surfaces still trail the latest truth.",
+        ),
+        RecoveryMetricSnapshot(
+            metric_key="escalation_count",
+            label="Escalation Delta",
+            value=3,
+            explanation="Escalations improved, though free-plan routing is still above target.",
+        ),
+        RecoveryMetricSnapshot(
+            metric_key="coverage_gap_count",
+            label="Coverage Gap Delta",
+            value=2,
+            explanation="One coverage gap closed, but not enough to call the cycle fully recovered.",
+        ),
+        RecoveryMetricSnapshot(
+            metric_key="publish_conflict_count",
+            label="Publish Conflict Delta",
+            value=1,
+            explanation="Most publish conflict is gone, yet one split-brain surface remains.",
+        ),
+    )
+
+
+def sample_recovery_alignment_planes() -> tuple[AlignmentPlaneChange, ...]:
+    return (
+        AlignmentPlaneChange(
+            plane_key="object_truth",
+            label="Object Truth",
+            before_state=TruthPlaneState.MISALIGNED,
+            after_state=TruthPlaneState.ALIGNED,
+            before_score=0.34,
+            after_score=0.91,
+        ),
+        AlignmentPlaneChange(
+            plane_key="audience_truth",
+            label="Audience Truth",
+            before_state=TruthPlaneState.MISALIGNED,
+            after_state=TruthPlaneState.PARTIAL,
+            before_score=0.22,
+            after_score=0.58,
+            residual_reasons=(
+                "Free-plan US routing still points to the enterprise escalation path.",
+            ),
+        ),
+        AlignmentPlaneChange(
+            plane_key="publish_truth",
+            label="Publish Truth",
+            before_state=TruthPlaneState.SPLIT_BRAIN,
+            after_state=TruthPlaneState.SPLIT_BRAIN,
+            before_score=0.41,
+            after_score=0.56,
+            residual_reasons=(
+                "Macro wording still lags the published external answer.",
+            ),
+        ),
+        AlignmentPlaneChange(
+            plane_key="coverage_truth",
+            label="Coverage Truth",
+            before_state=TruthPlaneState.PARTIAL,
+            after_state=TruthPlaneState.PARTIAL,
+            before_score=0.43,
+            after_score=0.62,
+            residual_reasons=(
+                "Free-plan billing exception handling is still under-covered.",
+            ),
+        ),
+    )
+
+
+def sample_recovery_residual_risks() -> tuple[ResidualRisk, ...]:
+    return (
+        ResidualRisk(
+            risk_id="risk-audience-free-us",
+            label="Free-plan US audience mismatch remains open",
+            severity="elevated",
+            truth_plane="audience_truth",
+            summary="Queue routing still sends free-plan billing users into an enterprise escalation path.",
+            acceptable_residual=False,
+            recommended_command="open_audience_mismatch_review",
+            owner="support-ops",
+            blocking_surface="queue_sidebar",
+            evidence_refs=("conversation/free-us-1", "queue/sidebar-routing"),
+        ),
+        ResidualRisk(
+            risk_id="risk-publish-macro-eu",
+            label="Macro surface still shows split-brain publish behavior",
+            severity="emerging",
+            truth_plane="publish_truth",
+            summary="The internal macro still uses legacy EU rollout wording even after the publish command.",
+            acceptable_residual=False,
+            recommended_command="route_macro_fix_to_review",
+            owner="knowledge-manager",
+            blocking_surface="macro",
+            evidence_refs=("macro/invoice-export-eu",),
+        ),
+        ResidualRisk(
+            risk_id="risk-coverage-free-us",
+            label="Free-plan billing exception coverage is still thin",
+            severity="watch",
+            truth_plane="coverage_truth",
+            summary="Coverage improved, but one low-volume branch still lacks a stable governed answer.",
+            acceptable_residual=True,
+            recommended_command="monitor_free_plan_coverage",
+            owner="support-lead",
+            blocking_surface="copilot",
+            evidence_refs=("coverage/free-us-billing",),
         ),
     )

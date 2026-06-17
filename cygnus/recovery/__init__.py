@@ -1,11 +1,17 @@
 from cygnus.recovery.fixtures import (
+    sample_recovery_alignment_planes,
+    sample_recovery_metrics_after,
+    sample_recovery_metrics_before,
+    sample_recovery_residual_risks,
     sample_reality_check_command_ref,
     sample_reality_check_feedback,
 )
-from cygnus.recovery.providers import build_downstream_reality_check
+from cygnus.recovery.providers import build_downstream_reality_check, build_recovery_window
 from cygnus.recovery.query import (
     DownstreamRealityCheckQuery,
+    RecoveryWindowQuery,
     get_downstream_reality_check_surface,
+    get_recovery_window_surface,
 )
 from cygnus.recovery.reality_check import (
     DownstreamFeedbackSignal,
@@ -16,8 +22,24 @@ from cygnus.recovery.reality_check import (
     RealityCheckStrip,
     build_downstream_reality_check_surface,
 )
+from cygnus.recovery.window import (
+    AlignmentPlaneChange,
+    BeforeAfterAlignmentView,
+    ClosureJudge,
+    RecoveryAssessment,
+    RecoveryDecision,
+    RecoveryMetricDelta,
+    RecoveryMetricSnapshot,
+    RecoveryWindowSurface,
+    ResidualRisk,
+    TruthPlaneState,
+    build_recovery_window_surface,
+)
 
 __all__ = [
+    "AlignmentPlaneChange",
+    "BeforeAfterAlignmentView",
+    "ClosureJudge",
     "DownstreamFeedbackSignal",
     "DownstreamRealityCheckQuery",
     "DownstreamRealityCheckSurface",
@@ -27,7 +49,22 @@ __all__ = [
     "RealityCheckStrip",
     "build_downstream_reality_check",
     "build_downstream_reality_check_surface",
+    "build_recovery_window",
+    "build_recovery_window_surface",
     "get_downstream_reality_check_surface",
+    "get_recovery_window_surface",
+    "RecoveryAssessment",
+    "RecoveryDecision",
+    "RecoveryMetricDelta",
+    "RecoveryMetricSnapshot",
+    "RecoveryWindowQuery",
+    "RecoveryWindowSurface",
+    "ResidualRisk",
+    "TruthPlaneState",
+    "sample_recovery_alignment_planes",
+    "sample_recovery_metrics_after",
+    "sample_recovery_metrics_before",
+    "sample_recovery_residual_risks",
     "sample_reality_check_command_ref",
     "sample_reality_check_feedback",
 ]

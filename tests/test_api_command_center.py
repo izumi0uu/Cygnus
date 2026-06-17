@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from cygnus.api.app import command_center, downstream_reality_check, healthz
+from cygnus.api.app import command_center, downstream_reality_check, healthz, recovery_window
 
 
 class CommandCenterApiTests(unittest.TestCase):
@@ -23,6 +23,13 @@ class CommandCenterApiTests(unittest.TestCase):
         self.assertIn("reality_check_strip", payload)
         self.assertIn("feedback_feed", payload)
         self.assertIn("mismatch_by_audience", payload)
+
+    def test_recovery_window_payload_shape(self) -> None:
+        payload = recovery_window("cmd-publish-1")
+        self.assertEqual(payload["surface_id"], "recovery-window")
+        self.assertIn("before_after_alignment_view", payload)
+        self.assertIn("rewrite_delta", payload)
+        self.assertIn("closure_judge", payload)
 
 
 if __name__ == "__main__":

@@ -1,37 +1,41 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { X } from 'lucide-react'
+import ForceGraph2D from 'react-force-graph-2d'
 import { fetchCommandCenter, type CommandCenterSurface, type PriorityItem } from '@/lib/api'
 import { Button } from '@/components/ui/button'
-import { Segmented } from '@/components/Segmented'
-import { Stat } from '@/components/Stat'
 import { useVocab } from '@/lib/vocab'
 
-const HEAT: Record<string, string> = { urgent: 'chip-urgent', high: 'chip-high', medium: 'chip-medium', low: 'chip' }
+const HEX: Record<string, string> = { urgent: '#e5484d', high: '#f76808', medium: '#e8930c', low: '#185ee0' }
 const RANK: Record<string, number> = { urgent: 3, high: 2, medium: 1, low: 0 }
+const OBJR: Record<string, number> = { urgent: 9, high: 7, medium: 6, low: 5 }
+const C_AUD = '#7b828f'
+const C_SURF = '#aab0bd'
 
-type Filter = 'all' | 'urgent' | 'unassigned'
-type Obj = { ref: string; type: string; risk: PriorityItem }
-
-// Distinct knowledge objects currently under governance attention, keyed by object_ref,
-// surfaced with their most-urgent risk. Derived from the existing command-center payload.
-function aggregate(data: CommandCenterSurface): Obj[] {
-  const map = new Map<string, Obj>()
-  for (const it of data.priority_stack) {
-    const cur = map.get(it.object_ref)
-    if (!cur || (RANK[it.urgency] ?? 0) > (RANK[cur.risk.urgency] ?? 0)) {
-      map.set(it.object_ref, { ref: it.object_ref, type: it.object_type, risk: it })
-    }
-  }
-  return [...map.values()].sort((a, b) => (RANK[b.risk.urgency] ?? 0) - (RANK[a.risk.urgency] ?? 0))
+type GNode = {
+  id: string
+  kind: 'object' | 'audience' | 'surface'
+  name: string
+  r: number
+  color: string
+  objType?: string
+  urgency?: string
+  item?: PriorityItem
+  x?: number
+  y?: number
 }
 
 export default function KnowledgeObjects() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const v = useVocab()
   const [data, setData] = useState<CommandCenterSurface | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [filter, setFilter] = useState<Filter>('all')
+  const [selected, setSelected] = useState<PriorityItem | null>(null)
+
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const [w, setW] = useState(0)
+  const H = 540
 
   const load = () => {
     setLoading(true)
@@ -39,8 +43,56 @@ export default function KnowledgeObjects() {
     fetchCommandCenter().then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false))
   }
   useEffect(load, [])
+  useEffect(() => {
+    const el = wrapRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setW(el.clientWidth))
+    ro.observe(el)
+    setW(el.clientWidth)
+    return () => ro.disconnect()
+  }, [data])
+  useEffect(() => {
+    if (!selected) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelected(null) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selected])
 
-  const objs = useMemo(() => (data ? aggregate(data) : []), [data])
+  const graph = useMemo(() => {
+    if (!data) return { nodes: [] as GNode[], links: [] as { source: string; target: string }[] }
+    const nodes = new Map<string, GNode>()
+    const links: { source: string; target: string }[] = []
+    const seen = new Set<string>()
+    const objMost = new Map<string, PriorityItem>()
+    for (const it of data.priority_stack) {
+      const c = objMost.get(it.object_ref)
+      if (!c || (RANK[it.urgency] ?? 0) > (RANK[c.urgency] ?? 0)) objMost.set(it.object_ref, it)
+    }
+    for (const it of data.priority_stack) {
+      const oid = 'o:' + it.object_ref
+      if (!nodes.has(oid)) {
+        const top = objMost.get(it.object_ref)!
+        nodes.set(oid, { id: oid, kind: 'object', name: it.object_ref, r: OBJR[top.urgency] ?? 5, color: HEX[top.urgency] ?? '#185ee0', objType: it.object_type, urgency: top.urgency, item: top })
+      }
+      it.audience_labels.forEach((lab, idx) => {
+        const aid = 'a:' + lab
+        if (!nodes.has(aid)) {
+          const a = it.affected_audiences[idx]
+          nodes.set(aid, { id: aid, kind: 'audience', name: a ? v.audienceFacets(a).join('·') || v.visibility(a.visibility) : lab, r: 5, color: C_AUD })
+        }
+        const k = oid + '>' + aid
+        if (!seen.has(k)) { seen.add(k); links.push({ source: oid, target: aid }) }
+      })
+      it.affected_surfaces.forEach((s) => {
+        const sid = 's:' + s
+        if (!nodes.has(sid)) nodes.set(sid, { id: sid, kind: 'surface', name: v.surface(s), r: 4, color: C_SURF })
+        const k = oid + '>' + sid
+        if (!seen.has(k)) { seen.add(k); links.push({ source: oid, target: sid }) }
+      })
+    }
+    return { nodes: [...nodes.values()], links }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, i18n.language])
 
   if (loading) return <div className="font-mono text-sm text-muted-foreground">{t('state.loading')}</div>
   if (error)
@@ -52,62 +104,110 @@ export default function KnowledgeObjects() {
     )
   if (!data) return null
 
-  const types = new Set(objs.map((o) => o.type)).size
-  const urgent = objs.filter((o) => o.risk.urgency === 'urgent').length
-  const gaps = objs.filter((o) => o.risk.owner_state === 'unassigned').length
-  const rows = objs.filter((o) =>
-    filter === 'all' ? true : filter === 'urgent' ? o.risk.urgency === 'urgent' : o.risk.owner_state === 'unassigned',
-  )
+  const drawNode = (node: any, ctx: CanvasRenderingContext2D, scale: number) => {
+    const r = node.r ?? 5
+    ctx.beginPath()
+    ctx.arc(node.x, node.y, r, 0, 2 * Math.PI)
+    ctx.fillStyle = node.color
+    ctx.fill()
+    if (node.kind === 'object') {
+      ctx.lineWidth = 2 / scale
+      ctx.strokeStyle = '#ffffff'
+      ctx.stroke()
+    }
+    const fontSize = 11 / scale
+    ctx.font = `${node.kind === 'object' ? 600 : 400} ${fontSize}px Inter, sans-serif`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'top'
+    ctx.fillStyle = node.kind === 'object' ? '#1a1d24' : '#7b828f'
+    ctx.fillText(node.name, node.x, node.y + r + 2 / scale)
+  }
+  const drawHit = (node: any, color: string, ctx: CanvasRenderingContext2D) => {
+    ctx.beginPath()
+    ctx.arc(node.x, node.y, (node.r ?? 5) + 2, 0, 2 * Math.PI)
+    ctx.fillStyle = color
+    ctx.fill()
+  }
 
   return (
     <>
-      <div className="mb-4 flex flex-wrap gap-2.5">
-        <Stat n={objs.length} label={t('obj.statObjects')} />
-        <Stat n={types} label={t('obj.statTypes')} />
-        <Stat n={urgent} label={t('frame.urgent')} dot="var(--urgent)" />
-        <Stat n={gaps} label={t('frame.ownerGaps')} dot="var(--high)" />
+      <div className="mb-3 flex flex-wrap items-center gap-4">
+        <Legend color={HEX.urgent} ring label={t('kg.object')} extra={t('kg.objectNote')} />
+        <Legend color={C_AUD} label={t('kg.audience')} />
+        <Legend color={C_SURF} label={t('kg.surface')} />
+        <span className="ml-auto font-mono text-[11px] text-faint">{t('kg.hint')}</span>
       </div>
 
-      <div className="mb-3.5 flex items-center gap-3">
-        <Segmented
-          value={filter}
-          onChange={setFilter}
-          options={[
-            { value: 'all', label: t('queue.all') },
-            { value: 'urgent', label: t('queue.urgent') },
-            { value: 'unassigned', label: t('queue.unassigned') },
-          ]}
-        />
+      <div ref={wrapRef} className="overflow-hidden rounded-xl border border-border bg-card shadow-soft" style={{ height: H }}>
+        {w > 0 && (
+          <ForceGraph2D
+            width={w}
+            height={H}
+            graphData={graph}
+            backgroundColor="rgba(0,0,0,0)"
+            nodeLabel="name"
+            nodeRelSize={5}
+            linkColor={() => 'rgba(123,130,143,0.22)'}
+            linkWidth={1}
+            cooldownTicks={120}
+            nodeCanvasObject={drawNode}
+            nodePointerAreaPaint={drawHit}
+            onNodeClick={(node: any) => { if (node.kind === 'object' && node.item) setSelected(node.item) }}
+          />
+        )}
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-border bg-card shadow-soft">
-        <div className="grid grid-cols-[160px_1fr_220px_140px_150px] gap-3.5 border-b border-border px-[18px] py-2.5 font-mono text-[10px] uppercase tracking-[1px] text-faint">
-          <span>{t('obj.thType')}</span>
-          <span>{t('obj.thRef')}</span>
-          <span>{t('obj.thRisk')}</span>
-          <span>{t('obj.thOwner')}</span>
-          <span>{t('obj.thAct')}</span>
-        </div>
-        {rows.map((o) => (
-          <div key={o.ref} className="grid grid-cols-[160px_1fr_220px_140px_150px] items-center gap-3.5 border-b border-border px-[18px] py-[14px] last:border-b-0">
-            <span><span className="chip">{v.objectType(o.type)}</span></span>
-            <span className="font-mono text-[12px] text-foreground">{o.ref}</span>
-            <span className="flex items-center gap-1.5">
-              <span className={`chip ${HEAT[o.risk.urgency]}`}>{t(`urgency.${o.risk.urgency}`)}</span>
-              <span className="rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">{v.riskType(o.risk.risk_type)}</span>
-            </span>
-            <span>
-              {o.risk.owner_state === 'unassigned' ? (
-                <span className="chip chip-gap">{t('owner.gap')}</span>
-              ) : (
-                <span className="font-mono text-[11.5px] text-muted-foreground">@{o.risk.queue_owner}</span>
-              )}
-            </span>
-            <span><button className="cmd">{v.command(o.risk.primary_command)} →</button></span>
-          </div>
-        ))}
-        {rows.length === 0 && <div className="px-[18px] py-10 text-center text-sm text-muted-foreground">{t('state.empty')}</div>}
-      </div>
+      {selected && <Drawer item={selected} onClose={() => setSelected(null)} />}
     </>
+  )
+}
+
+function Legend({ color, label, ring, extra }: { color: string; label: string; ring?: boolean; extra?: string }) {
+  return (
+    <span className="flex items-center gap-2 text-[12.5px] text-muted-foreground">
+      <span className="h-3 w-3 rounded-full" style={{ background: color, boxShadow: ring ? '0 0 0 1.5px #fff inset' : undefined }} />
+      {label}
+      {extra && <span className="font-mono text-[10px] text-faint">{extra}</span>}
+    </span>
+  )
+}
+
+function Drawer({ item, onClose }: { item: PriorityItem; onClose: () => void }) {
+  const { t } = useTranslation()
+  const v = useVocab()
+  const HEATCHIP: Record<string, string> = { urgent: 'chip-urgent', high: 'chip-high', medium: 'chip-medium', low: 'chip' }
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-foreground/25" onClick={onClose} />
+      <aside role="dialog" aria-modal="true" className="fixed right-0 top-0 z-50 flex h-full w-full max-w-[440px] flex-col overflow-y-auto border-l border-border bg-card p-5 shadow-soft">
+        <div className="flex items-center gap-2">
+          <span className={`chip ${HEATCHIP[item.urgency]}`}>{t(`urgency.${item.urgency}`)}</span>
+          <span className="rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">{v.objectType(item.object_type)}</span>
+          <button className="ml-auto flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground hover:bg-muted" aria-label={t('detail.close')} onClick={onClose}><X size={15} /></button>
+        </div>
+        <h2 className="mt-3 text-lg font-bold leading-tight">{item.title}</h2>
+        <div className="mt-1 font-mono text-[11px] text-faint">{item.object_ref} · {v.riskType(item.risk_type)}</div>
+        <Section label={t('detail.whyNow')}><p className="text-sm leading-relaxed text-muted-foreground">{item.why_now_summary}</p></Section>
+        <Section label={t('detail.audiences')}>
+          <div className="flex flex-wrap gap-1.5">{item.affected_audiences.map((a, i) => <span key={i} className="chip">{v.audienceSegment(a)}</span>)}</div>
+        </Section>
+        <Section label={t('detail.surfaces')}>
+          <div className="flex flex-wrap gap-1.5">{item.affected_surfaces.map((s) => <span key={s} className="chip">{v.surface(s)}</span>)}</div>
+        </Section>
+        <Section label={t('detail.commands')}>
+          <div className="flex flex-wrap gap-2">{item.command_actions.map((c) => <button key={c} className="cmd">{v.command(c)}</button>)}</div>
+          <p className="mt-2 font-mono text-[10px] leading-relaxed text-faint">{t('detail.commandNote')}</p>
+        </Section>
+      </aside>
+    </>
+  )
+}
+
+function Section({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="mt-5 border-t border-border pt-4">
+      <div className="mb-2 font-mono text-xs font-semibold uppercase tracking-widest text-muted-foreground">{label}</div>
+      {children}
+    </div>
   )
 }

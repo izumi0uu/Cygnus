@@ -9,81 +9,95 @@
   font-display: swap;
 }
 
-/* 1. Tokens at root (Command Brutalism — light "paper" default) */
+/* ============================================================
+   Cygnus operation console — "Blue DNA" (light only)
+   Accent #185ee0, tint #e6eef9, soft blue elevation, rounded.
+   Operational portal structure modeled on Arkon; shadcn token
+   convention so `npx shadcn add` works. (No purple, no dark.)
+   ============================================================ */
 :root {
-  --radius: 10px;
+  --background: #f6f8fc;
+  --foreground: #1a1d24;
+  --card: #ffffff;
+  --card-foreground: #1a1d24;
+  --popover: #ffffff;
+  --popover-foreground: #1a1d24;
 
-  --paper: hsl(48 33% 97%);
-  --surface: hsl(0 0% 100%);
-  --surface-muted: hsl(40 20% 94%);
-  --background: var(--paper);
-  --foreground: hsl(20 14% 8%);
-  --muted-foreground: hsl(25 8% 40%);
+  --primary: #185ee0;
+  --primary-foreground: #ffffff;
+  --secondary: #eef1f7;
+  --secondary-foreground: #3a3f4b;
+  --muted: #f4f6fb;
+  --muted-foreground: #5b6270;
+  --accent: #e6eef9;
+  --accent-foreground: #185ee0;
+  --destructive: #e5484d;
+  --destructive-foreground: #ffffff;
 
-  --primary: hsl(276 100% 57%);
-  --primary-foreground: hsl(0 0% 100%);
-  --primary-active: hsl(276 74% 48%);
-  --primary-hover: hsl(276 100% 68%);
-  --border: hsl(20 14% 8%);
+  --border: #e7e9f0;
+  --input: #e7e9f0;
+  --ring: #185ee0;
+  --radius: 0.75rem;
 
-  --trust: hsl(217 87% 56%);     --trust-foreground: hsl(0 0% 100%);
-  --aligned: hsl(152 69% 39%);   --aligned-foreground: hsl(0 0% 100%);
-  --caution: hsl(38 90% 48%);    --caution-foreground: hsl(20 14% 8%);
-  --critical: hsl(0 72% 51%);    --critical-foreground: hsl(0 0% 100%);
+  /* sidebar */
+  --sidebar: #ffffff;
+  --sidebar-foreground: #1a1d24;
+  --sidebar-primary: #185ee0;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e6eef9;
+  --sidebar-accent-foreground: #185ee0;
+  --sidebar-border: #e7e9f0;
+  --sidebar-ring: #185ee0;
 
-  --heat-urgent: hsl(0 72% 51%);
-  --heat-high: hsl(24 90% 48%);
-  --heat-medium: hsl(38 90% 48%);
-  --heat-low: hsl(217 87% 56%);
-
-  --shadow-command: 4px 4px 0 0 var(--primary-active);
-  --shadow-command-lg: 6px 6px 0 0 var(--primary-active);
-  --shadow-ink: 4px 4px 0 0 var(--foreground);
-  --shadow-pressed: 2px 2px 0 0 var(--primary-active);
-  --shadow-critical: 4px 4px 0 0 hsl(0 63% 35%);
-  --ease-command: cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* risk signal */
+  --urgent: #e5484d;
+  --high: #f76808;
+  --medium: #e8930c;
+  --ok: #30a46c;
+  --faint: #8b91a0;
 }
 
-/* Dark = long-session ops variant (same purple identity) */
-.dark {
-  --paper: hsl(276 30% 8%);
-  --surface: hsl(276 22% 12%);
-  --surface-muted: hsl(276 18% 18%);
-  --background: var(--paper);
-  --foreground: hsl(40 20% 94%);
-  --muted-foreground: hsl(35 10% 65%);
-
-  --primary: hsl(276 100% 68%);
-  --primary-foreground: hsl(276 70% 10%);
-  --primary-active: hsl(276 90% 60%);
-  --primary-hover: hsl(276 100% 76%);
-  --border: hsl(40 16% 80%);
-
-  --caution-foreground: hsl(20 14% 8%);
-  --shadow-ink: 4px 4px 0 0 hsl(276 90% 60%);
-}
-
-/* 2. Map variables to Tailwind utilities */
 @theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --color-surface: var(--surface);
-  --color-surface-muted: var(--surface-muted);
-  --color-muted-foreground: var(--muted-foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
   --color-border: var(--border);
-  --color-trust: var(--trust);
-  --color-aligned: var(--aligned);
-  --color-caution: var(--caution);
-  --color-critical: var(--critical);
-  --font-display: "Space Grotesk", "Geist", system-ui, sans-serif;
-  --font-sans: "Inter", "Geist", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", "Geist Mono", ui-monospace, monospace;
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-urgent: var(--urgent);
+  --color-high: var(--high);
+  --color-medium: var(--medium);
+  --color-ok: var(--ok);
+  --color-faint: var(--faint);
+
+  --font-sans: "Inter", -apple-system, "PingFang SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
 }
 
-/* 3. Base */
 @layer base {
   * { border-color: var(--border); }
   body {
@@ -91,80 +105,33 @@
     color: var(--foreground);
     font-family: var(--font-sans);
     margin: 0;
+    -webkit-font-smoothing: antialiased;
   }
 }
 
-/* 4. Signature Command Brutalism components */
 @layer components {
-  .btn-command {
-    display: inline-flex; align-items: center; gap: 8px;
-    height: 40px; padding: 0 18px;
-    border: 2px solid var(--primary-active); border-radius: var(--radius);
-    background: var(--primary); color: var(--primary-foreground);
-    font-weight: 600; font-size: 14px; cursor: pointer;
-    box-shadow: var(--shadow-command);
-    transition: transform .12s var(--ease-command), box-shadow .12s var(--ease-command), background .2s;
-  }
-  .btn-command:hover { background: var(--primary-hover); }
-  .btn-command:active { transform: translate(2px, 2px); box-shadow: var(--shadow-pressed); }
-  .btn-command:focus-visible { outline: none; box-shadow: var(--shadow-command), 0 0 0 3px hsl(276 100% 87%); }
+  .shadow-soft { box-shadow: 0 1px 2px rgba(24, 94, 224, 0.05), 0 8px 24px rgba(24, 94, 224, 0.07); }
+  .shadow-card { box-shadow: 0 1px 3px rgba(24, 94, 224, 0.06); }
 
-  .btn-secondary {
-    display: inline-flex; align-items: center; gap: 8px;
-    height: 40px; padding: 0 16px;
-    border: 2px solid var(--border); border-radius: var(--radius);
-    background: var(--surface); color: var(--foreground);
-    font-weight: 600; font-size: 14px; cursor: pointer;
-    box-shadow: var(--shadow-ink);
-    transition: transform .12s var(--ease-command), box-shadow .12s var(--ease-command);
-  }
-  .btn-secondary:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0 0 var(--foreground); }
+  /* segmented control with sliding glider (from the reference) */
+  .seg { position: relative; display: inline-flex; background: var(--card); box-shadow: 0 0 1px 0 rgba(24,94,224,.15), 0 4px 10px 0 rgba(24,94,224,.10); padding: 5px; border-radius: 99px; }
+  .seg-btn { position: relative; z-index: 2; height: 30px; padding: 0 16px; border: none; background: none; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--muted-foreground); border-radius: 99px; cursor: pointer; transition: color .15s ease-in; }
+  .seg-btn[data-on="true"] { color: var(--primary); }
+  .seg-glider { position: absolute; z-index: 1; top: 5px; left: 5px; height: 30px; background: var(--accent); border-radius: 99px; transition: transform .25s ease-out, width .25s ease-out; }
 
-  .icon-btn {
-    display: inline-flex; align-items: center; gap: 6px;
-    height: 34px; padding: 0 12px;
-    border: 2px solid var(--border); border-radius: 8px;
-    background: var(--surface); color: var(--foreground);
-    font-weight: 600; font-size: 12px; cursor: pointer;
-    box-shadow: 3px 3px 0 0 var(--foreground);
-    transition: transform .1s var(--ease-command), box-shadow .1s var(--ease-command);
-  }
-  .icon-btn:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 0 var(--foreground); }
+  /* risk chips — tint + outline signal */
+  .chip { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; padding: 3px 9px; border-radius: 99px; border: 1px solid var(--border); background: var(--muted); color: var(--muted-foreground); white-space: nowrap; }
+  .chip-urgent { color: var(--urgent); border-color: color-mix(in srgb, var(--urgent) 35%, transparent); background: color-mix(in srgb, var(--urgent) 9%, transparent); }
+  .chip-high   { color: var(--high);   border-color: color-mix(in srgb, var(--high) 35%, transparent);   background: color-mix(in srgb, var(--high) 9%, transparent); }
+  .chip-medium { color: var(--medium); border-color: color-mix(in srgb, var(--medium) 35%, transparent); background: color-mix(in srgb, var(--medium) 9%, transparent); }
+  .chip-gap    { color: var(--high);   border-color: color-mix(in srgb, var(--high) 35%, transparent);   background: color-mix(in srgb, var(--high) 9%, transparent); }
 
-  .card-brutal {
-    position: relative;
-    background: var(--surface);
-    border: 2px solid var(--border); border-radius: var(--radius);
-    box-shadow: var(--shadow-ink);
-  }
-  .card-lead { box-shadow: var(--shadow-command-lg); border-color: var(--primary-active); }
+  /* outline command pill (preview action) */
+  .cmd { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--primary); background: transparent; border: 1px solid color-mix(in srgb, var(--primary) 45%, transparent); border-radius: 99px; padding: 5px 11px; cursor: pointer; transition: background .15s; }
+  .cmd:hover { background: var(--accent); }
 
-  .chip {
-    display: inline-flex; align-items: center;
-    font-family: var(--font-mono); font-size: 10px; font-weight: 600;
-    text-transform: uppercase; letter-spacing: .5px;
-    padding: 3px 8px; border-radius: 6px; border: 2px solid var(--border);
-    background: var(--surface); color: var(--muted-foreground);
-  }
-  .heat-urgent { background: var(--heat-urgent); color: #fff; border-color: hsl(0 63% 35%); }
-  .heat-high   { background: var(--heat-high); color: #fff; border-color: hsl(24 80% 30%); }
-  .heat-medium { background: var(--heat-medium); color: hsl(20 14% 8%); border-color: hsl(38 80% 28%); }
-  .heat-low    { background: var(--heat-low); color: #fff; border-color: hsl(217 70% 35%); }
-  .chip-ownergap { background: hsl(40 90% 90%); color: hsl(28 80% 28%); border-color: hsl(38 80% 35%); }
-  .chip-assigned { border-style: dashed; }
-
-  .cmd-pill {
-    display: inline-flex; align-items: center; gap: 4px;
-    font-family: var(--font-mono); font-size: 11px; font-weight: 600;
-    padding: 4px 10px; border-radius: 7px;
-    border: 2px solid var(--primary-active); background: var(--primary); color: var(--primary-foreground);
-    cursor: pointer; box-shadow: 2px 2px 0 0 var(--primary-active);
-    transition: transform .1s var(--ease-command), box-shadow .1s var(--ease-command);
-  }
-  .cmd-pill:active { transform: translate(2px, 2px); box-shadow: none; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .btn-command, .btn-secondary, .icon-btn, .cmd-pill { transition: background .2s; }
-  .btn-command:active, .btn-secondary:active, .icon-btn:active, .cmd-pill:active { transform: none; }
+  /* Notion-style thin sidebar scrollbar */
+  .thin-scroll::-webkit-scrollbar { width: 4px; }
+  .thin-scroll::-webkit-scrollbar-thumb { background: rgba(0,0,0,.08); border-radius: 4px; }
+  .thin-scroll { scrollbar-width: thin; scrollbar-color: rgba(0,0,0,.08) transparent; }
 }

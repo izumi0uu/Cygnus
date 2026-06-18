@@ -30,6 +30,7 @@ const zh = {
     aud: { segs: '受众段', external: '对外', internal: '对内', thVis: '可见性', thSeg: '受众段', thRisks: '触及风险', thSurf: '下游面', thAct: '操作', risksUnit: '风险' },
     obj: { statObjects: '知识对象', statTypes: '类型', thType: '类型', thRef: '对象', thRisk: '当前风险', thOwner: '责任人', thAct: '操作' },
     src: { statSources: '受损来源', thObject: '对象', thWhy: '情况', thSurf: '下游面', thOwner: '责任人', thAct: '操作', empty: '当前没有来源完整性问题' },
+    drift: { statWatched: '监测对象', statDrift: '漂移中', thObject: '对象', thWhy: '漂移情况', thSurf: '下游面', thOwner: '责任人', thAct: '操作', empty: '当前没有漂移风险' },
     detail: {
       whyNow: '为什么现在重要',
       scope: '作用域 / 爆炸半径',
@@ -73,6 +74,7 @@ const en = {
     aud: { segs: 'segments', external: 'External', internal: 'Internal', thVis: 'visibility', thSeg: 'audience segment', thRisks: 'risks', thSurf: 'surfaces', thAct: 'action', risksUnit: 'risks' },
     obj: { statObjects: 'objects', statTypes: 'types', thType: 'type', thRef: 'object', thRisk: 'current risk', thOwner: 'owner', thAct: 'action' },
     src: { statSources: 'sources at risk', thObject: 'object', thWhy: 'situation', thSurf: 'surfaces', thOwner: 'owner', thAct: 'action', empty: 'No source-integrity issues right now' },
+    drift: { statWatched: 'watched', statDrift: 'drifting', thObject: 'object', thWhy: 'drift', thSurf: 'surfaces', thOwner: 'owner', thAct: 'action', empty: 'No drift right now' },
     detail: {
       whyNow: 'Why now',
       scope: 'Scope / blast radius',

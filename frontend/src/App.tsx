@@ -5,6 +5,7 @@ import ReviewQueue from '@/pages/ReviewQueue'
 import AudiencePublish from '@/pages/AudiencePublish'
 import KnowledgeObjects from '@/pages/KnowledgeObjects'
 import SourcesEvidence from '@/pages/SourcesEvidence'
+import CoverageDrift from '@/pages/CoverageDrift'
 import Placeholder from '@/pages/Placeholder'
 
 export default function App() {
@@ -16,7 +17,7 @@ export default function App() {
         <Route path="objects" element={<KnowledgeObjects />} />
         <Route path="sources" element={<SourcesEvidence />} />
         <Route path="audience" element={<AudiencePublish />} />
-        <Route path="drift" element={<Placeholder sectionKey="drift" />} />
+        <Route path="drift" element={<CoverageDrift />} />
         <Route path="propagation" element={<Placeholder sectionKey="propagation" />} />
         <Route path="audit" element={<Placeholder sectionKey="audit" />} />
       </Route>

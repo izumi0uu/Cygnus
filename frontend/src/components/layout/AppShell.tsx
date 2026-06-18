@@ -15,16 +15,16 @@ import {
 import { cn } from '@/lib/utils'
 
 type Group = 'gov' | 'obs'
-type NavItem = { to: string; key: string; icon: ComponentType<{ size?: number; className?: string }>; group: Group; end?: boolean; badge?: string }
+type NavItem = { to: string; key: string; code: string; icon: ComponentType<{ size?: number; className?: string }>; group: Group; end?: boolean; badge?: string }
 
 const NAV: NavItem[] = [
-  { to: '/console', key: 'reviewQueue', icon: ListTodo, group: 'gov', end: true, badge: '4' },
-  { to: '/console/objects', key: 'objects', icon: Boxes, group: 'gov' },
-  { to: '/console/sources', key: 'sources', icon: Database, group: 'gov' },
-  { to: '/console/audience', key: 'audience', icon: Users, group: 'gov' },
-  { to: '/console/drift', key: 'drift', icon: TrendingUp, group: 'obs' },
-  { to: '/console/propagation', key: 'propagation', icon: Share2, group: 'obs' },
-  { to: '/console/audit', key: 'audit', icon: ShieldCheck, group: 'obs' },
+  { to: '/console', key: 'reviewQueue', code: 'REVIEW QUEUE', icon: ListTodo, group: 'gov', end: true, badge: '4' },
+  { to: '/console/objects', key: 'objects', code: 'KNOWLEDGE OBJECTS', icon: Boxes, group: 'gov' },
+  { to: '/console/sources', key: 'sources', code: 'SOURCES & EVIDENCE', icon: Database, group: 'gov' },
+  { to: '/console/audience', key: 'audience', code: 'AUDIENCE & PUBLISH', icon: Users, group: 'gov' },
+  { to: '/console/drift', key: 'drift', code: 'COVERAGE & DRIFT', icon: TrendingUp, group: 'obs' },
+  { to: '/console/propagation', key: 'propagation', code: 'PROPAGATION', icon: Share2, group: 'obs' },
+  { to: '/console/audit', key: 'audit', code: 'AUDIT', icon: ShieldCheck, group: 'obs' },
 ]
 
 function NavGroup({ group }: { group: Group }) {
@@ -92,7 +92,7 @@ export default function AppShell() {
       <div className="flex min-w-0 flex-col">
         <header className="flex h-[60px] shrink-0 items-center gap-4 border-b border-border bg-card/85 px-6 backdrop-blur">
           <h1 className="font-bold">{t(`nav.${active.key}`)}</h1>
-          <span className="font-mono text-[11px] text-faint">{t('queue.subtitle')}</span>
+          <span className="font-mono text-[11px] text-faint">{active.code}</span>
           <div className="ml-auto flex w-60 items-center gap-2 rounded-full border border-border bg-muted px-3.5 py-2 text-[12.5px] text-faint">
             <Search size={14} />
             <span>{t('queue.search')}</span>

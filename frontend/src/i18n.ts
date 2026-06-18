@@ -29,6 +29,7 @@ const zh = {
     queue: { subtitle: 'REVIEW QUEUE · 晨间简报', search: '搜索风险 / 对象…', all: '全部', urgent: '紧急', unassigned: '无主', sort: '排序：风险', command: '发命令', statRisks: '治理风险', statSurfaces: '下游面', thUrgency: '紧急度', thRisk: '风险', thScope: '作用域', thOwner: '责任人', thCommand: '主命令', scopeFmt: '{{a}} 受众 · {{s}} 面', soon: '此区建设中' },
     aud: { segs: '受众段', external: '对外', internal: '对内', thVis: '可见性', thSeg: '受众段', thRisks: '触及风险', thSurf: '下游面', thAct: '操作', risksUnit: '风险' },
     obj: { statObjects: '知识对象', statTypes: '类型', thType: '类型', thRef: '对象', thRisk: '当前风险', thOwner: '责任人', thAct: '操作' },
+    src: { statSources: '受损来源', thObject: '对象', thWhy: '情况', thSurf: '下游面', thOwner: '责任人', thAct: '操作', empty: '当前没有来源完整性问题' },
     detail: {
       whyNow: '为什么现在重要',
       scope: '作用域 / 爆炸半径',
@@ -71,6 +72,7 @@ const en = {
     queue: { subtitle: 'REVIEW QUEUE · MORNING BRIEF', search: 'Search risks / objects…', all: 'All', urgent: 'Urgent', unassigned: 'Unassigned', sort: 'Sort: risk', command: 'Command', statRisks: 'risks', statSurfaces: 'surfaces', thUrgency: 'urgency', thRisk: 'risk', thScope: 'scope', thOwner: 'owner', thCommand: 'command', scopeFmt: '{{a}} aud · {{s}} surf', soon: 'Section under construction' },
     aud: { segs: 'segments', external: 'External', internal: 'Internal', thVis: 'visibility', thSeg: 'audience segment', thRisks: 'risks', thSurf: 'surfaces', thAct: 'action', risksUnit: 'risks' },
     obj: { statObjects: 'objects', statTypes: 'types', thType: 'type', thRef: 'object', thRisk: 'current risk', thOwner: 'owner', thAct: 'action' },
+    src: { statSources: 'sources at risk', thObject: 'object', thWhy: 'situation', thSurf: 'surfaces', thOwner: 'owner', thAct: 'action', empty: 'No source-integrity issues right now' },
     detail: {
       whyNow: 'Why now',
       scope: 'Scope / blast radius',

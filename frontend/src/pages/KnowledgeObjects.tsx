@@ -11,7 +11,7 @@ const ForceGraph3D = lazy(() => import('react-force-graph-3d'))
 
 const HEX: Record<string, string> = { urgent: '#e5484d', high: '#f76808', medium: '#e8930c', low: '#185ee0' }
 const RANK: Record<string, number> = { urgent: 3, high: 2, medium: 1, low: 0 }
-const OBJR: Record<string, number> = { urgent: 9, high: 7, medium: 6, low: 5 }
+const OBJR: Record<string, number> = { urgent: 11, high: 9, medium: 8, low: 7 }
 const C_AUD = '#7b828f'
 const C_SURF = '#aab0bd'
 
@@ -38,6 +38,7 @@ export default function KnowledgeObjects() {
   const [mode, setMode] = useState<'2d' | '3d'>('2d')
 
   const wrapRef = useRef<HTMLDivElement>(null)
+  const fgRef = useRef<any>(null)
   const [w, setW] = useState(0)
   const H = 540
 
@@ -82,14 +83,14 @@ export default function KnowledgeObjects() {
         const aid = 'a:' + lab
         if (!nodes.has(aid)) {
           const a = it.affected_audiences[idx]
-          nodes.set(aid, { id: aid, kind: 'audience', name: a ? v.audienceFacets(a).join('·') || v.visibility(a.visibility) : lab, r: 5, color: C_AUD })
+          nodes.set(aid, { id: aid, kind: 'audience', name: a ? v.audienceFacets(a).join('·') || v.visibility(a.visibility) : lab, r: 6, color: C_AUD })
         }
         const k = oid + '>' + aid
         if (!seen.has(k)) { seen.add(k); links.push({ source: oid, target: aid }) }
       })
       it.affected_surfaces.forEach((s) => {
         const sid = 's:' + s
-        if (!nodes.has(sid)) nodes.set(sid, { id: sid, kind: 'surface', name: v.surface(s), r: 4, color: C_SURF })
+        if (!nodes.has(sid)) nodes.set(sid, { id: sid, kind: 'surface', name: v.surface(s), r: 5, color: C_SURF })
         const k = oid + '>' + sid
         if (!seen.has(k)) { seen.add(k); links.push({ source: oid, target: sid }) }
       })
@@ -151,15 +152,17 @@ export default function KnowledgeObjects() {
       <div ref={wrapRef} className="overflow-hidden rounded-xl border border-border bg-card shadow-soft" style={{ height: H }}>
         {w > 0 && mode === '2d' && (
           <ForceGraph2D
+            ref={fgRef}
             width={w}
             height={H}
             graphData={graph}
             backgroundColor="rgba(0,0,0,0)"
             nodeLabel="name"
-            nodeRelSize={5}
+            nodeRelSize={6}
             linkColor={() => 'rgba(123,130,143,0.22)'}
             linkWidth={1}
             cooldownTicks={120}
+            onEngineStop={() => fgRef.current?.zoomToFit(400, 70)}
             nodeCanvasObject={drawNode}
             nodePointerAreaPaint={drawHit}
             onNodeClick={(node: any) => { if (node.kind === 'object' && node.item) setSelected(node.item) }}
@@ -168,6 +171,7 @@ export default function KnowledgeObjects() {
         {w > 0 && mode === '3d' && (
           <Suspense fallback={<div className="flex h-full items-center justify-center font-mono text-sm text-muted-foreground">{t('state.loading')}</div>}>
             <ForceGraph3D
+              ref={fgRef}
               width={w}
               height={H}
               graphData={graph}
@@ -178,6 +182,7 @@ export default function KnowledgeObjects() {
               nodeOpacity={0.95}
               linkColor={() => 'rgba(123,130,143,0.4)'}
               linkOpacity={0.5}
+              onEngineStop={() => fgRef.current?.zoomToFit(600, 90)}
               onNodeClick={(node: any) => { if (node.kind === 'object' && node.item) setSelected(node.item) }}
             />
           </Suspense>

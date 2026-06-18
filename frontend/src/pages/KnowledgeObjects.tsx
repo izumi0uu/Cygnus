@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { X } from 'lucide-react'
 import ForceGraph2D from 'react-force-graph-2d'
 import { fetchCommandCenter, type CommandCenterSurface, type PriorityItem } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { useVocab } from '@/lib/vocab'
+
+// three is heavy → only loaded when the user switches to 3D
+const ForceGraph3D = lazy(() => import('react-force-graph-3d'))
 
 const HEX: Record<string, string> = { urgent: '#e5484d', high: '#f76808', medium: '#e8930c', low: '#185ee0' }
 const RANK: Record<string, number> = { urgent: 3, high: 2, medium: 1, low: 0 }
@@ -32,6 +35,7 @@ export default function KnowledgeObjects() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<PriorityItem | null>(null)
+  const [mode, setMode] = useState<'2d' | '3d'>('2d')
 
   const wrapRef = useRef<HTMLDivElement>(null)
   const [w, setW] = useState(0)
@@ -135,11 +139,17 @@ export default function KnowledgeObjects() {
         <Legend color={HEX.urgent} ring label={t('kg.object')} extra={t('kg.objectNote')} />
         <Legend color={C_AUD} label={t('kg.audience')} />
         <Legend color={C_SURF} label={t('kg.surface')} />
-        <span className="ml-auto font-mono text-[11px] text-faint">{t('kg.hint')}</span>
+        <div className="ml-auto flex items-center gap-3">
+          <div className="flex rounded-full border border-border p-0.5 text-[12px] font-semibold">
+            <button onClick={() => setMode('2d')} className={mode === '2d' ? 'rounded-full bg-accent px-3 py-1 text-primary' : 'px-3 py-1 text-muted-foreground'}>2D</button>
+            <button onClick={() => setMode('3d')} className={mode === '3d' ? 'rounded-full bg-accent px-3 py-1 text-primary' : 'px-3 py-1 text-muted-foreground'}>3D</button>
+          </div>
+          <span className="font-mono text-[11px] text-faint">{t('kg.hint')}</span>
+        </div>
       </div>
 
       <div ref={wrapRef} className="overflow-hidden rounded-xl border border-border bg-card shadow-soft" style={{ height: H }}>
-        {w > 0 && (
+        {w > 0 && mode === '2d' && (
           <ForceGraph2D
             width={w}
             height={H}
@@ -154,6 +164,23 @@ export default function KnowledgeObjects() {
             nodePointerAreaPaint={drawHit}
             onNodeClick={(node: any) => { if (node.kind === 'object' && node.item) setSelected(node.item) }}
           />
+        )}
+        {w > 0 && mode === '3d' && (
+          <Suspense fallback={<div className="flex h-full items-center justify-center font-mono text-sm text-muted-foreground">{t('state.loading')}</div>}>
+            <ForceGraph3D
+              width={w}
+              height={H}
+              graphData={graph}
+              backgroundColor="#f6f8fc"
+              nodeLabel="name"
+              nodeColor={(n: any) => n.color}
+              nodeVal={(n: any) => n.r}
+              nodeOpacity={0.95}
+              linkColor={() => 'rgba(123,130,143,0.4)'}
+              linkOpacity={0.5}
+              onNodeClick={(node: any) => { if (node.kind === 'object' && node.item) setSelected(node.item) }}
+            />
+          </Suspense>
         )}
       </div>
 

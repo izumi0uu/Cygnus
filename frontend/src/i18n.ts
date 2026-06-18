@@ -31,7 +31,7 @@ const zh = {
     aud: { segs: '受众段', external: '对外', internal: '对内', thVis: '可见性', thSeg: '受众段', thRisks: '触及风险', thSurf: '下游面', thAct: '操作', risksUnit: '风险', byRisk: '受众段 × 触及风险', byRiskSub: '按触及风险排序', touched: '风险触及', surfUnit: '下游面' },
     obj: { statObjects: '知识对象', statTypes: '类型', thType: '类型', thRef: '对象', thRisk: '当前风险', thOwner: '责任人', thAct: '操作' },
     kg: { object: '对象', objectNote: '按紧急度', audience: '受众', surface: '下游面', hint: '点击对象节点查看详情', riskType: '风险类型' },
-    src: { statSources: '受损来源', thObject: '对象', thWhy: '情况', thSurf: '下游面', thOwner: '责任人', thAct: '操作', empty: '当前没有来源完整性问题' },
+    src: { statSources: '受损来源', thObject: '对象', thWhy: '情况', thSurf: '下游面', thOwner: '责任人', thAct: '操作', empty: '当前没有来源完整性问题', blind: '来源失明 / 降级', statWatched: '监测对象', okFmt: '其余 {{n}} 个监测对象来源未见异常' },
     drift: { statWatched: '监测对象', statDrift: '漂移中', thObject: '对象', thWhy: '漂移情况', thSurf: '下游面', thOwner: '责任人', thAct: '操作', empty: '当前没有漂移风险' },
     detail: {
       whyNow: '为什么现在重要',
@@ -77,7 +77,7 @@ const en = {
     aud: { segs: 'segments', external: 'External', internal: 'Internal', thVis: 'visibility', thSeg: 'audience segment', thRisks: 'risks', thSurf: 'surfaces', thAct: 'action', risksUnit: 'risks', byRisk: 'Segments × risk', byRiskSub: 'by risk touched', touched: 'risks', surfUnit: 'surfaces' },
     obj: { statObjects: 'objects', statTypes: 'types', thType: 'type', thRef: 'object', thRisk: 'current risk', thOwner: 'owner', thAct: 'action' },
     kg: { object: 'Object', objectNote: 'by urgency', audience: 'Audience', surface: 'Surface', hint: 'Click an object node for details', riskType: 'Risk type' },
-    src: { statSources: 'sources at risk', thObject: 'object', thWhy: 'situation', thSurf: 'surfaces', thOwner: 'owner', thAct: 'action', empty: 'No source-integrity issues right now' },
+    src: { statSources: 'sources at risk', thObject: 'object', thWhy: 'situation', thSurf: 'surfaces', thOwner: 'owner', thAct: 'action', empty: 'No source-integrity issues right now', blind: 'Source blind / degraded', statWatched: 'watched', okFmt: '{{n}} other watched objects: sources OK' },
     drift: { statWatched: 'watched', statDrift: 'drifting', thObject: 'object', thWhy: 'drift', thSurf: 'surfaces', thOwner: 'owner', thAct: 'action', empty: 'No drift right now' },
     detail: {
       whyNow: 'Why now',

@@ -57,6 +57,11 @@ export default function KnowledgeObjects() {
     return () => ro.disconnect()
   }, [data])
   useEffect(() => {
+    if (mode !== '3d') return
+    const id = setTimeout(() => fgRef.current?.zoomToFit(400, 14), 700)
+    return () => clearTimeout(id)
+  }, [mode])
+  useEffect(() => {
     if (!selected) return
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelected(null) }
     window.addEventListener('keydown', onKey)
@@ -176,16 +181,23 @@ export default function KnowledgeObjects() {
               width={w}
               height={H}
               graphData={graph}
-              backgroundColor="#f6f8fc"
+              backgroundColor="#0f1320"
               nodeLabel="name"
               nodeColor={(n: any) => n.color}
               nodeVal={(n: any) => n.r}
+              nodeRelSize={8}
               nodeOpacity={0.95}
-              linkColor={() => 'rgba(123,130,143,0.4)'}
-              linkOpacity={0.5}
+              nodeResolution={16}
+              linkColor={() => 'rgba(120,150,230,0.45)'}
+              linkOpacity={0.6}
+              linkWidth={0.6}
+              linkDirectionalParticles={2}
+              linkDirectionalParticleWidth={2.4}
+              linkDirectionalParticleSpeed={0.01}
+              linkDirectionalParticleColor={() => '#5b8def'}
               warmupTicks={120}
               cooldownTicks={0}
-              onEngineStop={() => fgRef.current?.zoomToFit(0, 90)}
+              onEngineStop={() => fgRef.current?.zoomToFit(0, 12)}
               onNodeClick={(node: any) => { if (node.kind === 'object' && node.item) setSelected(node.item) }}
             />
           </Suspense>

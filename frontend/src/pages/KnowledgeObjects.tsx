@@ -161,8 +161,9 @@ export default function KnowledgeObjects() {
             nodeRelSize={6}
             linkColor={() => 'rgba(123,130,143,0.22)'}
             linkWidth={1}
-            cooldownTicks={120}
-            onEngineStop={() => fgRef.current?.zoomToFit(400, 70)}
+            warmupTicks={120}
+            cooldownTicks={0}
+            onEngineStop={() => fgRef.current?.zoomToFit(0, 70)}
             nodeCanvasObject={drawNode}
             nodePointerAreaPaint={drawHit}
             onNodeClick={(node: any) => { if (node.kind === 'object' && node.item) setSelected(node.item) }}
@@ -182,7 +183,9 @@ export default function KnowledgeObjects() {
               nodeOpacity={0.95}
               linkColor={() => 'rgba(123,130,143,0.4)'}
               linkOpacity={0.5}
-              onEngineStop={() => fgRef.current?.zoomToFit(600, 90)}
+              warmupTicks={120}
+              cooldownTicks={0}
+              onEngineStop={() => fgRef.current?.zoomToFit(0, 90)}
               onNodeClick={(node: any) => { if (node.kind === 'object' && node.item) setSelected(node.item) }}
             />
           </Suspense>

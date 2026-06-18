@@ -1,6 +1,7 @@
 import { Routes, Route } from 'react-router-dom'
 import Landing from '@/pages/Landing'
 import AppShell from '@/components/layout/AppShell'
+import Overview from '@/pages/Overview'
 import ReviewQueue from '@/pages/ReviewQueue'
 import AudiencePublish from '@/pages/AudiencePublish'
 import KnowledgeObjects from '@/pages/KnowledgeObjects'
@@ -13,7 +14,8 @@ export default function App() {
     <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/console" element={<AppShell />}>
-        <Route index element={<ReviewQueue />} />
+        <Route index element={<Overview />} />
+        <Route path="queue" element={<ReviewQueue />} />
         <Route path="objects" element={<KnowledgeObjects />} />
         <Route path="sources" element={<SourcesEvidence />} />
         <Route path="audience" element={<AudiencePublish />} />

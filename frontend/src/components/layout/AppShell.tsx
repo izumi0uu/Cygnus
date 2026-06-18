@@ -2,6 +2,7 @@ import type { ComponentType } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
+  LayoutDashboard,
   ListTodo,
   Boxes,
   Database,
@@ -18,7 +19,8 @@ type Group = 'gov' | 'obs'
 type NavItem = { to: string; key: string; code: string; icon: ComponentType<{ size?: number; className?: string }>; group: Group; end?: boolean; badge?: string }
 
 const NAV: NavItem[] = [
-  { to: '/console', key: 'reviewQueue', code: 'REVIEW QUEUE', icon: ListTodo, group: 'gov', end: true, badge: '4' },
+  { to: '/console', key: 'overview', code: 'OVERVIEW', icon: LayoutDashboard, group: 'gov', end: true },
+  { to: '/console/queue', key: 'reviewQueue', code: 'REVIEW QUEUE', icon: ListTodo, group: 'gov', badge: '4' },
   { to: '/console/objects', key: 'objects', code: 'KNOWLEDGE OBJECTS', icon: Boxes, group: 'gov' },
   { to: '/console/sources', key: 'sources', code: 'SOURCES & EVIDENCE', icon: Database, group: 'gov' },
   { to: '/console/audience', key: 'audience', code: 'AUDIENCE & PUBLISH', icon: Users, group: 'gov' },

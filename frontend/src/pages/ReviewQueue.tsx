@@ -5,6 +5,7 @@ import { fetchCommandCenter, type CommandCenterSurface, type PriorityItem } from
 import { Button } from '@/components/ui/button'
 import { Segmented } from '@/components/Segmented'
 import { Stat } from '@/components/Stat'
+import { useVocab } from '@/lib/vocab'
 
 const HEAT: Record<string, string> = { urgent: 'chip-urgent', high: 'chip-high', medium: 'chip-medium', low: 'chip' }
 const DOT: Record<string, string> = { urgent: 'var(--urgent)', high: 'var(--high)', medium: 'var(--medium)', low: 'var(--faint)' }
@@ -13,6 +14,7 @@ type Filter = 'all' | 'urgent' | 'unassigned'
 
 export default function ReviewQueue() {
   const { t } = useTranslation()
+  const v = useVocab()
   const [data, setData] = useState<CommandCenterSurface | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -97,7 +99,7 @@ export default function ReviewQueue() {
               <div className="text-sm font-semibold leading-snug">{it.title}</div>
               <div className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{it.why_now_summary}</div>
               <div className="mt-1.5">
-                <span className="rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">{it.risk_type}</span>
+                <span className="rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">{v.riskType(it.risk_type)}</span>
               </div>
             </div>
             <span className="font-mono text-[11px] text-muted-foreground">
@@ -111,7 +113,7 @@ export default function ReviewQueue() {
               )}
             </span>
             <span>
-              <button className="cmd" onClick={(e) => { e.stopPropagation(); setSelected(it) }}>{it.primary_command} →</button>
+              <button className="cmd" onClick={(e) => { e.stopPropagation(); setSelected(it) }}>{v.command(it.primary_command)} →</button>
             </span>
           </div>
         ))}
@@ -125,6 +127,7 @@ export default function ReviewQueue() {
 
 function Drawer({ item, onClose }: { item: PriorityItem; onClose: () => void }) {
   const { t } = useTranslation()
+  const v = useVocab()
   return (
     <>
       <div className="fixed inset-0 z-40 bg-foreground/25" onClick={onClose} />
@@ -135,7 +138,7 @@ function Drawer({ item, onClose }: { item: PriorityItem; onClose: () => void }) 
       >
         <div className="flex items-center gap-2">
           <span className={`chip ${HEAT[item.urgency]}`}>{t(`urgency.${item.urgency}`)}</span>
-          <span className="rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">{item.risk_type}</span>
+          <span className="rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">{v.riskType(item.risk_type)}</span>
           <button
             className="ml-auto flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground hover:bg-muted"
             aria-label={t('detail.close')}
@@ -145,16 +148,16 @@ function Drawer({ item, onClose }: { item: PriorityItem; onClose: () => void }) 
           </button>
         </div>
         <h2 className="mt-3 text-lg font-bold leading-tight">{item.title}</h2>
-        <div className="mt-1 font-mono text-[11px] text-faint">{item.object_ref} · {item.object_type}</div>
+        <div className="mt-1 font-mono text-[11px] text-faint">{item.object_ref} · {v.objectType(item.object_type)}</div>
 
         <Section label={t('detail.whyNow')}>
           <p className="text-sm leading-relaxed text-muted-foreground">{item.why_now_summary}</p>
         </Section>
         <Section label={t('detail.scope')}>
           <div className="mb-1.5 font-mono text-[10px] uppercase tracking-wide text-faint">{t('detail.audiences')}</div>
-          <div className="flex flex-wrap gap-1.5">{item.audience_labels.map((a) => <span key={a} className="chip">{a}</span>)}</div>
+          <div className="flex flex-wrap gap-1.5">{item.affected_audiences.map((a, i) => <span key={i} className="chip">{v.audienceSegment(a)}</span>)}</div>
           <div className="mb-1.5 mt-3 font-mono text-[10px] uppercase tracking-wide text-faint">{t('detail.surfaces')}</div>
-          <div className="flex flex-wrap gap-1.5">{item.affected_surfaces.map((s) => <span key={s} className="chip">{s}</span>)}</div>
+          <div className="flex flex-wrap gap-1.5">{item.affected_surfaces.map((s) => <span key={s} className="chip">{v.surface(s)}</span>)}</div>
         </Section>
         <Section label={t('detail.owner')}>
           {item.owner_state === 'unassigned'
@@ -162,7 +165,7 @@ function Drawer({ item, onClose }: { item: PriorityItem; onClose: () => void }) 
             : <span className="chip">@{item.queue_owner}</span>}
         </Section>
         <Section label={t('detail.commands')}>
-          <div className="flex flex-wrap gap-2">{item.command_actions.map((c) => <button key={c} className="cmd">{c}</button>)}</div>
+          <div className="flex flex-wrap gap-2">{item.command_actions.map((c) => <button key={c} className="cmd">{v.command(c)}</button>)}</div>
           <p className="mt-2 font-mono text-[10px] leading-relaxed text-faint">{t('detail.commandNote')}</p>
         </Section>
       </aside>

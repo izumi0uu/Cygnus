@@ -1,19 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { fetchCommandCenter, type CommandCenterSurface } from '@/lib/api'
+import { fetchCommandCenter, type CommandCenterSurface, type AffectedAudience } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Segmented } from '@/components/Segmented'
 import { Stat } from '@/components/Stat'
+import { useVocab } from '@/lib/vocab'
 
 type Filter = 'all' | 'external' | 'internal'
-type Seg = { label: string; visibility: string; risks: number; surfaces: string[] }
+type Seg = { label: string; visibility: string; aud?: AffectedAudience; risks: number; surfaces: string[] }
 
 function aggregate(data: CommandCenterSurface): Seg[] {
-  const map = new Map<string, { label: string; visibility: string; risks: number; surfaces: Set<string> }>()
+  const map = new Map<string, { label: string; visibility: string; aud?: AffectedAudience; risks: number; surfaces: Set<string> }>()
   for (const it of data.priority_stack) {
     it.audience_labels.forEach((label, i) => {
-      const vis = it.affected_audiences[i]?.visibility ?? (label.startsWith('internal') ? 'internal' : 'external')
-      const seg = map.get(label) ?? { label, visibility: vis, risks: 0, surfaces: new Set<string>() }
+      const a = it.affected_audiences[i]
+      const vis = a?.visibility ?? (label.startsWith('internal') ? 'internal' : 'external')
+      const seg = map.get(label) ?? { label, visibility: vis, aud: a, risks: 0, surfaces: new Set<string>() }
       seg.risks += 1
       it.affected_surfaces.forEach((s) => seg.surfaces.add(s))
       map.set(label, seg)
@@ -24,6 +26,7 @@ function aggregate(data: CommandCenterSurface): Seg[] {
 
 export default function AudiencePublish() {
   const { t } = useTranslation()
+  const v = useVocab()
   const [data, setData] = useState<CommandCenterSurface | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -85,15 +88,15 @@ export default function AudiencePublish() {
         {rows.map((s) => (
           <div key={s.label} className="grid grid-cols-[110px_1.3fr_110px_1.4fr_130px] items-center gap-3.5 border-b border-border px-[18px] py-[14px] last:border-b-0">
             <span>
-              <span className={`chip ${s.visibility === 'external' ? 'chip-high' : ''}`}>{t(`aud.${s.visibility}`)}</span>
+              <span className={`chip ${s.visibility === 'external' ? 'chip-high' : ''}`}>{v.visibility(s.visibility)}</span>
             </span>
-            <span className="font-mono text-[12px] text-foreground">{s.label}</span>
+            <span className="font-mono text-[12px] text-foreground">{s.aud ? v.audienceSegment(s.aud) : s.label}</span>
             <span className="font-mono text-[12px] text-muted-foreground">{s.risks} {t('aud.risksUnit')}</span>
             <span className="flex flex-wrap gap-1.5">
-              {s.surfaces.map((su) => <span key={su} className="chip">{su}</span>)}
+              {s.surfaces.map((su) => <span key={su} className="chip">{v.surface(su)}</span>)}
             </span>
             <span>
-              <button className="cmd">{s.visibility === 'external' ? 'restrict_publish' : 'open_review'} →</button>
+              <button className="cmd">{v.command(s.visibility === 'external' ? 'restrict_publish' : 'open_review')} →</button>
             </span>
           </div>
         ))}

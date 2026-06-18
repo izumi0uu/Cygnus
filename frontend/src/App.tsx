@@ -3,6 +3,7 @@ import Landing from '@/pages/Landing'
 import AppShell from '@/components/layout/AppShell'
 import ReviewQueue from '@/pages/ReviewQueue'
 import AudiencePublish from '@/pages/AudiencePublish'
+import KnowledgeObjects from '@/pages/KnowledgeObjects'
 import Placeholder from '@/pages/Placeholder'
 
 export default function App() {
@@ -11,7 +12,7 @@ export default function App() {
       <Route path="/" element={<Landing />} />
       <Route path="/console" element={<AppShell />}>
         <Route index element={<ReviewQueue />} />
-        <Route path="objects" element={<Placeholder sectionKey="objects" />} />
+        <Route path="objects" element={<KnowledgeObjects />} />
         <Route path="sources" element={<Placeholder sectionKey="sources" />} />
         <Route path="audience" element={<AudiencePublish />} />
         <Route path="drift" element={<Placeholder sectionKey="drift" />} />

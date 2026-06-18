@@ -1,3 +1,14 @@
+export interface AffectedAudience {
+  visibility: string
+  brands: string[]
+  product_lines: string[]
+  plans: string[]
+  regions: string[]
+  languages: string[]
+  product_versions: string[]
+  is_global: boolean
+}
+
 export interface PriorityItem {
   risk_id: string
   title: string
@@ -7,6 +18,7 @@ export interface PriorityItem {
   object_ref: string
   why_now_summary: string
   audience_labels: string[]
+  affected_audiences: AffectedAudience[]
   affected_surfaces: string[]
   owner_state: string
   queue_owner: string | null

@@ -2,6 +2,7 @@ import { Routes, Route } from 'react-router-dom'
 import Landing from '@/pages/Landing'
 import AppShell from '@/components/layout/AppShell'
 import ReviewQueue from '@/pages/ReviewQueue'
+import AudiencePublish from '@/pages/AudiencePublish'
 import Placeholder from '@/pages/Placeholder'
 
 export default function App() {
@@ -12,7 +13,7 @@ export default function App() {
         <Route index element={<ReviewQueue />} />
         <Route path="objects" element={<Placeholder sectionKey="objects" />} />
         <Route path="sources" element={<Placeholder sectionKey="sources" />} />
-        <Route path="audience" element={<Placeholder sectionKey="audience" />} />
+        <Route path="audience" element={<AudiencePublish />} />
         <Route path="drift" element={<Placeholder sectionKey="drift" />} />
         <Route path="propagation" element={<Placeholder sectionKey="propagation" />} />
         <Route path="audit" element={<Placeholder sectionKey="audit" />} />

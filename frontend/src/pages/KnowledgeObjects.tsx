@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { X } from 'lucide-react'
 import ForceGraph2D from 'react-force-graph-2d'
@@ -6,18 +6,16 @@ import { fetchCommandCenter, type CommandCenterSurface, type PriorityItem } from
 import { Button } from '@/components/ui/button'
 import { useVocab } from '@/lib/vocab'
 
-// three is heavy → only loaded when the user switches to 3D
-const ForceGraph3D = lazy(() => import('react-force-graph-3d'))
-
 const HEX: Record<string, string> = { urgent: '#e5484d', high: '#f76808', medium: '#e8930c', low: '#185ee0' }
 const RANK: Record<string, number> = { urgent: 3, high: 2, medium: 1, low: 0 }
-const OBJR: Record<string, number> = { urgent: 11, high: 9, medium: 8, low: 7 }
+const OBJR: Record<string, number> = { urgent: 9, high: 7, medium: 6, low: 5 }
 const C_AUD = '#7b828f'
 const C_SURF = '#aab0bd'
+const RTC: Record<string, string> = { source_blindness: '#e5484d', drift: '#f76808', audience_mismatch: '#e8930c', ticket_pressure: '#185ee0', policy_conflict: '#e5484d', owner_gap: '#e8930c' }
 
 type GNode = {
   id: string
-  kind: 'object' | 'audience' | 'surface'
+  kind: 'object' | 'audience' | 'surface' | 'risktype'
   name: string
   r: number
   color: string
@@ -35,7 +33,6 @@ export default function KnowledgeObjects() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<PriorityItem | null>(null)
-  const [mode, setMode] = useState<'2d' | '3d'>('2d')
 
   const wrapRef = useRef<HTMLDivElement>(null)
   const fgRef = useRef<any>(null)
@@ -56,11 +53,6 @@ export default function KnowledgeObjects() {
     setW(el.clientWidth)
     return () => ro.disconnect()
   }, [data])
-  useEffect(() => {
-    if (mode !== '3d') return
-    const id = setTimeout(() => fgRef.current?.zoomToFit(400, 14), 700)
-    return () => clearTimeout(id)
-  }, [mode])
   useEffect(() => {
     if (!selected) return
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelected(null) }
@@ -84,18 +76,22 @@ export default function KnowledgeObjects() {
         const top = objMost.get(it.object_ref)!
         nodes.set(oid, { id: oid, kind: 'object', name: it.object_ref, r: OBJR[top.urgency] ?? 5, color: HEX[top.urgency] ?? '#185ee0', objType: it.object_type, urgency: top.urgency, item: top })
       }
+      const rid = 'r:' + it.risk_type
+      if (!nodes.has(rid)) nodes.set(rid, { id: rid, kind: 'risktype', name: v.riskType(it.risk_type), r: 5, color: RTC[it.risk_type] ?? '#94a3b8' })
+      const rk = oid + '>' + rid
+      if (!seen.has(rk)) { seen.add(rk); links.push({ source: oid, target: rid }) }
       it.audience_labels.forEach((lab, idx) => {
         const aid = 'a:' + lab
         if (!nodes.has(aid)) {
           const a = it.affected_audiences[idx]
-          nodes.set(aid, { id: aid, kind: 'audience', name: a ? v.audienceFacets(a).join('·') || v.visibility(a.visibility) : lab, r: 6, color: C_AUD })
+          nodes.set(aid, { id: aid, kind: 'audience', name: a ? v.audienceFacets(a).join('·') || v.visibility(a.visibility) : lab, r: 5, color: C_AUD })
         }
         const k = oid + '>' + aid
         if (!seen.has(k)) { seen.add(k); links.push({ source: oid, target: aid }) }
       })
       it.affected_surfaces.forEach((s) => {
         const sid = 's:' + s
-        if (!nodes.has(sid)) nodes.set(sid, { id: sid, kind: 'surface', name: v.surface(s), r: 5, color: C_SURF })
+        if (!nodes.has(sid)) nodes.set(sid, { id: sid, kind: 'surface', name: v.surface(s), r: 4, color: C_SURF })
         const k = oid + '>' + sid
         if (!seen.has(k)) { seen.add(k); links.push({ source: oid, target: sid }) }
       })
@@ -118,18 +114,18 @@ export default function KnowledgeObjects() {
     const r = node.r ?? 5
     ctx.beginPath()
     ctx.arc(node.x, node.y, r, 0, 2 * Math.PI)
-    ctx.fillStyle = node.color
-    ctx.fill()
-    if (node.kind === 'object') {
-      ctx.lineWidth = 2 / scale
-      ctx.strokeStyle = '#ffffff'
-      ctx.stroke()
+    if (node.kind === 'risktype') {
+      ctx.fillStyle = '#ffffff'; ctx.fill()
+      ctx.lineWidth = 2.5 / scale; ctx.strokeStyle = node.color; ctx.stroke()
+    } else {
+      ctx.fillStyle = node.color; ctx.fill()
+      if (node.kind === 'object') { ctx.lineWidth = 2 / scale; ctx.strokeStyle = '#ffffff'; ctx.stroke() }
     }
     const fontSize = 11 / scale
     ctx.font = `${node.kind === 'object' ? 600 : 400} ${fontSize}px Inter, sans-serif`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'top'
-    ctx.fillStyle = node.kind === 'object' ? '#1a1d24' : '#7b828f'
+    ctx.fillStyle = node.kind === 'object' ? '#1a1d24' : node.kind === 'risktype' ? node.color : '#7b828f'
     ctx.fillText(node.name, node.x, node.y + r + 2 / scale)
   }
   const drawHit = (node: any, color: string, ctx: CanvasRenderingContext2D) => {
@@ -143,19 +139,14 @@ export default function KnowledgeObjects() {
     <>
       <div className="mb-3 flex flex-wrap items-center gap-4">
         <Legend color={HEX.urgent} ring label={t('kg.object')} extra={t('kg.objectNote')} />
+        <Legend color={HEX.urgent} hollow label={t('kg.riskType')} />
         <Legend color={C_AUD} label={t('kg.audience')} />
         <Legend color={C_SURF} label={t('kg.surface')} />
-        <div className="ml-auto flex items-center gap-3">
-          <div className="flex rounded-full border border-border p-0.5 text-[12px] font-semibold">
-            <button onClick={() => setMode('2d')} className={mode === '2d' ? 'rounded-full bg-accent px-3 py-1 text-primary' : 'px-3 py-1 text-muted-foreground'}>2D</button>
-            <button onClick={() => setMode('3d')} className={mode === '3d' ? 'rounded-full bg-accent px-3 py-1 text-primary' : 'px-3 py-1 text-muted-foreground'}>3D</button>
-          </div>
-          <span className="font-mono text-[11px] text-faint">{t('kg.hint')}</span>
-        </div>
+        <span className="ml-auto font-mono text-[11px] text-faint">{t('kg.hint')}</span>
       </div>
 
       <div ref={wrapRef} className="overflow-hidden rounded-xl border border-border bg-card shadow-soft" style={{ height: H }}>
-        {w > 0 && mode === '2d' && (
+        {w > 0 && (
           <ForceGraph2D
             ref={fgRef}
             width={w}
@@ -163,44 +154,15 @@ export default function KnowledgeObjects() {
             graphData={graph}
             backgroundColor="rgba(0,0,0,0)"
             nodeLabel="name"
-            nodeRelSize={6}
+            nodeRelSize={5}
             linkColor={() => 'rgba(123,130,143,0.22)'}
             linkWidth={1}
-            warmupTicks={120}
-            cooldownTicks={0}
-            onEngineStop={() => fgRef.current?.zoomToFit(0, 70)}
+            cooldownTicks={120}
+            onEngineStop={() => fgRef.current?.zoomToFit(400, 60)}
             nodeCanvasObject={drawNode}
             nodePointerAreaPaint={drawHit}
             onNodeClick={(node: any) => { if (node.kind === 'object' && node.item) setSelected(node.item) }}
           />
-        )}
-        {w > 0 && mode === '3d' && (
-          <Suspense fallback={<div className="flex h-full items-center justify-center font-mono text-sm text-muted-foreground">{t('state.loading')}</div>}>
-            <ForceGraph3D
-              ref={fgRef}
-              width={w}
-              height={H}
-              graphData={graph}
-              backgroundColor="#0f1320"
-              nodeLabel="name"
-              nodeColor={(n: any) => n.color}
-              nodeVal={(n: any) => n.r}
-              nodeRelSize={8}
-              nodeOpacity={0.95}
-              nodeResolution={16}
-              linkColor={() => 'rgba(120,150,230,0.45)'}
-              linkOpacity={0.6}
-              linkWidth={0.6}
-              linkDirectionalParticles={2}
-              linkDirectionalParticleWidth={2.4}
-              linkDirectionalParticleSpeed={0.01}
-              linkDirectionalParticleColor={() => '#5b8def'}
-              warmupTicks={120}
-              cooldownTicks={0}
-              onEngineStop={() => fgRef.current?.zoomToFit(0, 12)}
-              onNodeClick={(node: any) => { if (node.kind === 'object' && node.item) setSelected(node.item) }}
-            />
-          </Suspense>
         )}
       </div>
 
@@ -209,10 +171,10 @@ export default function KnowledgeObjects() {
   )
 }
 
-function Legend({ color, label, ring, extra }: { color: string; label: string; ring?: boolean; extra?: string }) {
+function Legend({ color, label, ring, hollow, extra }: { color: string; label: string; ring?: boolean; hollow?: boolean; extra?: string }) {
   return (
     <span className="flex items-center gap-2 text-[12.5px] text-muted-foreground">
-      <span className="h-3 w-3 rounded-full" style={{ background: color, boxShadow: ring ? '0 0 0 1.5px #fff inset' : undefined }} />
+      <span className="h-3 w-3 rounded-full" style={hollow ? { border: `2px solid ${color}`, background: '#fff' } : { background: color, boxShadow: ring ? '0 0 0 1.5px #fff inset' : undefined }} />
       {label}
       {extra && <span className="font-mono text-[10px] text-faint">{extra}</span>}
     </span>

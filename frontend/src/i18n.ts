@@ -30,7 +30,7 @@ const zh = {
     queue: { subtitle: 'REVIEW QUEUE · 晨间简报', search: '搜索风险 / 对象…', all: '全部', urgent: '紧急', unassigned: '无主', sort: '排序：风险', command: '发命令', statRisks: '治理风险', statSurfaces: '下游面', thUrgency: '紧急度', thRisk: '风险', thScope: '作用域', thOwner: '责任人', thCommand: '主命令', scopeFmt: '{{a}} 受众 · {{s}} 面', soon: '此区建设中' },
     aud: { segs: '受众段', external: '对外', internal: '对内', thVis: '可见性', thSeg: '受众段', thRisks: '触及风险', thSurf: '下游面', thAct: '操作', risksUnit: '风险', byRisk: '受众段 × 触及风险', byRiskSub: '按触及风险排序', touched: '风险触及', surfUnit: '下游面' },
     obj: { statObjects: '知识对象', statTypes: '类型', thType: '类型', thRef: '对象', thRisk: '当前风险', thOwner: '责任人', thAct: '操作' },
-    kg: { object: '对象', objectNote: '按紧急度', audience: '受众', surface: '下游面', hint: '点击对象节点查看详情' },
+    kg: { object: '对象', objectNote: '按紧急度', audience: '受众', surface: '下游面', hint: '点击对象节点查看详情', riskType: '风险类型' },
     src: { statSources: '受损来源', thObject: '对象', thWhy: '情况', thSurf: '下游面', thOwner: '责任人', thAct: '操作', empty: '当前没有来源完整性问题' },
     drift: { statWatched: '监测对象', statDrift: '漂移中', thObject: '对象', thWhy: '漂移情况', thSurf: '下游面', thOwner: '责任人', thAct: '操作', empty: '当前没有漂移风险' },
     detail: {
@@ -76,7 +76,7 @@ const en = {
     queue: { subtitle: 'REVIEW QUEUE · MORNING BRIEF', search: 'Search risks / objects…', all: 'All', urgent: 'Urgent', unassigned: 'Unassigned', sort: 'Sort: risk', command: 'Command', statRisks: 'risks', statSurfaces: 'surfaces', thUrgency: 'urgency', thRisk: 'risk', thScope: 'scope', thOwner: 'owner', thCommand: 'command', scopeFmt: '{{a}} aud · {{s}} surf', soon: 'Section under construction' },
     aud: { segs: 'segments', external: 'External', internal: 'Internal', thVis: 'visibility', thSeg: 'audience segment', thRisks: 'risks', thSurf: 'surfaces', thAct: 'action', risksUnit: 'risks', byRisk: 'Segments × risk', byRiskSub: 'by risk touched', touched: 'risks', surfUnit: 'surfaces' },
     obj: { statObjects: 'objects', statTypes: 'types', thType: 'type', thRef: 'object', thRisk: 'current risk', thOwner: 'owner', thAct: 'action' },
-    kg: { object: 'Object', objectNote: 'by urgency', audience: 'Audience', surface: 'Surface', hint: 'Click an object node for details' },
+    kg: { object: 'Object', objectNote: 'by urgency', audience: 'Audience', surface: 'Surface', hint: 'Click an object node for details', riskType: 'Risk type' },
     src: { statSources: 'sources at risk', thObject: 'object', thWhy: 'situation', thSurf: 'surfaces', thOwner: 'owner', thAct: 'action', empty: 'No source-integrity issues right now' },
     drift: { statWatched: 'watched', statDrift: 'drifting', thObject: 'object', thWhy: 'drift', thSurf: 'surfaces', thOwner: 'owner', thAct: 'action', empty: 'No drift right now' },
     detail: {

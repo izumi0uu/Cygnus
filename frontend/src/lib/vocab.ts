@@ -91,6 +91,15 @@ export function useVocab() {
     if (a.is_global) parts.push(pick(REGION, 'global', zh))
     return parts.join(' · ')
   }
+  const audienceFacets = (a: AffectedAudience): string[] => {
+    const out: string[] = []
+    a.product_lines.forEach((x) => out.push(pick(PRODUCT_LINE, x, zh)))
+    a.plans.forEach((x) => out.push(pick(PLAN, x, zh)))
+    a.regions.forEach((x) => out.push(pick(REGION, x, zh)))
+    a.languages.forEach((x) => out.push(humanize(x)))
+    if (a.is_global) out.push(pick(REGION, 'global', zh))
+    return out
+  }
   return {
     riskType: (k: string) => pick(RISK_TYPE, k, zh),
     command: (k: string) => pick(COMMAND, k, zh),
@@ -98,5 +107,6 @@ export function useVocab() {
     objectType: (k: string) => pick(OBJECT_TYPE, k, zh),
     visibility: (k: string) => pick(VISIBILITY, k, zh),
     audienceSegment,
+    audienceFacets,
   }
 }

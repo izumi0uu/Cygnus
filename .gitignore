@@ -8,6 +8,7 @@ CLAUDE.md
 DESIGN.md
 docs/
 README.md
+frontend/README.md
 
 # Local test/runtime cache
 __pycache__/
@@ -15,6 +16,7 @@ __pycache__/
 
 # Local prototype exports
 prototypes/
+.tmp/
 
 # macOS + Python build artifacts
 .DS_Store
@@ -22,3 +24,15 @@ prototypes/
 
 # Vendored commercial font (Thunder, Pangram Pangram) — kept local, not redistributed
 frontend/public/fonts/thunder.woff2
+
+
+# Local venv / OMX state / tool caches
+.venv/
+.venv-runability/
+.omx/
+.pytest_cache/
+.uv-cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/

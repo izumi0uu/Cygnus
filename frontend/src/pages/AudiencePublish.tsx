@@ -4,6 +4,8 @@ import { fetchCommandCenter, type CommandCenterSurface, type AffectedAudience } 
 import { Button } from '@/components/ui/button'
 import { Stat } from '@/components/Stat'
 import { useVocab } from '@/lib/vocab'
+import { CmdButton } from '@/components/CmdButton'
+import { PageSkeleton } from '@/components/Skeleton'
 
 type Seg = { label: string; visibility: string; aud?: AffectedAudience; risks: number; surfaces: string[] }
 
@@ -40,7 +42,7 @@ export default function AudiencePublish() {
 
   const segs = useMemo(() => (data ? aggregate(data) : []), [data])
 
-  if (loading) return <div className="font-mono text-sm text-muted-foreground">{t('state.loading')}</div>
+  if (loading) return <PageSkeleton />
   if (error)
     return (
       <div className="rounded-xl border border-border bg-card p-4 shadow-card">
@@ -114,7 +116,7 @@ export default function AudiencePublish() {
                 {s.surfaces.map((su) => <span key={su} className="chip">{v.surface(su)}</span>)}
               </div>
               <div className="flex">
-                <button className="cmd ml-auto">{v.command(s.visibility === 'external' ? 'restrict_publish' : 'open_review')} →</button>
+                <CmdButton command={s.visibility === 'external' ? 'restrict_publish' : 'open_review'} className="ml-auto" />
               </div>
             </div>
           ))}

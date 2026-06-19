@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button'
 import { Segmented } from '@/components/Segmented'
 import { Stat } from '@/components/Stat'
 import { useVocab } from '@/lib/vocab'
+import { CmdButton } from '@/components/CmdButton'
+import { PageSkeleton } from '@/components/Skeleton'
 
 const HEAT: Record<string, string> = { urgent: 'chip-urgent', high: 'chip-high', medium: 'chip-medium', low: 'chip' }
 const DOT: Record<string, string> = { urgent: 'var(--urgent)', high: 'var(--high)', medium: 'var(--medium)', low: 'var(--faint)' }
@@ -34,7 +36,7 @@ export default function ReviewQueue() {
     return () => window.removeEventListener('keydown', onKey)
   }, [selected])
 
-  if (loading) return <div className="font-mono text-sm text-muted-foreground">{t('state.loading')}</div>
+  if (loading) return <PageSkeleton />
   if (error)
     return (
       <div className="rounded-xl border border-border bg-card p-4 shadow-card">
@@ -165,7 +167,7 @@ function Drawer({ item, onClose }: { item: PriorityItem; onClose: () => void }) 
             : <span className="chip">@{item.queue_owner}</span>}
         </Section>
         <Section label={t('detail.commands')}>
-          <div className="flex flex-wrap gap-2">{item.command_actions.map((c) => <button key={c} className="cmd">{v.command(c)}</button>)}</div>
+          <div className="flex flex-wrap gap-2">{item.command_actions.map((c) => <CmdButton key={c} command={c} />)}</div>
           <p className="mt-2 font-mono text-[10px] leading-relaxed text-faint">{t('detail.commandNote')}</p>
         </Section>
       </aside>

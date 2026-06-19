@@ -1,4 +1,4 @@
-import { Suspense, type ComponentType } from 'react'
+import { Suspense, useEffect, useState, type ComponentType } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
@@ -11,9 +11,12 @@ import {
   Share2,
   ShieldCheck,
   Search,
-  Bell,
+  LogOut,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useAuth } from '@/lib/auth'
+import NotificationBell from '@/components/NotificationBell'
+import CommandPalette from '@/components/CommandPalette'
 
 type Group = 'gov' | 'obs'
 type NavItem = { to: string; key: string; code: string; icon: ComponentType<{ size?: number; className?: string }>; group: Group; end?: boolean; badge?: string }
@@ -66,9 +69,30 @@ function NavGroup({ group }: { group: Group }) {
 }
 
 export default function AppShell() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { pathname } = useLocation()
+  const { user, logout } = useAuth()
   const active = NAV.find((i) => i.to === pathname) ?? NAV[0]
+  const initials = (user?.name || user?.email || 'ID').slice(0, 2).toUpperCase()
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const isZh = i18n.language.startsWith('zh')
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setPaletteOpen((o) => !o)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  const toggleLang = () => {
+    const next = isZh ? 'en' : 'zh'
+    i18n.changeLanguage(next)
+    localStorage.setItem('cygnus-lang', next)
+  }
 
   return (
     <div className="grid h-screen grid-cols-[248px_1fr] bg-background">
@@ -83,25 +107,42 @@ export default function AppShell() {
           <NavGroup group="obs" />
         </div>
         <div className="mt-2 flex items-center gap-2.5 border-t border-sidebar-border px-1.5 pt-3">
-          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground">ID</div>
+          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground">{initials}</div>
           <div className="min-w-0">
-            <div className="truncate text-[12.5px] font-semibold">support-lead</div>
-            <div className="truncate text-[11px] text-faint">izumi0uu</div>
+            <div className="truncate text-[12.5px] font-semibold">{user?.name ?? 'support-lead'}</div>
+            <div className="truncate text-[11px] text-faint">{user?.email ?? 'izumi0uu'}</div>
           </div>
+          <button
+            onClick={logout}
+            aria-label={t('auth.logout')}
+            title={t('auth.logout')}
+            className="ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-faint hover:bg-muted hover:text-foreground"
+          >
+            <LogOut size={15} />
+          </button>
         </div>
       </aside>
 
       <div className="flex min-w-0 flex-col">
-        <header className="flex h-[60px] shrink-0 items-center gap-4 border-b border-border bg-card/85 px-6 backdrop-blur">
+        <header className="relative z-40 flex h-[60px] shrink-0 items-center gap-4 border-b border-border bg-card/85 px-6 backdrop-blur">
           <h1 className="font-bold">{t(`nav.${active.key}`)}</h1>
           <span className="font-mono text-[11px] text-faint">{active.code}</span>
-          <div className="ml-auto flex w-60 items-center gap-2 rounded-full border border-border bg-muted px-3.5 py-2 text-[12.5px] text-faint">
+          <button
+            onClick={() => setPaletteOpen(true)}
+            className="ml-auto flex w-60 items-center gap-2 rounded-full border border-border bg-muted px-3.5 py-2 text-[12.5px] text-faint hover:border-primary/40"
+          >
             <Search size={14} />
             <span>{t('queue.search')}</span>
-          </div>
-          <button className="flex h-[34px] w-[34px] items-center justify-center rounded-full border border-border bg-card text-muted-foreground hover:bg-muted">
-            <Bell size={16} />
+            <kbd className="ml-auto rounded border border-border bg-card px-1.5 font-mono text-[10px]">⌘K</kbd>
           </button>
+          <button
+            onClick={toggleLang}
+            aria-label="language"
+            className="flex h-[34px] items-center justify-center rounded-full border border-border bg-card px-3 font-mono text-[11px] font-semibold text-muted-foreground hover:bg-muted"
+          >
+            {isZh ? t('lang.en') : t('lang.zh')}
+          </button>
+          <NotificationBell />
         </header>
         <main className="flex-1 overflow-y-auto px-6 pb-10 pt-5">
           <Suspense fallback={<div className="font-mono text-sm text-muted-foreground">{t('state.loading')}</div>}>
@@ -109,6 +150,7 @@ export default function AppShell() {
           </Suspense>
         </main>
       </div>
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>
   )
 }

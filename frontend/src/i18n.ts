@@ -18,6 +18,11 @@ const zh = {
       awaitBackendNote: '该视图依赖的后端端点尚未开放——当前 command-center 简报未覆盖此数据。',
     },
     toggle: { theme: '主题', system: '跟随系统', light: '浅色', dark: '深色' },
+    auth: { signIn: '登录', email: '邮箱', password: '密码', passwordPlaceholder: '输入密码', signingIn: '登录中…', failed: '登录失败', logout: '退出登录', deployNote: 'Cygnus · 本地部署' },
+    notif: { title: '通知', markAll: '全部已读', empty: '暂无通知' },
+    cmd: { preview: '「{{action}}」为预览态 · 待写路径接入' },
+    palette: { placeholder: '搜索风险 / 对象 / 区域…', sections: '区域', risks: '风险', empty: '无匹配结果', hint: '↑↓ 选择 · ↵ 跳转 · Esc 关闭' },
+    lang: { zh: '中', en: 'EN' },
     landing: {
       eyebrow: 'Support Brain · 支持知识操作系统',
       default: '支持知识',
@@ -66,6 +71,11 @@ const en = {
       awaitBackendNote: "This view needs a backend endpoint that isn't exposed yet — the command-center brief doesn't cover this data.",
     },
     toggle: { theme: 'Theme', system: 'System', light: 'Light', dark: 'Dark' },
+    auth: { signIn: 'Sign in', email: 'Email', password: 'Password', passwordPlaceholder: 'Enter password', signingIn: 'Signing in…', failed: 'Login failed', logout: 'Log out', deployNote: 'Cygnus · On-Premise' },
+    notif: { title: 'Notifications', markAll: 'Mark all read', empty: 'No notifications' },
+    cmd: { preview: 'Command "{{action}}" is preview-only · write path pending' },
+    palette: { placeholder: 'Search risks / objects / sections…', sections: 'Sections', risks: 'Risks', empty: 'No matches', hint: '↑↓ select · ↵ go · Esc close' },
+    lang: { zh: '中', en: 'EN' },
     landing: {
       eyebrow: 'Support Brain · Support Knowledge OS',
       default: 'SUPPORT',

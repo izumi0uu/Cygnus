@@ -5,6 +5,8 @@ import ForceGraph2D from 'react-force-graph-2d'
 import { fetchCommandCenter, type CommandCenterSurface, type PriorityItem } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { useVocab } from '@/lib/vocab'
+import { CmdButton } from '@/components/CmdButton'
+import { PageSkeleton } from '@/components/Skeleton'
 
 const HEX: Record<string, string> = { urgent: '#e5484d', high: '#f76808', medium: '#e8930c', low: '#185ee0' }
 const RANK: Record<string, number> = { urgent: 3, high: 2, medium: 1, low: 0 }
@@ -100,7 +102,7 @@ export default function KnowledgeObjects() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, i18n.language])
 
-  if (loading) return <div className="font-mono text-sm text-muted-foreground">{t('state.loading')}</div>
+  if (loading) return <PageSkeleton />
   if (error)
     return (
       <div className="rounded-xl border border-border bg-card p-4 shadow-card">
@@ -204,7 +206,7 @@ function Drawer({ item, onClose }: { item: PriorityItem; onClose: () => void }) 
           <div className="flex flex-wrap gap-1.5">{item.affected_surfaces.map((s) => <span key={s} className="chip">{v.surface(s)}</span>)}</div>
         </Section>
         <Section label={t('detail.commands')}>
-          <div className="flex flex-wrap gap-2">{item.command_actions.map((c) => <button key={c} className="cmd">{v.command(c)}</button>)}</div>
+          <div className="flex flex-wrap gap-2">{item.command_actions.map((c) => <CmdButton key={c} command={c} />)}</div>
           <p className="mt-2 font-mono text-[10px] leading-relaxed text-faint">{t('detail.commandNote')}</p>
         </Section>
       </aside>

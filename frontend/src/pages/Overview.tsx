@@ -5,6 +5,8 @@ import { ListTodo, Bell, Users, Share2, Database } from 'lucide-react'
 import { fetchCommandCenter, type CommandCenterSurface } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { useVocab } from '@/lib/vocab'
+import { CmdButton } from '@/components/CmdButton'
+import { PageSkeleton } from '@/components/Skeleton'
 import { PieChart } from '@/components/charts/pie-chart'
 import { PieSlice } from '@/components/charts/pie-slice'
 
@@ -49,7 +51,7 @@ export default function Overview() {
     }
   }, [data, t])
 
-  if (loading) return <div className="font-mono text-sm text-muted-foreground">{t('state.loading')}</div>
+  if (loading) return <PageSkeleton />
   if (error)
     return (
       <div className="rounded-xl border border-border bg-card p-4 shadow-card">
@@ -158,7 +160,7 @@ export default function Overview() {
                   <div className="mt-1 flex items-center gap-1.5">
                     <span className="h-2 w-2 rounded-full" style={{ background: HEX[it.urgency] }} />
                     <span className="rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">{v.riskType(it.risk_type)}</span>
-                    <button className="cmd">{v.command(it.primary_command)} →</button>
+                    <CmdButton command={it.primary_command} />
                   </div>
                 </div>
               </div>

@@ -5,6 +5,8 @@ import { fetchCommandCenter, type CommandCenterSurface } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Stat } from '@/components/Stat'
 import { useVocab } from '@/lib/vocab'
+import { CmdButton } from '@/components/CmdButton'
+import { PageSkeleton } from '@/components/Skeleton'
 
 const HEAT: Record<string, string> = { urgent: 'chip-urgent', high: 'chip-high', medium: 'chip-medium', low: 'chip' }
 
@@ -23,7 +25,7 @@ export default function CoverageDrift() {
   }
   useEffect(load, [])
 
-  if (loading) return <div className="font-mono text-sm text-muted-foreground">{t('state.loading')}</div>
+  if (loading) return <PageSkeleton />
   if (error)
     return (
       <div className="rounded-xl border border-border bg-card p-4 shadow-card">
@@ -73,7 +75,7 @@ export default function CoverageDrift() {
                 {it.owner_state === 'unassigned'
                   ? <span className="chip chip-gap">{t('owner.gap')}</span>
                   : <span className="font-mono text-[11.5px] text-muted-foreground">@{it.queue_owner}</span>}
-                <button className="cmd ml-auto">{v.command(it.primary_command)} →</button>
+                <CmdButton command={it.primary_command} className="ml-auto" />
               </div>
             </div>
           </div>

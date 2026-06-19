@@ -2,6 +2,10 @@ import { lazy } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import Landing from '@/pages/Landing'
 import AppShell from '@/components/layout/AppShell'
+import RequireAuth from '@/components/RequireAuth'
+import { AuthProvider } from '@/lib/auth'
+import { ToastProvider } from '@/lib/toast'
+import Login from '@/pages/Login'
 
 const Overview = lazy(() => import('@/pages/Overview'))
 const ReviewQueue = lazy(() => import('@/pages/ReviewQueue'))
@@ -13,18 +17,25 @@ const Placeholder = lazy(() => import('@/pages/Placeholder'))
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/" element={<Landing />} />
-      <Route path="/console" element={<AppShell />}>
-        <Route index element={<Overview />} />
-        <Route path="queue" element={<ReviewQueue />} />
-        <Route path="objects" element={<KnowledgeObjects />} />
-        <Route path="sources" element={<SourcesEvidence />} />
-        <Route path="audience" element={<AudiencePublish />} />
-        <Route path="drift" element={<CoverageDrift />} />
-        <Route path="propagation" element={<Placeholder sectionKey="propagation" />} />
-        <Route path="audit" element={<Placeholder sectionKey="audit" />} />
-      </Route>
-    </Routes>
+    <AuthProvider>
+      <ToastProvider>
+        <Routes>
+          <Route path="/" element={<Landing />} />
+          <Route path="/login" element={<Login />} />
+          <Route element={<RequireAuth />}>
+            <Route path="/console" element={<AppShell />}>
+              <Route index element={<Overview />} />
+              <Route path="queue" element={<ReviewQueue />} />
+              <Route path="objects" element={<KnowledgeObjects />} />
+              <Route path="sources" element={<SourcesEvidence />} />
+              <Route path="audience" element={<AudiencePublish />} />
+              <Route path="drift" element={<CoverageDrift />} />
+              <Route path="propagation" element={<Placeholder sectionKey="propagation" />} />
+              <Route path="audit" element={<Placeholder sectionKey="audit" />} />
+            </Route>
+          </Route>
+        </Routes>
+      </ToastProvider>
+    </AuthProvider>
   )
 }

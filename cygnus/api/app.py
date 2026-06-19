@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from cygnus.domain.objects import TroubleshootingFlow
 from cygnus.publish import (
     get_pressure_intake_publish_preview_surface,
     get_pressure_intake_publish_propagation_surface,
@@ -17,6 +18,7 @@ from cygnus.recovery import (
     get_recovery_window_surface,
     sample_recovery_command_refs,
 )
+from cygnus.retrieval import sample_knowledge_objects, sample_support_evidence
 from cygnus.review import (
     OwnerState,
     ReviewHomeQuery,
@@ -123,3 +125,100 @@ def governance_overview() -> dict[str, object]:
             command_ids=tuple(ref.command_id for ref in sample_recovery_command_refs())
         )
     ).to_dict()
+
+
+@app.get("/api/knowledge-graph")
+def knowledge_graph() -> dict[str, object]:
+    """Typed knowledge objects, evidence, and audiences as a relationship graph.
+
+    Nodes:
+      - object:   a support knowledge object (answer_card, policy_rule, …)
+      - evidence: a grounding evidence record (help_center, release_note, …)
+      - audience: a distinct supported-audience filter
+
+    Edges (all derived from real object fields, not invented):
+      - object --cites--> evidence        (KnowledgeObject.evidence_ids)
+      - object --serves--> audience       (KnowledgeObject.supported_audiences)
+      - object --escalates_to--> object   (TroubleshootingFlow.escalation_route_id)
+    """
+    objects = sample_knowledge_objects()
+    evidence = sample_support_evidence()
+    evidence_by_id = {e.evidence_id: e for e in evidence}
+
+    nodes: list[dict[str, object]] = []
+    edges: list[dict[str, object]] = []
+    seen_edges: set[tuple[str, str, str]] = set()
+
+    def _add_edge(source: str, target: str, kind: str) -> None:
+        key = (source, target, kind)
+        if key in seen_edges:
+            return
+        seen_edges.add(key)
+        edges.append({"source": source, "target": target, "kind": kind})
+
+    audience_node_ids: dict[str, str] = {}
+
+    def _audience_node_id(audience_dict: dict[str, object]) -> str:
+        parts = [str(audience_dict["visibility"])]
+        for facet in ("brands", "product_lines", "plans", "regions", "languages", "product_versions"):
+            parts.extend(str(v) for v in audience_dict.get(facet, []))
+        key = ":".join(parts) if parts else "global"
+        if key not in audience_node_ids:
+            audience_node_ids[key] = f"aud:{len(audience_node_ids)}"
+            nodes.append(
+                {
+                    "id": audience_node_ids[key],
+                    "kind": "audience",
+                    "label": key,
+                    "visibility": audience_dict["visibility"],
+                    "is_global": audience_dict.get("is_global", False),
+                }
+            )
+        return audience_node_ids[key]
+
+    for obj in objects:
+        object_dict = obj.to_dict()
+        nodes.append(
+            {
+                "id": obj.object_id,
+                "kind": "object",
+                "label": obj.title,
+                "object_type": obj.object_type.value,
+                "lifecycle_state": object_dict["lifecycle_state"],
+                "summary": obj.summary,
+            }
+        )
+
+        for evidence_id in obj.evidence_ids:
+            if evidence_id in evidence_by_id:
+                _add_edge(obj.object_id, evidence_id, "cites")
+
+        for audience in obj.supported_audiences:
+            audience_dict = audience.to_dict()
+            _add_edge(obj.object_id, _audience_node_id(audience_dict), "serves")
+
+        if isinstance(obj, TroubleshootingFlow) and obj.escalation_route_id:
+            _add_edge(obj.object_id, obj.escalation_route_id, "escalates_to")
+
+    for ev in evidence:
+        nodes.append(
+            {
+                "id": ev.evidence_id,
+                "kind": "evidence",
+                "label": ev.title,
+                "source_type": ev.source_type.value,
+                "freshness": ev.freshness_state.value,
+                "source_ref": ev.source_ref,
+            }
+        )
+
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "stats": {
+            "objects": sum(1 for n in nodes if n["kind"] == "object"),
+            "evidence": sum(1 for n in nodes if n["kind"] == "evidence"),
+            "audiences": len(audience_node_ids),
+            "edges": len(edges),
+        },
+    }

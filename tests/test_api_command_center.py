@@ -7,6 +7,7 @@ from cygnus.api.app import (
     downstream_reality_check,
     governance_overview,
     healthz,
+    knowledge_graph,
     publish_preview,
     publish_propagation,
     recovery_proof,
@@ -84,6 +85,19 @@ class CommandCenterApiTests(unittest.TestCase):
         self.assertIn("highest_leverage_command", payload)
         self.assertEqual(len(payload["open_loops"]), 2)
         self.assertEqual(payload["highest_leverage_command"], "cmd-restrict-2")
+
+    def test_knowledge_graph_payload_shape(self) -> None:
+        payload = knowledge_graph()
+        self.assertIn("nodes", payload)
+        self.assertIn("edges", payload)
+        self.assertIn("stats", payload)
+        self.assertGreater(payload["stats"]["objects"], 0)
+        self.assertGreater(payload["stats"]["evidence"], 0)
+        self.assertGreater(payload["stats"]["audiences"], 0)
+        node_kinds = {node["kind"] for node in payload["nodes"]}
+        edge_kinds = {edge["kind"] for edge in payload["edges"]}
+        self.assertTrue({"object", "evidence", "audience"}.issubset(node_kinds))
+        self.assertTrue({"cites", "serves"}.issubset(edge_kinds))
 
 
 if __name__ == "__main__":

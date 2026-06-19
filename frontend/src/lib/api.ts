@@ -49,3 +49,37 @@ export async function fetchCommandCenter(): Promise<CommandCenterSurface> {
   if (!res.ok) throw new Error(`API ${res.status}`)
   return res.json()
 }
+
+export type GraphNodeKind = 'object' | 'evidence' | 'audience'
+
+export interface KnowledgeGraphNode {
+  id: string
+  kind: GraphNodeKind
+  label: string
+  object_type?: string
+  lifecycle_state?: string
+  summary?: string
+  source_type?: string
+  freshness?: string
+  source_ref?: string
+  visibility?: string
+  is_global?: boolean
+}
+
+export interface KnowledgeGraphEdge {
+  source: string
+  target: string
+  kind: 'cites' | 'serves' | 'escalates_to'
+}
+
+export interface KnowledgeGraph {
+  nodes: KnowledgeGraphNode[]
+  edges: KnowledgeGraphEdge[]
+  stats: { objects: number; evidence: number; audiences: number; edges: number }
+}
+
+export async function fetchKnowledgeGraph(): Promise<KnowledgeGraph> {
+  const res = await fetch('/api/knowledge-graph')
+  if (!res.ok) throw new Error(`API ${res.status}`)
+  return res.json()
+}

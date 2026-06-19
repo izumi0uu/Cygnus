@@ -3,37 +3,51 @@ import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { X } from 'lucide-react'
 import ForceGraph2D from 'react-force-graph-2d'
-import { fetchCommandCenter, type CommandCenterSurface, type PriorityItem } from '@/lib/api'
+import { fetchKnowledgeGraph, type KnowledgeGraph, type KnowledgeGraphNode } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { useVocab } from '@/lib/vocab'
-import { CmdButton } from '@/components/CmdButton'
 import { PageSkeleton } from '@/components/Skeleton'
 import { useFocusTrap } from '@/lib/useFocusTrap'
 
-const HEX: Record<string, string> = { urgent: '#e5484d', high: '#f76808', medium: '#e8930c', low: '#185ee0' }
-const RANK: Record<string, number> = { urgent: 3, high: 2, medium: 1, low: 0 }
-const OBJR: Record<string, number> = { urgent: 9, high: 7, medium: 6, low: 5 }
+// Object-type → node color (stays within the Blue DNA palette).
+const OBJ_COLOR: Record<string, string> = {
+  answer_card: '#185ee0',
+  policy_rule: '#30a46c',
+  known_issue_page: '#e5484d',
+  troubleshooting_flow: '#f76808',
+  escalation_route: '#e8930c',
+}
+// Evidence source-type → node color.
+const EV_COLOR: Record<string, string> = {
+  help_center: '#185ee0',
+  internal_sop: '#30a46c',
+  release_note: '#e8930c',
+  incident_update: '#e5484d',
+  resolved_ticket: '#7b828f',
+  chat_transcript: '#aab0bd',
+}
 const C_AUD = '#7b828f'
-const C_SURF = '#aab0bd'
-const RTC: Record<string, string> = { source_blindness: '#e5484d', drift: '#f76808', audience_mismatch: '#e8930c', ticket_pressure: '#185ee0', policy_conflict: '#e5484d', owner_gap: '#e8930c' }
+// Edge styling per relationship kind.
+const EDGE_STYLE: Record<string, { color: string; width: number; dashed?: boolean }> = {
+  cites: { color: 'rgba(24,94,224,0.35)', width: 1 },
+  serves: { color: 'rgba(123,130,143,0.28)', width: 1, dashed: true },
+  escalates_to: { color: 'rgba(231,72,77,0.5)', width: 2 },
+}
 
 type GNode = {
   id: string
-  kind: 'object' | 'audience' | 'surface' | 'risktype'
+  kind: 'object' | 'evidence' | 'audience'
   name: string
   r: number
   color: string
-  objType?: string
-  urgency?: string
-  item?: PriorityItem
+  node?: KnowledgeGraphNode
   x?: number
   y?: number
 }
 
 export default function KnowledgeObjects() {
   const { t, i18n } = useTranslation()
-  const v = useVocab()
-  const [data, setData] = useState<CommandCenterSurface | null>(null)
+  const [data, setData] = useState<KnowledgeGraph | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searchParams, setSearchParams] = useSearchParams()
@@ -46,7 +60,7 @@ export default function KnowledgeObjects() {
   const load = () => {
     setLoading(true)
     setError(null)
-    fetchCommandCenter().then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false))
+    fetchKnowledgeGraph().then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false))
   }
   useEffect(load, [])
   useEffect(() => {
@@ -58,48 +72,24 @@ export default function KnowledgeObjects() {
     return () => ro.disconnect()
   }, [data])
 
-  const openRisk = (id: string) =>
-    setSearchParams((p) => { const n = new URLSearchParams(p); n.set('risk', id); return n })
-  const closeRisk = () =>
-    setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('risk'); return n }, { replace: true })
+  const openObject = (id: string) =>
+    setSearchParams((p) => { const n = new URLSearchParams(p); n.set('object', id); return n })
+  const closeObject = () =>
+    setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('object'); return n }, { replace: true })
 
   const graph = useMemo(() => {
-    if (!data) return { nodes: [] as GNode[], links: [] as { source: string; target: string }[] }
-    const nodes = new Map<string, GNode>()
-    const links: { source: string; target: string }[] = []
-    const seen = new Set<string>()
-    const objMost = new Map<string, PriorityItem>()
-    for (const it of data.priority_stack) {
-      const c = objMost.get(it.object_ref)
-      if (!c || (RANK[it.urgency] ?? 0) > (RANK[c.urgency] ?? 0)) objMost.set(it.object_ref, it)
-    }
-    for (const it of data.priority_stack) {
-      const oid = 'o:' + it.object_ref
-      if (!nodes.has(oid)) {
-        const top = objMost.get(it.object_ref)!
-        nodes.set(oid, { id: oid, kind: 'object', name: it.object_ref, r: OBJR[top.urgency] ?? 5, color: HEX[top.urgency] ?? '#185ee0', objType: it.object_type, urgency: top.urgency, item: top })
+    if (!data) return { nodes: [] as GNode[], links: [] as { source: string; target: string; kind: string }[] }
+    const nodes: GNode[] = data.nodes.map((n) => {
+      if (n.kind === 'object') {
+        return { id: n.id, kind: 'object', name: n.label, r: 9, color: OBJ_COLOR[n.object_type ?? ''] ?? '#185ee0', node: n }
       }
-      const rid = 'r:' + it.risk_type
-      if (!nodes.has(rid)) nodes.set(rid, { id: rid, kind: 'risktype', name: v.riskType(it.risk_type), r: 5, color: RTC[it.risk_type] ?? '#94a3b8' })
-      const rk = oid + '>' + rid
-      if (!seen.has(rk)) { seen.add(rk); links.push({ source: oid, target: rid }) }
-      it.audience_labels.forEach((lab, idx) => {
-        const aid = 'a:' + lab
-        if (!nodes.has(aid)) {
-          const a = it.affected_audiences[idx]
-          nodes.set(aid, { id: aid, kind: 'audience', name: a ? v.audienceFacets(a).join('·') || v.visibility(a.visibility) : lab, r: 5, color: C_AUD })
-        }
-        const k = oid + '>' + aid
-        if (!seen.has(k)) { seen.add(k); links.push({ source: oid, target: aid }) }
-      })
-      it.affected_surfaces.forEach((s) => {
-        const sid = 's:' + s
-        if (!nodes.has(sid)) nodes.set(sid, { id: sid, kind: 'surface', name: v.surface(s), r: 4, color: C_SURF })
-        const k = oid + '>' + sid
-        if (!seen.has(k)) { seen.add(k); links.push({ source: oid, target: sid }) }
-      })
-    }
-    return { nodes: [...nodes.values()], links }
+      if (n.kind === 'evidence') {
+        return { id: n.id, kind: 'evidence', name: n.label, r: 6, color: EV_COLOR[n.source_type ?? ''] ?? '#aab0bd', node: n }
+      }
+      return { id: n.id, kind: 'audience', name: n.visibility === 'external' ? 'EXT' : 'INT', r: 5, color: C_AUD, node: n }
+    })
+    const links = data.edges.map((e) => ({ source: e.source, target: e.target, kind: e.kind }))
+    return { nodes, links }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, i18n.language])
 
@@ -113,25 +103,25 @@ export default function KnowledgeObjects() {
     )
   if (!data) return null
 
-  const selectedId = searchParams.get('risk')
-  const selected = selectedId ? data.priority_stack.find((it) => it.risk_id === selectedId) ?? null : null
+  const selectedId = searchParams.get('object')
+  const selected = selectedId ? data.nodes.find((n) => n.id === selectedId && n.kind === 'object') ?? null : null
 
   const drawNode = (node: any, ctx: CanvasRenderingContext2D, scale: number) => {
     const r = node.r ?? 5
     ctx.beginPath()
     ctx.arc(node.x, node.y, r, 0, 2 * Math.PI)
-    if (node.kind === 'risktype') {
+    if (node.kind === 'audience') {
       ctx.fillStyle = '#ffffff'; ctx.fill()
-      ctx.lineWidth = 2.5 / scale; ctx.strokeStyle = node.color; ctx.stroke()
+      ctx.lineWidth = 2 / scale; ctx.strokeStyle = node.color; ctx.stroke()
     } else {
       ctx.fillStyle = node.color; ctx.fill()
       if (node.kind === 'object') { ctx.lineWidth = 2 / scale; ctx.strokeStyle = '#ffffff'; ctx.stroke() }
     }
-    const fontSize = 11 / scale
+    const fontSize = (node.kind === 'object' ? 11 : 10) / scale
     ctx.font = `${node.kind === 'object' ? 600 : 400} ${fontSize}px Inter, sans-serif`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'top'
-    ctx.fillStyle = node.kind === 'object' ? '#1a1d24' : node.kind === 'risktype' ? node.color : '#7b828f'
+    ctx.fillStyle = node.kind === 'object' ? '#1a1d24' : node.kind === 'audience' ? node.color : '#7b828f'
     ctx.fillText(node.name, node.x, node.y + r + 2 / scale)
   }
   const drawHit = (node: any, color: string, ctx: CanvasRenderingContext2D) => {
@@ -144,10 +134,9 @@ export default function KnowledgeObjects() {
   return (
     <>
       <div className="mb-3 flex flex-wrap items-center gap-4">
-        <Legend color={HEX.urgent} ring label={t('kg.object')} extra={t('kg.objectNote')} />
-        <Legend color={HEX.urgent} hollow label={t('kg.riskType')} />
-        <Legend color={C_AUD} label={t('kg.audience')} />
-        <Legend color={C_SURF} label={t('kg.surface')} />
+        <Legend color="#185ee0" ring label={t('kg.object')} extra={t('kg.objectNote')} />
+        <Legend color="#30a46c" label={t('kg.evidence')} />
+        <Legend color={C_AUD} hollow label={t('kg.audience')} />
         <span className="ml-auto font-mono text-[11px] text-faint">{t('kg.hint')}</span>
       </div>
 
@@ -161,18 +150,19 @@ export default function KnowledgeObjects() {
             backgroundColor="rgba(0,0,0,0)"
             nodeLabel="name"
             nodeRelSize={5}
-            linkColor={() => 'rgba(123,130,143,0.22)'}
-            linkWidth={1}
+            linkColor={(l: any) => EDGE_STYLE[l.kind]?.color ?? 'rgba(123,130,143,0.22)'}
+            linkWidth={(l: any) => EDGE_STYLE[l.kind]?.width ?? 1}
+            linkLineDash={(l: any) => (EDGE_STYLE[l.kind]?.dashed ? [4, 3] : null)}
             cooldownTicks={120}
             onEngineStop={() => fgRef.current?.zoomToFit(400, 60)}
             nodeCanvasObject={drawNode}
             nodePointerAreaPaint={drawHit}
-            onNodeClick={(node: any) => { if (node.kind === 'object' && node.item) openRisk(node.item.risk_id) }}
+            onNodeClick={(node: any) => { if (node.kind === 'object' && node.node) openObject(node.node.id) }}
           />
         )}
       </div>
 
-      {selected && <Drawer item={selected} onClose={closeRisk} />}
+      {selected && <Drawer node={selected} edges={data.edges} nodes={data.nodes} onClose={closeObject} />}
     </>
   )
 }
@@ -187,34 +177,65 @@ function Legend({ color, label, ring, hollow, extra }: { color: string; label: s
   )
 }
 
-function Drawer({ item, onClose }: { item: PriorityItem; onClose: () => void }) {
+function Drawer({ node, edges, nodes, onClose }: { node: KnowledgeGraphNode; edges: KnowledgeGraph['edges']; nodes: KnowledgeGraphNode[]; onClose: () => void }) {
   const { t } = useTranslation()
   const v = useVocab()
   const ref = useRef<HTMLElement>(null)
   useFocusTrap(ref, true, onClose)
-  const HEATCHIP: Record<string, string> = { urgent: 'chip-urgent', high: 'chip-high', medium: 'chip-medium', low: 'chip' }
+  // Resolve this object's neighbours via its edges (both directions).
+  const neighbourIds = new Set<string>()
+  for (const e of edges) {
+    if (e.source === node.id) neighbourIds.add(e.target)
+    if (e.target === node.id) neighbourIds.add(e.source)
+  }
+  const neighbours = nodes.filter((n) => neighbourIds.has(n.id))
+  const citedEvidence = neighbours.filter((n) => n.kind === 'evidence')
+  const audiences = neighbours.filter((n) => n.kind === 'audience')
+  const linkedObjects = neighbours.filter((n) => n.kind === 'object')
+  const LC: Record<string, string> = { published: 'chip', in_review: 'chip-high', draft: 'chip-medium' }
   return (
     <>
       <div className="fixed inset-0 z-40 bg-foreground/25" onClick={onClose} />
       <aside ref={ref} role="dialog" aria-modal="true" aria-labelledby="ko-drawer-title" tabIndex={-1} className="fixed right-0 top-0 z-50 flex h-full w-full max-w-[440px] flex-col overflow-y-auto border-l border-border bg-card p-5 shadow-soft outline-none">
         <div className="flex items-center gap-2">
-          <span className={`chip ${HEATCHIP[item.urgency]}`}>{t(`urgency.${item.urgency}`)}</span>
-          <span className="rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">{v.objectType(item.object_type)}</span>
+          <span className="rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">{v.objectType(node.object_type ?? '')}</span>
+          <span className={`chip ${LC[node.lifecycle_state ?? ''] ?? 'chip'}`}>{node.lifecycle_state}</span>
           <button className="ml-auto flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground hover:bg-muted" aria-label={t('detail.close')} onClick={onClose}><X size={15} /></button>
         </div>
-        <h2 id="ko-drawer-title" className="mt-3 text-lg font-bold leading-tight">{item.title}</h2>
-        <div className="mt-1 font-mono text-[11px] text-faint">{item.object_ref} · {v.riskType(item.risk_type)}</div>
-        <Section label={t('detail.whyNow')}><p className="text-sm leading-relaxed text-muted-foreground">{item.why_now_summary}</p></Section>
+        <h2 id="ko-drawer-title" className="mt-3 text-lg font-bold leading-tight">{node.label}</h2>
+        <div className="mt-1 font-mono text-[11px] text-faint">{node.id}</div>
+        <Section label={t('detail.summary')}>
+          <p className="text-sm leading-relaxed text-muted-foreground">{node.summary}</p>
+        </Section>
+        <Section label={t('detail.evidence')}>
+          {citedEvidence.length ? (
+            <ul className="space-y-2">
+              {citedEvidence.map((e) => (
+                <li key={e.id} className="flex items-start gap-2">
+                  <span className="mt-1 h-2 w-2 shrink-0 rounded-full" style={{ background: EV_COLOR[e.source_type ?? ''] ?? '#aab0bd' }} />
+                  <div>
+                    <div className="text-sm font-medium">{e.label}</div>
+                    <div className="font-mono text-[10px] text-faint">{e.source_type} · {e.freshness} · {e.source_ref}</div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : <p className="text-sm text-faint">{t('state.empty')}</p>}
+        </Section>
         <Section label={t('detail.audiences')}>
-          <div className="flex flex-wrap gap-1.5">{item.affected_audiences.map((a, i) => <span key={i} className="chip">{v.audienceSegment(a)}</span>)}</div>
+          {audiences.length ? (
+            <div className="flex flex-wrap gap-1.5">
+              {audiences.map((a) => <span key={a.id} className="chip">{v.visibility(a.visibility ?? '')}</span>)}
+            </div>
+          ) : <p className="text-sm text-faint">{t('state.empty')}</p>}
         </Section>
-        <Section label={t('detail.surfaces')}>
-          <div className="flex flex-wrap gap-1.5">{item.affected_surfaces.map((s) => <span key={s} className="chip">{v.surface(s)}</span>)}</div>
-        </Section>
-        <Section label={t('detail.commands')}>
-          <div className="flex flex-wrap gap-2">{item.command_actions.map((c) => <CmdButton key={c} command={c} />)}</div>
-          <p className="mt-2 font-mono text-[10px] leading-relaxed text-faint">{t('detail.commandNote')}</p>
-        </Section>
+        {linkedObjects.length > 0 && (
+          <Section label={t('detail.linkedObjects')}>
+            <div className="flex flex-wrap gap-1.5">
+              {linkedObjects.map((o) => <span key={o.id} className="chip">{o.label}</span>)}
+            </div>
+          </Section>
+        )}
       </aside>
     </>
   )

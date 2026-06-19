@@ -7,7 +7,12 @@ from cygnus.api.app import (
     downstream_reality_check,
     governance_overview,
     healthz,
+    publish_preview,
+    publish_propagation,
+    recovery_proof,
     recovery_window,
+    review_intake,
+    review_queue_item,
 )
 
 
@@ -22,6 +27,40 @@ class CommandCenterApiTests(unittest.TestCase):
         self.assertIn("available_commands", payload)
         self.assertEqual(len(payload["priority_stack"]), 4)
         self.assertEqual(payload["situation_frame"]["urgent_items"], 1)
+
+    def test_review_intake_payload_shape(self) -> None:
+        payload = review_intake()
+        self.assertIn("review_home", payload)
+        self.assertIn("pressure_surface", payload)
+        self.assertIn("source_blindness_surface", payload)
+        self.assertEqual(payload["review_home"]["surface_id"], "review-home")
+        self.assertEqual(payload["pressure_surface"]["surface_id"], "review-pressure")
+        self.assertEqual(payload["source_blindness_surface"]["surface_id"], "source-health")
+
+    def test_review_queue_item_returns_intake_drilldown_surface(self) -> None:
+        payload = review_queue_item("refund-enterprise-rewrite")
+        self.assertEqual(payload["surface_id"], "review-queue-drilldown")
+        self.assertEqual(payload["selected_card"]["object_ref"], "refund-enterprise-rewrite")
+        self.assertIn("queue_surface", payload)
+
+    def test_publish_preview_returns_blast_radius_surface(self) -> None:
+        payload = publish_preview()
+        self.assertEqual(payload["surface_id"], "publish-preview")
+        self.assertIn("selected_preview", payload)
+        self.assertIn("situation_frame", payload)
+
+    def test_publish_propagation_returns_supporting_surface_theater(self) -> None:
+        payload = publish_propagation("refund-enterprise-rewrite", action_key="hold_external")
+        self.assertEqual(payload["surface_id"], "publish-propagation")
+        self.assertEqual(payload["selected_action"], "hold_external")
+        self.assertIn("propagation_ledger", payload)
+
+    def test_recovery_proof_returns_frontline_reality_check(self) -> None:
+        payload = recovery_proof("billing-verification-w25")
+        self.assertEqual(payload["surface_id"], "recovery-proof")
+        self.assertEqual(payload["selected_card"]["object_ref"], "billing-verification-w25")
+        self.assertIn("recovery_window", payload)
+        self.assertIn("signals", payload)
 
     def test_downstream_reality_check_payload_shape(self) -> None:
         payload = downstream_reality_check("cmd-publish-1")

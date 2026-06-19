@@ -11,7 +11,7 @@ from cygnus.review.fixtures import sample_review_bundles
 from cygnus.review.providers import build_review_command_surface_from_bundles
 from cygnus.review.queue import ReviewQueueSurface, build_review_queue_surface
 from cygnus.review.service import ProposalBundle, derive_owner_state
-from cygnus.substrate.compilation_plan import CompilationProposal, UrgencyLevel
+from cygnus.substrate.compilation_plan import CompilationProposal, EvidenceSufficiency, UrgencyLevel
 
 
 def _normalize(values: Iterable[str] | None, *, label: str) -> tuple[str, ...]:
@@ -44,6 +44,8 @@ class ReviewPressureLine:
     trigger_signals: tuple[str, ...]
     affected_audience_labels: tuple[str, ...]
     affected_surfaces: tuple[str, ...]
+    evidence_sufficiency: EvidenceSufficiency
+    visibility_consequence: str
     impact_summary: str
     command_actions: tuple[str, ...] = field(default_factory=tuple)
 
@@ -54,6 +56,8 @@ class ReviewPressureLine:
             raise ValueError("title must not be blank")
         if self.queue_owner is not None and not self.queue_owner.strip():
             raise ValueError("queue_owner must not be blank when provided")
+        if not self.visibility_consequence.strip():
+            raise ValueError("visibility_consequence must not be blank")
         if not self.impact_summary.strip():
             raise ValueError("impact_summary must not be blank")
         object.__setattr__(self, "trigger_signals", _normalize(self.trigger_signals, label="trigger signal"))
@@ -75,6 +79,8 @@ class ReviewPressureLine:
             "trigger_signals": list(self.trigger_signals),
             "affected_audience_labels": list(self.affected_audience_labels),
             "affected_surfaces": list(self.affected_surfaces),
+            "evidence_sufficiency": self.evidence_sufficiency.value,
+            "visibility_consequence": self.visibility_consequence,
             "impact_summary": self.impact_summary,
             "command_actions": list(self.command_actions),
         }
@@ -268,6 +274,12 @@ def _line_from_bundle(bundle: ProposalBundle) -> ReviewPressureLine:
         trigger_signals=signal.trigger_signals,
         affected_audience_labels=audience_labels,
         affected_surfaces=affected_surfaces,
+        evidence_sufficiency=proposal.evidence_sufficiency,
+        visibility_consequence=_visibility_consequence(
+            audiences=signal.affected_audiences,
+            surfaces=affected_surfaces,
+            evidence_sufficiency=proposal.evidence_sufficiency,
+        ),
         impact_summary=_impact_summary(
             object_type=proposal.object_type,
             audiences=audience_labels,
@@ -298,6 +310,25 @@ def _impact_summary(
     return (
         f"Suggested {object_type.value} spans {len(audiences)} audience lane(s) "
         f"across {surface_phrase}."
+    )
+
+
+def _visibility_consequence(
+    *,
+    audiences: tuple[AudienceFilter, ...],
+    surfaces: tuple[str, ...],
+    evidence_sufficiency: EvidenceSufficiency,
+) -> str:
+    external_count = sum(1 for audience in audiences if audience.visibility.value == "external")
+    surface_phrase = ", ".join(surfaces)
+    if external_count:
+        return (
+            f"{external_count} external audience lane(s) may continue receiving unsupported guidance "
+            f"across {surface_phrase} while evidence is {evidence_sufficiency.value}."
+        )
+    return (
+        f"Pressure is currently contained to internal surfaces ({surface_phrase}), "
+        f"but evidence is still {evidence_sufficiency.value}."
     )
 
 

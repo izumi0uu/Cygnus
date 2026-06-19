@@ -6,6 +6,7 @@ from cygnus.review import (
     OwnerState,
     ReviewHomeQuery,
     ReviewQueueDrilldownQuery,
+    get_pressure_intake_review_queue_drilldown,
     get_review_queue_drilldown,
 )
 
@@ -46,3 +47,12 @@ class ReviewDrilldownTests(unittest.TestCase):
                     home_query=ReviewHomeQuery(owner_state=OwnerState.UNASSIGNED),
                 )
             )
+
+
+class PressureIntakeDrilldownTests(unittest.TestCase):
+    def test_pressure_intake_drilldown_returns_governance_first_context(self) -> None:
+        payload = get_pressure_intake_review_queue_drilldown("incident-sync-eu-billing").to_dict()
+
+        self.assertEqual(payload["selected_card"]["object_ref"], "incident-sync-eu-billing")
+        self.assertEqual(payload["selected_detail"]["risk_frame"]["risk_type"], "source_blindness")
+        self.assertIn("help_center", payload["selected_detail"]["audience_impact"]["impacted_surfaces"])

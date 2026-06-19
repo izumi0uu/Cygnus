@@ -13,6 +13,19 @@ from cygnus.review.drift import (
 from cygnus.review.drilldown import ReviewQueueDrilldownQuery, ReviewQueueDrilldownSurface, get_review_queue_drilldown
 from cygnus.review.fixtures import sample_review_bundles, sample_review_command_brief, sample_review_command_surface
 from cygnus.review.home import ReviewHomeQuery, get_review_home_surface
+from cygnus.review.intake import (
+    PressureIntakeBundle,
+    PressureIntakeRecord,
+    PressureIntakeSurfaces,
+    PressureSignalType,
+    build_pressure_intake_surfaces,
+    compile_pressure_intake,
+    compile_pressure_intake_bundle,
+    compile_pressure_proposal_bundles,
+    get_pressure_intake_review_brief_surface,
+    get_pressure_intake_review_queue_drilldown,
+    sample_pressure_intake_records,
+)
 from cygnus.review.item import AudienceImpact, EvidenceStrength, ReviewItemDetailSurface, RiskFrame, build_review_item_detail_surface
 from cygnus.review.pressure import (
     PressureCommand,
@@ -63,6 +76,10 @@ __all__ = [
     "OwnerState",
     "PressureCommand",
     "PressureCommandType",
+    "PressureIntakeBundle",
+    "PressureIntakeRecord",
+    "PressureIntakeSurfaces",
+    "PressureSignalType",
     "PressureMutationResult",
     "PriorityStackCard",
     "QueueCommand",
@@ -108,6 +125,13 @@ __all__ = [
     "get_review_queue_drilldown",
     "build_review_command_surface",
     "build_review_command_surface_from_bundles",
+    "build_pressure_intake_surfaces",
+    "compile_pressure_intake",
+    "compile_pressure_intake_bundle",
+    "compile_pressure_proposal_bundles",
+    "get_pressure_intake_review_brief_surface",
+    "get_pressure_intake_review_queue_drilldown",
+    "sample_pressure_intake_records",
     "ProposalBundle",
     "ReviewSignal",
     "assemble_review_command_brief",

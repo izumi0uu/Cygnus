@@ -65,8 +65,8 @@ just a high-level recap.
 
 # What to KEEP from the source (do not lose these)
 - Specific numbers: thresholds, dosages, timeframes, dimensions, distances, percentages.
-- Named regulations, laws, articles, code references (e.g. "Điều 5 Luật PCCC 2001",
-  "ISO 27001 §A.12.1", "Section 3.2 of the SOP").
+- Named regulations, laws, articles, code references (e.g. "Article 5 of the Fire
+  Prevention and Fighting Law 2001", "ISO 27001 §A.12.1", "Section 3.2 of the SOP").
 - Equipment names, model numbers, product specs, serial ranges.
 - Procedure steps in the order they appear, with the actual actions (not "follow
   the procedure" but "1. cut power 2. evacuate 3. call 114").
@@ -99,8 +99,8 @@ the body content. (Slugs are still in Latin characters — see slug rules below.
   `entity/jane-doe`, `concept/expense-approval`, `topic/fire-safety`,
   `source/<short-doc-slug>`.
 - Slugs must be in English/Latin characters regardless of document language
-  (transliterate or translate key words). Example: for "Bình chữa cháy" use
-  `concept/binh-chua-chay` or `concept/fire-extinguisher`.
+  (transliterate or translate key words). Example: for "Fire extinguisher" use
+  `concept/fire-extinguisher`.
 - Pick stable, generalizable slugs future sources will naturally update.
 
 # Wikilinks
@@ -134,22 +134,22 @@ from the source. Follow this structure:
   - `source` pages: at least 100 words summarizing key facts and links to all
     entity/concept pages it touches.
 
-  ## BAD example — this is what NOT to produce
-  This is a summary, not a wiki page. It loses every specific from the source:
+  ## BAD example — what NOT to produce
+  This is a summary, not a wiki page. It loses every critical detail from the source:
   ```
-  # Trách nhiệm PCCC của hộ gia đình
+  # Fire safety responsibilities of a household
 
-  Quy định trách nhiệm của chủ hộ và các thành viên trong gia đình.
+  Defines the responsibilities of the household head and family members.
 
-  ## Trách nhiệm của chủ hộ
-  - Đôn đốc thành viên thực hiện quy định pháp luật về PCCC.
-  - Kiểm tra, khắc phục nguy cơ cháy nổ.
-  - Phối hợp với cơ quan chức năng và các hộ gia đình khác.
+  ## Responsibilities of the household head
+  - Tell members to follow fire safety rules.
+  - Inspect and mitigate fire and explosion risks.
+  - Coordinate with authorities and other households.
 
-  ## Trách nhiệm của cá nhân
-  - Chấp hành nội quy PCCC.
-  - Nắm vững kiến thức chữa cháy.
-  - Đảm bảo an toàn khi sử dụng nguồn lửa, nguồn nhiệt.
+  ## Responsibilities of individual members
+  - Follow fire safety rules.
+  - Understand firefighting basics.
+  - Stay safe when using flames or heat sources.
   ```
   Why this is bad: it's just bullet headlines. No legal references, no specific
   numbers, no procedure steps, no equipment names. A person reading it later
@@ -157,73 +157,73 @@ from the source. Follow this structure:
 
   ## GOOD example — preserves substance from the source
   ```
-  # Trách nhiệm PCCC của hộ gia đình
+  # Fire safety responsibilities of a household
 
-  Mỗi hộ gia đình tại Việt Nam có trách nhiệm pháp lý trong [[concept/phong-chay-chua-chay|công
-  tác PCCC]] theo Điều 5 [[entity/luat-pccc-2001|Luật PCCC 2001]] (sửa đổi bổ sung 2013) và
-  Nghị định 136/2020/NĐ-CP. Trách nhiệm được phân chia giữa chủ hộ — người chịu trách nhiệm
-  pháp lý cao nhất — và các thành viên, tạo thành lớp phòng vệ đầu tiên trước khi cần đến
-  [[entity/co-quan-pccc|cơ quan PCCC chuyên trách]].
+  Every household has a legal duty within [[concept/fire-safety|fire safety work]] under
+  Article 5 of [[entity/fire-prevention-and-fighting-law-2001|the Fire Prevention and
+  Fighting Law 2001]] (as amended in 2013) and Decree 136/2020/ND-CP. Responsibility is
+  split between the household head — the primary legal holder — and the members, forming
+  the first line of defense before professional fire services are needed.
 
-  ## Trách nhiệm của chủ hộ
+  ## Responsibilities of the household head
 
-  Chủ hộ chịu trách nhiệm pháp lý chính về an toàn PCCC tại nơi cư trú và phải hoàn thành
-  ba nhóm nghĩa vụ sau:
+  The household head is primarily responsible for fire safety at home and must complete
+  three groups of duties:
 
-  ### 1. Tuyên truyền và đôn đốc tuân thủ pháp luật
+  ### 1. Educate and enforce compliance
 
-  Chủ hộ phải tổ chức cho mọi thành viên đủ tuổi (≥10 tuổi) học và hiểu các quy định
-  PCCC cơ bản. Tài liệu khuyến nghị:
-  - Tổ chức ít nhất 1 buổi phổ biến nội bộ mỗi quý.
-  - Diễn tập [[concept/thoat-hiem|thoát hiểm]] 6 tháng/lần, đặc biệt cho trẻ nhỏ và
-    người cao tuổi.
-  - Dạy trẻ em số điện thoại 114 (cứu hỏa), đường thoát hiểm chính-phụ, và kỹ thuật
-    bò thấp khi có khói.
+  The household head must make sure every member old enough (10+) understands the basic
+  fire safety rules. Recommended practices:
+  - Hold at least one internal briefing each quarter.
+  - Run [[concept/emergency-evacuation|evacuation]] drills every 6 months, especially for
+    children and older adults.
+  - Teach children the 114 emergency number, primary and secondary escape routes, and the
+    low-crawl technique in smoke.
 
-  ### 2. Kiểm tra và khắc phục nguy cơ cháy nổ
+  ### 2. Inspect and mitigate fire and explosion risks
 
-  Chủ hộ phải kiểm tra định kỳ (khuyến nghị hàng tuần) các nguồn nguy cơ thường gặp:
+  The household head should inspect common hazards regularly (weekly is recommended):
 
-  | Nguồn nguy cơ | Dấu hiệu cần khắc phục |
+  | Hazard source | Warning signs |
   |---|---|
-  | [[concept/he-thong-dien|Hệ thống điện]] | Dây nóng bất thường, ổ cắm quá tải, thiết bị tự ngắt |
-  | [[entity/binh-gas|Bình gas LPG]] | Van rò mùi, ống dẫn nứt, bình quá hạn (3-5 năm) |
-  | Vật liệu dễ cháy | Xăng/dầu gần nguồn nhiệt, giấy/vải gần bếp |
+  | [[concept/electrical-system|Electrical system]] | Unusual heat, overloaded outlets, devices tripping |
+  | [[entity/lpg-cylinder|LPG cylinder]] | Smell of a leak, cracked hose, expired cylinder (3-5 years) |
+  | Flammable materials | Gasoline/oil near heat sources, paper/fabric near the stove |
 
-  Khi phát hiện nguy cơ, phải khắc phục trong **24 giờ** hoặc cách ly nguồn nguy cơ
-  cho đến khi xử lý xong.
+  If a hazard is found, resolve it within **24 hours** or isolate it until it is safe.
 
-  ### 3. Phối hợp với cơ quan chức năng
+  ### 3. Coordinate with authorities
 
-  Khi xảy ra cháy, chủ hộ thực hiện theo trình tự:
-  1. Báo ngay [[entity/co-quan-pccc|cơ quan PCCC]] qua số **114** — cung cấp địa chỉ
-     chính xác, số tầng, có người mắc kẹt hay không.
-  2. Sơ tán toàn bộ thành viên ra điểm tập kết đã thống nhất (khuyến nghị cách nhà ≥20m).
-  3. Triển khai [[concept/binh-chua-chay|bình chữa cháy xách tay]] nếu đám cháy còn
-     nhỏ — "giai đoạn vàng" thường <2 phút đầu.
-  4. Cung cấp thông tin về vị trí nguồn cháy, vật liệu cháy, và người còn trong nhà
-     cho lực lượng đến hiện trường.
+  When a fire occurs, the household head should follow this sequence:
+  1. Call [[entity/fire-department|the fire department]] immediately at **114** and provide
+     the exact address, number of floors, and whether anyone is trapped.
+  2. Evacuate everyone to the agreed assembly point (recommended distance: at least 20 m
+     from the house).
+  3. Deploy a [[concept/portable-fire-extinguisher|portable fire extinguisher]] if the fire
+     is still small — the "golden window" is usually the first 2 minutes.
+  4. Share the fire location, burning materials, and any remaining occupants with arriving
+     responders.
 
-  ## Trách nhiệm của từng thành viên
+  ## Responsibilities of each member
 
-  Mọi thành viên (kể cả trẻ em theo độ tuổi) phải:
-  - Chấp hành [[concept/noi-quy-pccc|nội quy PCCC]] của hộ và khu dân cư.
-  - Biết sử dụng thành thạo [[concept/binh-chua-chay|bình chữa cháy]] xách tay loại
-    ABC (phổ biến nhất cho hộ gia đình) và [[concept/men-chua-chay|mền chữa cháy]].
-  - Tự kiểm tra an toàn khi rời khỏi khu vực có [[concept/nguon-lua-nguon-nhiet|nguồn
-    lửa, nguồn nhiệt]] — tắt bếp, rút phích cắm bàn ủi, kiểm tra van gas.
+  Every member (including children, depending on age) must:
+  - Follow the household and neighborhood [[concept/fire-safety-rules|fire safety rules]].
+  - Know how to use a standard ABC [[concept/portable-fire-extinguisher|portable fire extinguisher]]
+    and a [[concept/fire-blanket|fire blanket]].
+  - Check for safety when leaving any area with [[concept/flame-and-heat-source|flame or heat
+    sources]]: turn off the stove, unplug the iron, and check the gas valve.
 
-  ## Xem thêm
+  ## See also
 
-  - [[concept/phong-chay-chua-chay]]
-  - [[concept/bien-phap-phong-chay-tai-nha]]
-  - [[concept/xu-ly-su-co-chay]]
-  - [[entity/luat-pccc-2001]]
+  - [[concept/fire-prevention-and-fighting]]
+  - [[concept/home-fire-prevention]]
+  - [[concept/fire-incident-response]]
+  - [[entity/fire-prevention-and-fighting-law-2001]]
   ```
-  Why this is good: it preserves the legal references, specific numbers (10 tuổi,
-  6 tháng/lần, 24 giờ, 20m, 2 phút, 114), equipment specifics (bình ABC, mền chữa
-  cháy), procedure ordering, edge cases (trẻ nhỏ và người cao tuổi), and links
-  every concept and entity to its dedicated page.
+  Why this is good: it preserves the legal references, specific numbers (age 10+,
+  every 6 months, 24 hours, 20 m, 2 minutes, 114), equipment specifics (ABC extinguisher,
+  fire blanket), procedure ordering, edge cases (children and older adults), and links
+  throughout.
 
 # Image markers
 The source text may contain image references in this exact form:

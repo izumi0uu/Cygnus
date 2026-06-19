@@ -527,7 +527,7 @@ async def delete_skill_task(ctx: dict, skill_id: str):
 
 async def cleanup_temp_uploads_cron(ctx: dict):
     """
-    Cronjob: Quét và dọn các file rác trong temp_uploads do server crash để lại (cũ hơn 1 giờ).
+    Cronjob: Scan and clean orphaned files in temp_uploads left behind by a server crash (older than 1 hour).
     """
     import os
     import time

@@ -141,7 +141,7 @@ async def check_conflicts(
                     
                     # Prepend standardized contradiction callout directly to the page content markdown
                     pr.content_md = (
-                        f"> [!contradiction] **Mâu thuẫn tri thức phát hiện bởi AI:**\n"
+                        f"> [!contradiction] **AI-detected knowledge contradiction:**\n"
                         f"> {desc}\n\n"
                         f"{pr.content_md}"
                     )

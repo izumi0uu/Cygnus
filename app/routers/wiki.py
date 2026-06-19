@@ -744,7 +744,7 @@ async def get_wiki_hot(
     page = await wiki_service.get_page_by_slug(
         db, wiki_service.HOT_SLUG, scope_type=st, scope_id=sid
     )
-    return {"content_md": page.content_md if page else "*(Briefing Tri Thức Nóng chưa được khởi tạo. Hệ thống sẽ tự động tạo sau lần ingest tiếp theo hoặc khi được kích hoạt)*"}
+    return {"content_md": page.content_md if page else "*(Hot Knowledge Briefing has not been initialized. The system will generate it automatically after the next ingest or when triggered.)*"}
 
 
 @router.post("/wiki/hot/rebuild")

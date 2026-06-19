@@ -1192,27 +1192,30 @@ async def regenerate_hot_cache(
     contradiction_rows = (await session.execute(contradiction_stmt)).all()
 
     # 4. Format context natively (Zero LLM cost fallback)
-    recent_prose = "\n".join(f"- [[{r.slug}|{r.title}]] (Trạng thái: {r.status}, Cập nhật: {r.updated_at.strftime('%Y-%m-%d %H:%M') if r.updated_at else 'N/A'})" for r in recent_rows) if recent_rows else "- Không có cập nhật gần đây."
-    seed_prose = "\n".join(f"- [[{r.slug}|{r.title}]]" for r in seed_rows) if seed_rows else "- Không có trang sơ khởi nào."
+    recent_prose = "\n".join(
+        f"- [[{r.slug}|{r.title}]] (Status: {r.status}, Updated: {r.updated_at.strftime('%Y-%m-%d %H:%M') if r.updated_at else 'N/A'})"
+        for r in recent_rows
+    ) if recent_rows else "- No recent updates."
+    seed_prose = "\n".join(f"- [[{r.slug}|{r.title}]]" for r in seed_rows) if seed_rows else "- No seed pages yet."
     
     contradiction_items = []
     for r in contradiction_rows:
         match = re.search(r">\s*\[!contradiction]\s*(.*?)(?=\n[^>]|\n\n|$)", r.content_md, re.DOTALL | re.IGNORECASE)
-        callout_desc = match.group(1).replace(">", "").strip() if match else "Có mâu thuẫn tri thức được phát hiện."
+        callout_desc = match.group(1).replace(">", "").strip() if match else "A knowledge contradiction was detected."
         contradiction_items.append(f"- [[{r.slug}|{r.title}]]: {callout_desc}")
-    contradiction_prose = "\n".join(contradiction_items) if contradiction_items else "- Không phát hiện mâu thuẫn tri thức nào."
+    contradiction_prose = "\n".join(contradiction_items) if contradiction_items else "- No knowledge contradictions detected."
 
-    new_md = f"""# ⚡ Arkon Briefing Tri Thức Nóng
+    new_md = f"""# ⚡ Arkon Hot Knowledge Briefing
 
-*(Bản tin trạng thái tri thức tự động của hệ thống)*
+*(Auto-generated status briefing for the knowledge system)*
 
-## ⚠️ Mâu thuẫn tri thức đang tồn tại
+## ⚠️ Active knowledge contradictions
 {contradiction_prose}
 
-## 🔄 Tri thức cập nhật gần đây
+## 🔄 Recently updated knowledge
 {recent_prose}
 
-## 🌱 Tri thức sơ khởi (Seed Pages)
+## 🌱 Seed pages
 {seed_prose}
 """
 
@@ -1220,10 +1223,10 @@ async def regenerate_hot_cache(
     if page is None:
         page = WikiPage(
             slug=HOT_SLUG,
-            title="Briefing Tri Thức Nóng",
+            title="Hot Knowledge Briefing",
             status="evergreen",
             content_md=new_md,
-            summary="Bản tin tóm tắt tự động về tri thức và các mâu thuẫn cần giải quyết",
+            summary="Auto-generated briefing of knowledge updates and contradictions to resolve",
             knowledge_type_slugs=[],
             source_ids=[],
             scope_type=scope_type,

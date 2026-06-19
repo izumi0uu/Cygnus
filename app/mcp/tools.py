@@ -352,9 +352,9 @@ def register_tools(mcp: FastMCP):
                 pages_sorted = sorted(obj["pages"])
                 pages_label = ",".join(str(p) for p in pages_sorted[:5])
                 entry = (
-                    f"- 📄 **{title}** (nguyên văn) — {similarity_pct} — trang {pages_label}\n"
+                    f"- 📄 **{title}** (original text) — {similarity_pct} — pages {pages_label}\n"
                     f"  “{obj['preview']}”\n"
-                    f"  _Đọc bản gốc: `get_source_pages(\"{source.id}\", \"{pages_sorted[0]}\")` · "
+                    f"  _Read original: `get_source_pages(\"{source.id}\", \"{pages_sorted[0]}\")` · "
                     f"Link: {_portal_link(source.id)}_"
                 )
             lines.append(entry)

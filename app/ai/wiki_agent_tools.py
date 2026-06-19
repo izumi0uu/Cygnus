@@ -191,7 +191,7 @@ TOOL_SCHEMAS = [
                 "properties": {
                     "entry": {
                         "type": "string",
-                        "description": "Log entry, e.g. 'ingested PCCC guide: +12 pages, ~3 updated'",
+                        "description": "Log entry, e.g. 'ingested fire-safety guide: +12 pages, ~3 updated'",
                     },
                 },
                 "required": ["entry"],

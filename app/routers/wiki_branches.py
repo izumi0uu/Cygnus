@@ -47,16 +47,16 @@ class BranchCreate(BaseModel):
     def name_not_empty(cls, v: str) -> str:
         v = v.strip()
         if not v:
-            raise ValueError("Tên nhánh không được để trống")
+            raise ValueError("Branch name cannot be empty")
         if len(v) > 100:
-            raise ValueError("Tên nhánh không được vượt quá 100 ký tự")
+            raise ValueError("Branch name must not exceed 100 characters")
         return v
 
     @field_validator("scope_type")
     @classmethod
     def scope_known(cls, v: str) -> str:
         if v not in ("global", "department"):
-            raise ValueError("scope_type phải là global hoặc department")
+            raise ValueError("scope_type must be either global or department")
         return v
 
 
@@ -156,7 +156,7 @@ async def create_branch(
 ):
     """Create a new named contribution branch."""
     if not await _can_create_branch(db, user, body.scope_type, body.scope_id):
-        raise HTTPException(403, "Bạn không có quyền đóng góp trong phạm vi này")
+        raise HTTPException(403, "You do not have permission to contribute in this scope")
 
     branch = WikiBranch(
         name=body.name.strip(),
@@ -219,7 +219,7 @@ async def get_branch(
     """Retrieve detailed branch information with associated page drafts."""
     branch = await db.get(WikiBranch, branch_id)
     if not branch:
-        raise HTTPException(404, "Không tìm thấy nhánh đóng góp này")
+        raise HTTPException(404, "Contribution branch not found")
 
     base = await _to_branch_response(db, branch)
 
@@ -247,19 +247,19 @@ async def submit_branch(
     """Submit branch for merge review (draft -> pending_merge)."""
     branch = await db.get(WikiBranch, branch_id)
     if not branch:
-        raise HTTPException(404, "Không tìm thấy nhánh đóng góp")
+        raise HTTPException(404, "Contribution branch not found")
 
     if branch.author_id != user.id and user.role != "admin":
-        raise HTTPException(403, "Chỉ có tác giả của nhánh mới có quyền gửi yêu cầu")
+        raise HTTPException(403, "Only the branch author may submit this request")
 
     if branch.status != "draft":
-        raise HTTPException(400, f"Không thể gửi yêu cầu hợp nhất khi nhánh đang ở trạng thái '{branch.status}'")
+        raise HTTPException(400, f"Cannot submit for merge while the branch is in '{branch.status}' state")
 
     # Verify branch is not empty
     stmt = select(func.count(WikiPageDraft.id)).where(WikiPageDraft.branch_id == branch.id)
     count = (await db.execute(stmt)).scalar_one()
     if count == 0:
-        raise HTTPException(400, "Nhánh đóng góp của bạn đang trống. Vui lòng thêm nháp trang trước khi gửi.")
+        raise HTTPException(400, "Your contribution branch is empty. Add a page draft before submitting.")
 
     # Get associated drafts
     stmt = select(WikiPageDraft).where(WikiPageDraft.branch_id == branch_id)
@@ -290,16 +290,16 @@ async def close_branch(
     """Close/withdraw a branch and withdraw all its drafts."""
     branch = await db.get(WikiBranch, branch_id)
     if not branch:
-        raise HTTPException(404, "Không tìm thấy nhánh đóng góp")
+        raise HTTPException(404, "Contribution branch not found")
 
     is_author = branch.author_id == user.id
     is_reviewer = await _can_review_branch(db, user, branch.scope_type, branch.scope_id)
 
     if not is_author and not is_reviewer:
-        raise HTTPException(403, "Bạn không có quyền đóng hoặc hủy nhánh này")
+        raise HTTPException(403, "You do not have permission to close or cancel this branch")
 
     if branch.status in ("merged", "closed"):
-        raise HTTPException(400, f"Nhánh đã đóng hoặc đã được hợp nhất")
+        raise HTTPException(400, "The branch is already closed or merged")
 
     # Withdraw all drafts
     stmt = select(WikiPageDraft).where(WikiPageDraft.branch_id == branch_id)
@@ -328,13 +328,13 @@ async def merge_branch(
     """Atomically merge the branch (approve all drafts sequentially in a transaction)."""
     branch = await db.get(WikiBranch, branch_id)
     if not branch:
-        raise HTTPException(404, "Không tìm thấy nhánh đóng góp")
+        raise HTTPException(404, "Contribution branch not found")
 
     if not await _can_review_branch(db, user, branch.scope_type, branch.scope_id):
-        raise HTTPException(403, "Bạn không có quyền hợp nhất tài liệu trong phạm vi này")
+        raise HTTPException(403, "You do not have permission to merge documents in this scope")
 
     if branch.status != "pending_merge":
-        raise HTTPException(400, "Chỉ có thể hợp nhất nhánh khi đang ở trạng thái 'pending_merge'")
+        raise HTTPException(400, "A branch can only be merged while it is in 'pending_merge' state")
 
     # Fetch drafts in branch
     stmt = select(WikiPageDraft).where(WikiPageDraft.branch_id == branch_id)
@@ -349,9 +349,9 @@ async def merge_branch(
                 await db.commit()
                 raise HTTPException(
                     409,
-                    f"Xung đột xảy ra tại trang '{page.title}' ({page.slug}). "
-                    f"Trang này đã có bản cập nhật mới (v{page.version}) kể từ khi tác giả bắt đầu sửa (v{d.base_version}). "
-                    "Tác giả cần đồng bộ nhánh (rebase) trước khi duyệt hợp nhất."
+                    f"Conflict detected on page '{page.title}' ({page.slug}). "
+                    f"This page has newer updates (v{page.version}) since the author started editing (v{d.base_version}). "
+                    "The author must rebase the branch before merge approval."
                 )
 
     # Step 2: Atomic approval of all drafts
@@ -378,7 +378,7 @@ async def merge_branch(
         await db.commit()
     except Exception as e:
         await db.rollback()
-        raise HTTPException(400, f"Lỗi hợp nhất nhánh: {str(e)}")
+        raise HTTPException(400, f"Branch merge failed: {str(e)}")
 
     await db.refresh(branch)
     await log_audit(db, user, "merge_branch", "wiki_branch", str(branch.id))
@@ -396,21 +396,21 @@ async def rebase_draft(
     """Resolve a conflict on a draft by applying resolved content and bumping base_version to current."""
     branch = await db.get(WikiBranch, branch_id)
     if not branch:
-        raise HTTPException(404, "Không tìm thấy nhánh đóng góp")
+        raise HTTPException(404, "Contribution branch not found")
 
     if branch.author_id != user.id and user.role != "admin":
-        raise HTTPException(403, "Chỉ có tác giả nhánh mới có quyền xử lý xung đột")
+        raise HTTPException(403, "Only the branch author may resolve conflicts")
 
     draft = await db.get(WikiPageDraft, draft_id)
     if not draft or draft.branch_id != branch_id:
-        raise HTTPException(404, "Không tìm thấy bản nháp cần xử lý trong nhánh này")
+        raise HTTPException(404, "Draft not found in this branch")
 
     if not draft.page_id:
-        raise HTTPException(400, "Bản nháp trang tạo mới không cần xử lý rebase")
+        raise HTTPException(400, "New-page drafts do not need rebase")
 
     page = await db.get(WikiPage, draft.page_id)
     if not page:
-        raise HTTPException(404, "Không tìm thấy trang gốc trên wiki")
+        raise HTTPException(404, "Original wiki page not found")
 
     # Apply conflict resolution
     draft.content_md = body.resolved_content_md

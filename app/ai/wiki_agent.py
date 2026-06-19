@@ -53,7 +53,8 @@ regulations, procedures, names, and edge cases — not just a high-level recap.
 
 # What to KEEP from the source (never lose these)
 - Specific numbers: thresholds, dosages, timeframes, dimensions, distances, percentages.
-- Named regulations, laws, articles, code references (e.g. "Điều 5 Luật PCCC 2001",
+- Named regulations, laws, articles, code references (e.g. "Article 5 of the Fire
+  Prevention and Fighting Law 2001",
   "ISO 27001 §A.12.1", "Section 3.2 of the SOP").
 - Equipment names, model numbers, product specs, serial ranges.
 - Procedure steps in the exact order they appear, with the actual actions (not "follow
@@ -85,8 +86,7 @@ Write every page in the SAME LANGUAGE as the source document. Never translate bo
   `entity/jane-doe`, `concept/expense-approval`, `topic/fire-safety`,
   `source/<short-doc-slug>`.
 - Slugs must be in Latin characters regardless of document language (transliterate
-  or translate key words). Example: "Bình chữa cháy" → `concept/binh-chua-chay`
-  or `concept/fire-extinguisher`.
+  or translate key words). Example: "Fire extinguisher" → `concept/fire-extinguisher`.
 - Pick stable, generalizable slugs future sources will naturally update.
 
 # Wikilinks
@@ -120,42 +120,44 @@ Each page must be a proper encyclopedic article, NOT a flat bullet list.
 
 ## BAD example — what NOT to produce
 ```
-# Trách nhiệm PCCC của hộ gia đình
+# Fire safety responsibilities of a household
 
-Quy định trách nhiệm của chủ hộ và các thành viên trong gia đình.
+Defines the responsibilities of the household head and family members.
 
-## Trách nhiệm của chủ hộ
-- Đôn đốc thành viên thực hiện quy định pháp luật về PCCC.
-- Kiểm tra, khắc phục nguy cơ cháy nổ.
+## Responsibilities of the household head
+- Ensure members comply with fire safety rules.
+- Inspect and mitigate fire and explosion risks.
 ```
 Why bad: only bullet headlines. No legal references, no specific numbers, no procedure
 steps. A person cannot answer any practical question from this.
 
 ## GOOD example — preserves substance
 ```
-# Trách nhiệm PCCC của hộ gia đình
+# Fire safety responsibilities of a household
 
-Mỗi hộ gia đình tại Việt Nam có trách nhiệm pháp lý trong [[concept/phong-chay-chua-chay|công
-tác PCCC]] theo Điều 5 [[entity/luat-pccc-2001|Luật PCCC 2001]] (sửa đổi 2013) và Nghị định
-136/2020/NĐ-CP. Trách nhiệm phân chia giữa chủ hộ — người chịu trách nhiệm pháp lý cao nhất —
-và các thành viên, tạo thành lớp phòng vệ đầu tiên.
+Every household has a legal obligation within [[concept/fire-safety|fire safety work]]
+under Article 5 of [[entity/fire-prevention-and-fighting-law-2001|the 2001 Fire Prevention
+and Fighting Law]] (as amended in 2013) and Decree 136/2020/ND-CP. Responsibility is shared
+between the household head — the primary legal account holder — and the members, forming the
+first line of defense.
 
-## Trách nhiệm của chủ hộ
+## Responsibilities of the household head
 
-Chủ hộ chịu trách nhiệm pháp lý chính và phải hoàn thành ba nhóm nghĩa vụ:
+The household head carries the primary legal responsibility and must complete three groups of
+duties:
 
-### 1. Tuyên truyền và đôn đốc tuân thủ
-Tổ chức cho mọi thành viên ≥10 tuổi học quy định PCCC cơ bản. Khuyến nghị:
-- Ít nhất 1 buổi phổ biến nội bộ mỗi quý.
-- Diễn tập [[concept/thoat-hiem|thoát hiểm]] 6 tháng/lần.
-- Dạy trẻ số 114, đường thoát hiểm, kỹ thuật bò thấp khi có khói.
+### 1. Educate and enforce compliance
+Organize basic fire safety training for every member aged 10 or older. Recommended:
+- At least one internal briefing each quarter.
+- [[concept/emergency-evacuation|Evacuation]] drills every 6 months.
+- Teach children the 114 emergency number, escape routes, and low-crawl techniques in smoke.
 
-## Xem thêm
-- [[concept/phong-chay-chua-chay]]
-- [[concept/binh-chua-chay]]
+## See also
+- [[concept/fire-prevention-and-fighting]]
+- [[concept/fire-safety]]
 ```
-Why good: legal references (Điều 5, Nghị định 136/2020), specific numbers (≥10 tuổi,
-6 tháng/lần), procedure ordering, wikilinks throughout.
+Why this works: it preserves legal references (Article 5, Decree 136/2020), specific
+numbers (age 10+, every 6 months), procedure ordering, and wikilinks throughout.
 
 # Image markers
 The source text may contain image references in this exact form:

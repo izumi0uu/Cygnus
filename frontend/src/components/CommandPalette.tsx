@@ -5,6 +5,7 @@ import { Search, CornerDownLeft } from 'lucide-react'
 import { fetchCommandCenter } from '@/lib/api'
 import { routeForRisk } from '@/lib/notifications'
 import { useVocab } from '@/lib/vocab'
+import { useFocusTrap } from '@/lib/useFocusTrap'
 
 type Item = { id: string; group: 'sections' | 'risks'; label: string; sub?: string; to: string }
 
@@ -27,6 +28,8 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
   const [active, setActive] = useState(0)
   const [risks, setRisks] = useState<Item[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
+  const boxRef = useRef<HTMLDivElement>(null)
+  useFocusTrap(boxRef, open, onClose)
 
   useEffect(() => {
     if (!open) return
@@ -84,7 +87,12 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
   return (
     <div className="fixed inset-0 z-[150] flex items-start justify-center bg-foreground/25 pt-[12vh]" onMouseDown={onClose}>
       <div
-        className="w-full max-w-[560px] overflow-hidden rounded-xl border border-border bg-card shadow-soft"
+        ref={boxRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('palette.placeholder')}
+        tabIndex={-1}
+        className="w-full max-w-[560px] overflow-hidden rounded-xl border border-border bg-card shadow-soft outline-none"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2.5 border-b border-border px-4">

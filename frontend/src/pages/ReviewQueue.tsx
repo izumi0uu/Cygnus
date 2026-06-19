@@ -1,5 +1,6 @@
-import { type ReactNode, useEffect, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useSearchParams } from 'react-router-dom'
 import { SlidersHorizontal, Plus, X } from 'lucide-react'
 import { fetchCommandCenter, type CommandCenterSurface, type PriorityItem } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -8,6 +9,7 @@ import { Stat } from '@/components/Stat'
 import { useVocab } from '@/lib/vocab'
 import { CmdButton } from '@/components/CmdButton'
 import { PageSkeleton } from '@/components/Skeleton'
+import { useFocusTrap } from '@/lib/useFocusTrap'
 
 const HEAT: Record<string, string> = { urgent: 'chip-urgent', high: 'chip-high', medium: 'chip-medium', low: 'chip' }
 const DOT: Record<string, string> = { urgent: 'var(--urgent)', high: 'var(--high)', medium: 'var(--medium)', low: 'var(--faint)' }
@@ -21,7 +23,7 @@ export default function ReviewQueue() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState<Filter>('all')
-  const [selected, setSelected] = useState<PriorityItem | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const load = () => {
     setLoading(true)
@@ -29,12 +31,11 @@ export default function ReviewQueue() {
     fetchCommandCenter().then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false))
   }
   useEffect(load, [])
-  useEffect(() => {
-    if (!selected) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelected(null) }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [selected])
+
+  const openRisk = (id: string) =>
+    setSearchParams((p) => { const n = new URLSearchParams(p); n.set('risk', id); return n })
+  const closeRisk = () =>
+    setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('risk'); return n }, { replace: true })
 
   if (loading) return <PageSkeleton />
   if (error)
@@ -47,6 +48,8 @@ export default function ReviewQueue() {
   if (!data) return null
 
   const sf = data.situation_frame
+  const selectedId = searchParams.get('risk')
+  const selected = selectedId ? data.priority_stack.find((it) => it.risk_id === selectedId) ?? null : null
   const rows = data.priority_stack.filter((it) =>
     filter === 'all' ? true : filter === 'urgent' ? it.urgency === 'urgent' : it.owner_state === 'unassigned',
   )
@@ -87,8 +90,8 @@ export default function ReviewQueue() {
             key={it.risk_id}
             role="button"
             tabIndex={0}
-            onClick={() => setSelected(it)}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(it) } }}
+            onClick={() => openRisk(it.risk_id)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openRisk(it.risk_id) } }}
             className="grid cursor-pointer grid-cols-[96px_1fr_140px_140px_150px] items-center gap-3.5 border-b border-border px-[18px] py-[15px] transition-colors last:border-b-0 hover:bg-accent/50"
           >
             <span>
@@ -115,14 +118,14 @@ export default function ReviewQueue() {
               )}
             </span>
             <span>
-              <button className="cmd" onClick={(e) => { e.stopPropagation(); setSelected(it) }}>{v.command(it.primary_command)} →</button>
+              <button className="cmd" onClick={(e) => { e.stopPropagation(); openRisk(it.risk_id) }}>{v.command(it.primary_command)} →</button>
             </span>
           </div>
         ))}
         {rows.length === 0 && <div className="px-[18px] py-10 text-center text-sm text-muted-foreground">{t('state.empty')}</div>}
       </div>
 
-      {selected && <Drawer item={selected} onClose={() => setSelected(null)} />}
+      {selected && <Drawer item={selected} onClose={closeRisk} />}
     </>
   )
 }
@@ -130,13 +133,18 @@ export default function ReviewQueue() {
 function Drawer({ item, onClose }: { item: PriorityItem; onClose: () => void }) {
   const { t } = useTranslation()
   const v = useVocab()
+  const ref = useRef<HTMLElement>(null)
+  useFocusTrap(ref, true, onClose)
   return (
     <>
       <div className="fixed inset-0 z-40 bg-foreground/25" onClick={onClose} />
       <aside
+        ref={ref}
         role="dialog"
         aria-modal="true"
-        className="fixed right-0 top-0 z-50 flex h-full w-full max-w-[440px] flex-col overflow-y-auto border-l border-border bg-card p-5 shadow-soft"
+        aria-labelledby="rq-drawer-title"
+        tabIndex={-1}
+        className="fixed right-0 top-0 z-50 flex h-full w-full max-w-[440px] flex-col overflow-y-auto border-l border-border bg-card p-5 shadow-soft outline-none"
       >
         <div className="flex items-center gap-2">
           <span className={`chip ${HEAT[item.urgency]}`}>{t(`urgency.${item.urgency}`)}</span>
@@ -149,7 +157,7 @@ function Drawer({ item, onClose }: { item: PriorityItem; onClose: () => void }) 
             <X size={15} />
           </button>
         </div>
-        <h2 className="mt-3 text-lg font-bold leading-tight">{item.title}</h2>
+        <h2 id="rq-drawer-title" className="mt-3 text-lg font-bold leading-tight">{item.title}</h2>
         <div className="mt-1 font-mono text-[11px] text-faint">{item.object_ref} · {v.objectType(item.object_type)}</div>
 
         <Section label={t('detail.whyNow')}>

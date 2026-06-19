@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useState, type ComponentType } from 'react'
-import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
   LayoutDashboard,
@@ -71,6 +71,7 @@ function NavGroup({ group }: { group: Group }) {
 export default function AppShell() {
   const { t, i18n } = useTranslation()
   const { pathname } = useLocation()
+  const navigate = useNavigate()
   const { user, logout } = useAuth()
   const active = NAV.find((i) => i.to === pathname) ?? NAV[0]
   const initials = (user?.name || user?.email || 'ID').slice(0, 2).toUpperCase()
@@ -78,15 +79,34 @@ export default function AppShell() {
   const isZh = i18n.language.startsWith('zh')
 
   useEffect(() => {
+    const GO: Record<string, string> = {
+      o: '/console', q: '/console/queue', k: '/console/objects', s: '/console/sources',
+      a: '/console/audience', d: '/console/drift', p: '/console/propagation', t: '/console/audit',
+    }
+    const isTyping = () => {
+      const el = document.activeElement as HTMLElement | null
+      return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+    }
+    let gPending = false
+    let gTimer: ReturnType<typeof setTimeout> | undefined
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         setPaletteOpen((o) => !o)
+        return
+      }
+      if (isTyping()) return
+      if (e.key === '/') { e.preventDefault(); setPaletteOpen(true); return }
+      if (e.key === 'g') { gPending = true; clearTimeout(gTimer); gTimer = setTimeout(() => { gPending = false }, 1200); return }
+      if (gPending) {
+        gPending = false
+        const to = GO[e.key.toLowerCase()]
+        if (to) { e.preventDefault(); navigate(to) }
       }
     }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
+    return () => { window.removeEventListener('keydown', onKey); clearTimeout(gTimer) }
+  }, [navigate])
 
   const toggleLang = () => {
     const next = isZh ? 'en' : 'zh'

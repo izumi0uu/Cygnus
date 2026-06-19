@@ -3,11 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Bell, CheckCheck } from 'lucide-react'
 import { useVocab } from '@/lib/vocab'
-import { commandCenterSource, type CygnusNotification, type NotifSeverity } from '@/lib/notifications'
+import { notificationSource, type CygnusNotification, type NotifSeverity } from '@/lib/notifications'
 
 const SEV_HEX: Record<NotifSeverity, string> = { urgent: '#e5484d', high: '#f76808', medium: '#e8930c', low: '#185ee0' }
 
-const source = commandCenterSource
+const source = notificationSource
 
 export default function NotificationBell() {
   const { t } = useTranslation()

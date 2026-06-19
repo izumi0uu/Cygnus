@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useSearchParams } from 'react-router-dom'
 import { X } from 'lucide-react'
 import ForceGraph2D from 'react-force-graph-2d'
 import { fetchCommandCenter, type CommandCenterSurface, type PriorityItem } from '@/lib/api'
@@ -7,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { useVocab } from '@/lib/vocab'
 import { CmdButton } from '@/components/CmdButton'
 import { PageSkeleton } from '@/components/Skeleton'
+import { useFocusTrap } from '@/lib/useFocusTrap'
 
 const HEX: Record<string, string> = { urgent: '#e5484d', high: '#f76808', medium: '#e8930c', low: '#185ee0' }
 const RANK: Record<string, number> = { urgent: 3, high: 2, medium: 1, low: 0 }
@@ -34,7 +36,7 @@ export default function KnowledgeObjects() {
   const [data, setData] = useState<CommandCenterSurface | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [selected, setSelected] = useState<PriorityItem | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const wrapRef = useRef<HTMLDivElement>(null)
   const fgRef = useRef<any>(null)
@@ -55,12 +57,11 @@ export default function KnowledgeObjects() {
     setW(el.clientWidth)
     return () => ro.disconnect()
   }, [data])
-  useEffect(() => {
-    if (!selected) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelected(null) }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [selected])
+
+  const openRisk = (id: string) =>
+    setSearchParams((p) => { const n = new URLSearchParams(p); n.set('risk', id); return n })
+  const closeRisk = () =>
+    setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('risk'); return n }, { replace: true })
 
   const graph = useMemo(() => {
     if (!data) return { nodes: [] as GNode[], links: [] as { source: string; target: string }[] }
@@ -111,6 +112,9 @@ export default function KnowledgeObjects() {
       </div>
     )
   if (!data) return null
+
+  const selectedId = searchParams.get('risk')
+  const selected = selectedId ? data.priority_stack.find((it) => it.risk_id === selectedId) ?? null : null
 
   const drawNode = (node: any, ctx: CanvasRenderingContext2D, scale: number) => {
     const r = node.r ?? 5
@@ -163,12 +167,12 @@ export default function KnowledgeObjects() {
             onEngineStop={() => fgRef.current?.zoomToFit(400, 60)}
             nodeCanvasObject={drawNode}
             nodePointerAreaPaint={drawHit}
-            onNodeClick={(node: any) => { if (node.kind === 'object' && node.item) setSelected(node.item) }}
+            onNodeClick={(node: any) => { if (node.kind === 'object' && node.item) openRisk(node.item.risk_id) }}
           />
         )}
       </div>
 
-      {selected && <Drawer item={selected} onClose={() => setSelected(null)} />}
+      {selected && <Drawer item={selected} onClose={closeRisk} />}
     </>
   )
 }
@@ -186,17 +190,19 @@ function Legend({ color, label, ring, hollow, extra }: { color: string; label: s
 function Drawer({ item, onClose }: { item: PriorityItem; onClose: () => void }) {
   const { t } = useTranslation()
   const v = useVocab()
+  const ref = useRef<HTMLElement>(null)
+  useFocusTrap(ref, true, onClose)
   const HEATCHIP: Record<string, string> = { urgent: 'chip-urgent', high: 'chip-high', medium: 'chip-medium', low: 'chip' }
   return (
     <>
       <div className="fixed inset-0 z-40 bg-foreground/25" onClick={onClose} />
-      <aside role="dialog" aria-modal="true" className="fixed right-0 top-0 z-50 flex h-full w-full max-w-[440px] flex-col overflow-y-auto border-l border-border bg-card p-5 shadow-soft">
+      <aside ref={ref} role="dialog" aria-modal="true" aria-labelledby="ko-drawer-title" tabIndex={-1} className="fixed right-0 top-0 z-50 flex h-full w-full max-w-[440px] flex-col overflow-y-auto border-l border-border bg-card p-5 shadow-soft outline-none">
         <div className="flex items-center gap-2">
           <span className={`chip ${HEATCHIP[item.urgency]}`}>{t(`urgency.${item.urgency}`)}</span>
           <span className="rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">{v.objectType(item.object_type)}</span>
           <button className="ml-auto flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground hover:bg-muted" aria-label={t('detail.close')} onClick={onClose}><X size={15} /></button>
         </div>
-        <h2 className="mt-3 text-lg font-bold leading-tight">{item.title}</h2>
+        <h2 id="ko-drawer-title" className="mt-3 text-lg font-bold leading-tight">{item.title}</h2>
         <div className="mt-1 font-mono text-[11px] text-faint">{item.object_ref} · {v.riskType(item.risk_type)}</div>
         <Section label={t('detail.whyNow')}><p className="text-sm leading-relaxed text-muted-foreground">{item.why_now_summary}</p></Section>
         <Section label={t('detail.audiences')}>

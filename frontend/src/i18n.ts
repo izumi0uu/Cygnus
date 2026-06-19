@@ -14,6 +14,8 @@ const zh = {
       error: '无法连接 Cygnus API。请确认后端已启动：uvicorn cygnus.api.app:app --port 8077',
       retry: '重试',
       empty: '当前没有待处理的治理风险',
+      awaitBackend: '待后端端点',
+      awaitBackendNote: '该视图依赖的后端端点尚未开放——当前 command-center 简报未覆盖此数据。',
     },
     toggle: { theme: '主题', system: '跟随系统', light: '浅色', dark: '深色' },
     landing: {
@@ -32,7 +34,7 @@ const zh = {
     obj: { statObjects: '知识对象', statTypes: '类型', thType: '类型', thRef: '对象', thRisk: '当前风险', thOwner: '责任人', thAct: '操作' },
     kg: { object: '对象', objectNote: '按紧急度', audience: '受众', surface: '下游面', hint: '点击对象节点查看详情', riskType: '风险类型' },
     src: { statSources: '受损来源', thObject: '对象', thWhy: '情况', thSurf: '下游面', thOwner: '责任人', thAct: '操作', empty: '当前没有来源完整性问题', blind: '来源失明 / 降级', statWatched: '监测对象', okFmt: '其余 {{n}} 个监测对象来源未见异常' },
-    drift: { statWatched: '监测对象', statDrift: '漂移中', thObject: '对象', thWhy: '漂移情况', thSurf: '下游面', thOwner: '责任人', thAct: '操作', empty: '当前没有漂移风险' },
+    drift: { statWatched: '监测对象', statDrift: '漂移中', flag: '答案漂移 / 失新', thObject: '对象', thWhy: '漂移情况', thSurf: '下游面', thOwner: '责任人', thAct: '操作', empty: '当前没有漂移风险', okFmt: '其余 {{n}} 个监测对象未见漂移' },
     detail: {
       whyNow: '为什么现在重要',
       scope: '作用域 / 爆炸半径',
@@ -60,6 +62,8 @@ const en = {
       error: 'Cannot reach the Cygnus API. Start the backend: uvicorn cygnus.api.app:app --port 8077',
       retry: 'Retry',
       empty: 'No governance risks pending right now',
+      awaitBackend: 'Awaiting backend endpoint',
+      awaitBackendNote: "This view needs a backend endpoint that isn't exposed yet — the command-center brief doesn't cover this data.",
     },
     toggle: { theme: 'Theme', system: 'System', light: 'Light', dark: 'Dark' },
     landing: {
@@ -78,7 +82,7 @@ const en = {
     obj: { statObjects: 'objects', statTypes: 'types', thType: 'type', thRef: 'object', thRisk: 'current risk', thOwner: 'owner', thAct: 'action' },
     kg: { object: 'Object', objectNote: 'by urgency', audience: 'Audience', surface: 'Surface', hint: 'Click an object node for details', riskType: 'Risk type' },
     src: { statSources: 'sources at risk', thObject: 'object', thWhy: 'situation', thSurf: 'surfaces', thOwner: 'owner', thAct: 'action', empty: 'No source-integrity issues right now', blind: 'Source blind / degraded', statWatched: 'watched', okFmt: '{{n}} other watched objects: sources OK' },
-    drift: { statWatched: 'watched', statDrift: 'drifting', thObject: 'object', thWhy: 'drift', thSurf: 'surfaces', thOwner: 'owner', thAct: 'action', empty: 'No drift right now' },
+    drift: { statWatched: 'watched', statDrift: 'drifting', flag: 'Answer drift / stale', thObject: 'object', thWhy: 'drift', thSurf: 'surfaces', thOwner: 'owner', thAct: 'action', empty: 'No drift right now', okFmt: '{{n}} other watched objects: no drift' },
     detail: {
       whyNow: 'Why now',
       scope: 'Scope / blast radius',

@@ -168,6 +168,13 @@ export default function Overview() {
             <div className="flex items-baseline"><div className="text-[13px] font-bold">{t('overview.recovery')}</div><span className="ml-auto font-mono text-[11px] text-faint">{t('overview.pending')}</span></div>
             <div className="relative mt-2.5 flex h-[90px] items-center justify-center overflow-hidden rounded-lg bg-muted">
               <svg width="100%" height="90" viewBox="0 0 400 90" preserveAspectRatio="none" className="absolute inset-0">
+                <defs>
+                  <linearGradient id="recoveryFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="var(--primary)" stopOpacity="0.16" />
+                    <stop offset="100%" stopColor="var(--primary)" stopOpacity="0" />
+                  </linearGradient>
+                </defs>
+                <path d="M0,70 60,60 120,64 180,48 240,52 300,34 360,38 400,24 L400,90 L0,90 Z" fill="url(#recoveryFill)" />
                 <polyline points="0,70 60,60 120,64 180,48 240,52 300,34 360,38 400,24" fill="none" stroke="var(--faint)" strokeWidth="2" strokeDasharray="5 5" opacity="0.55" />
               </svg>
               <span className="z-10 font-mono text-[11px] uppercase tracking-wide text-faint">{t('overview.pendingNote')}</span>

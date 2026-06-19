@@ -1,4 +1,4 @@
-import type { ComponentType } from 'react'
+import { Suspense, type ComponentType } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
@@ -104,7 +104,9 @@ export default function AppShell() {
           </button>
         </header>
         <main className="flex-1 overflow-y-auto px-6 pb-10 pt-5">
-          <Outlet />
+          <Suspense fallback={<div className="font-mono text-sm text-muted-foreground">{t('state.loading')}</div>}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
     </div>

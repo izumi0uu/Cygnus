@@ -1,13 +1,15 @@
+import { lazy } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import Landing from '@/pages/Landing'
 import AppShell from '@/components/layout/AppShell'
-import Overview from '@/pages/Overview'
-import ReviewQueue from '@/pages/ReviewQueue'
-import AudiencePublish from '@/pages/AudiencePublish'
-import KnowledgeObjects from '@/pages/KnowledgeObjects'
-import SourcesEvidence from '@/pages/SourcesEvidence'
-import CoverageDrift from '@/pages/CoverageDrift'
-import Placeholder from '@/pages/Placeholder'
+
+const Overview = lazy(() => import('@/pages/Overview'))
+const ReviewQueue = lazy(() => import('@/pages/ReviewQueue'))
+const AudiencePublish = lazy(() => import('@/pages/AudiencePublish'))
+const KnowledgeObjects = lazy(() => import('@/pages/KnowledgeObjects'))
+const SourcesEvidence = lazy(() => import('@/pages/SourcesEvidence'))
+const CoverageDrift = lazy(() => import('@/pages/CoverageDrift'))
+const Placeholder = lazy(() => import('@/pages/Placeholder'))
 
 export default function App() {
   return (

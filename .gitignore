@@ -13,6 +13,9 @@ README.md
 __pycache__/
 *.pyc
 
+# Local prototype exports
+prototypes/
+
 # macOS + Python build artifacts
 .DS_Store
 *.egg-info/

@@ -3,8 +3,10 @@ import { useNavigate, useLocation, Navigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Loader2 } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
-import { Button } from '@/components/ui/button'
 
+// DWG-000 — the access control sheet. Login is the gate before the drawing set,
+// so it gets the same engineering-drawing treatment as the console: grid paper,
+// thin lines, a title block, and no rounded SaaS card.
 export default function Login() {
   const { t } = useTranslation()
   const { login, user, loading: authLoading } = useAuth()
@@ -34,19 +36,48 @@ export default function Login() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+    <div className="bp-grid relative flex min-h-screen items-center justify-center overflow-hidden px-4">
+      {/* corner registration marks on the whole sheet */}
+      <span className="pointer-events-none absolute left-3 top-3 h-3 w-3 border-l border-t border-primary opacity-40" />
+      <span className="pointer-events-none absolute right-3 top-3 h-3 w-3 border-r border-t border-primary opacity-40" />
+      <span className="pointer-events-none absolute bottom-3 left-3 h-3 w-3 border-b border-l border-primary opacity-40" />
+      <span className="pointer-events-none absolute bottom-3 right-3 h-3 w-3 border-b border-r border-primary opacity-40" />
+
       <div className="w-full max-w-md">
-        <div className="mb-8 text-center">
-          <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-[10px] bg-primary text-lg font-extrabold text-primary-foreground">C</div>
-          <h1 className="text-2xl font-bold tracking-tight">Cygnus</h1>
-          <p className="mt-1 font-mono text-[11px] uppercase tracking-widest text-faint">{t('landing.eyebrow')}</p>
+        {/* drawing number + title */}
+        <div className="mb-4 flex items-baseline justify-between">
+          <span className="bp-label">DWG-000 · ACCESS CONTROL</span>
+          <span className="bp-label" style={{ opacity: 0.4 }}>SEC-A · AUTH</span>
         </div>
 
-        <div className="rounded-xl border border-border bg-card p-7 shadow-soft">
-          <h2 className="mb-5 text-lg font-bold">{t('auth.signIn')}</h2>
+        <h1 className="mb-1 text-2xl font-bold tracking-tight">Cygnus</h1>
+        <p className="mb-5 bp-label" style={{ opacity: 0.55 }}>{t('landing.eyebrow')}</p>
+
+        {/* title block — session / environment parameters */}
+        <div className="bp-title-block mb-5">
+          <div className="bp-tb-row">
+            <div className="bp-tb-cell">
+              <div className="bp-tb-key">SESSION</div>
+              <div className="bp-tb-val" style={{ fontSize: 13 }}>{t('auth.signIn')}</div>
+            </div>
+            <div className="bp-tb-cell">
+              <div className="bp-tb-key">ENV</div>
+              <div className="bp-tb-val" style={{ fontSize: 13, color: 'var(--faint)' }}>ON-PREM</div>
+            </div>
+            <div className="bp-tb-cell">
+              <div className="bp-tb-key">STATUS</div>
+              <div className="bp-tb-val" style={{ fontSize: 13, color: error ? 'var(--urgent)' : 'var(--ok)' }}>
+                {error ? 'BLOCKED' : 'READY'}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* the form itself — a panel, no rounding, no shadow */}
+        <div className="bp-panel p-6">
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <label className="flex flex-col gap-1.5">
-              <span className="text-[13px] font-medium text-muted-foreground">{t('auth.email')}</span>
+              <span className="bp-label-inline">SEC-A · {t('auth.email')}</span>
               <input
                 type="email"
                 autoFocus
@@ -54,38 +85,52 @@ export default function Login() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="admin@cygnus.local"
-                className="rounded-lg border border-border bg-background px-3.5 py-2.5 text-sm outline-none transition-shadow focus:border-primary focus:ring-2 focus:ring-primary/25"
+                className="border border-[color-mix(in_srgb,var(--primary)_30%,transparent)] bg-transparent px-3 py-2 font-mono text-[13px] outline-none transition-colors focus:border-primary"
               />
             </label>
             <label className="flex flex-col gap-1.5">
-              <span className="text-[13px] font-medium text-muted-foreground">{t('auth.password')}</span>
+              <span className="bp-label-inline">SEC-B · {t('auth.password')}</span>
               <input
                 type="password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder={t('auth.passwordPlaceholder')}
-                className="rounded-lg border border-border bg-background px-3.5 py-2.5 text-sm outline-none transition-shadow focus:border-primary focus:ring-2 focus:ring-primary/25"
+                className="border border-[color-mix(in_srgb,var(--primary)_30%,transparent)] bg-transparent px-3 py-2 font-mono text-[13px] outline-none transition-colors focus:border-primary"
               />
             </label>
 
             {error && (
-              <p className="rounded-lg px-3 py-2 text-[13px]" style={{ color: 'var(--urgent)', background: 'color-mix(in srgb, var(--urgent) 10%, transparent)' }}>
+              <p
+                className="border px-3 py-2 font-mono text-[11px]"
+                style={{ color: 'var(--urgent)', borderColor: 'color-mix(in srgb, var(--urgent) 40%, transparent)' }}
+              >
                 {error}
               </p>
             )}
 
-            <Button type="submit" disabled={loading} className="mt-1 w-full">
+            <button
+              type="submit"
+              disabled={loading}
+              className="bp-cmd mt-1 w-full justify-center py-2 disabled:cursor-not-allowed disabled:opacity-50"
+            >
               {loading ? (
-                <span className="flex items-center justify-center gap-2"><Loader2 size={15} className="animate-spin" />{t('auth.signingIn')}</span>
+                <span className="flex items-center justify-center gap-2">
+                  <Loader2 size={13} className="animate-spin" />
+                  {t('auth.signingIn')}
+                </span>
               ) : (
-                t('auth.signIn')
+                <>{t('auth.signIn')} →</>
               )}
-            </Button>
+            </button>
           </form>
         </div>
 
-        <p className="mt-5 text-center font-mono text-[10px] text-faint">{t('auth.deployNote')}</p>
+        {/* drawing footer — like the sheet scale/info line */}
+        <div className="mt-5 flex items-center justify-between">
+          <span className="bp-label" style={{ opacity: 0.4 }}>{t('auth.deployNote')}</span>
+          <span className="bp-label" style={{ opacity: 0.4 }}>SCALE 1:1 · DWG-000</span>
+        </div>
       </div>
     </div>
   )

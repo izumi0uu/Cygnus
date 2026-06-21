@@ -28,7 +28,7 @@ const AuthContext = createContext<AuthState | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(() => getToken() !== null)
 
   const refresh = useCallback(async () => {
     try {
@@ -43,9 +43,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    if (getToken()) void refresh()
-    else setLoading(false)
-  }, [refresh])
+    if (!getToken()) return
+    void authApi<User>('/api/auth/me')
+      .then((data) => {
+        setUser(data)
+      })
+      .catch((err) => {
+        setUser(null)
+        if (err instanceof ApiError && (err.status === 401 || err.status === 403)) clearToken()
+      })
+      .finally(() => setLoading(false))
+  }, [])
 
   const login = async (email: string, password: string) => {
     const data = await authApi<{ access_token: string; user: User }>('/api/auth/login', {

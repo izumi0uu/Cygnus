@@ -30,8 +30,9 @@ export default function Overview() {
     setError(null)
     fetchGovernanceOverview().then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false))
   }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(load, [])
+  useEffect(() => {
+    fetchGovernanceOverview().then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false))
+  }, [])
 
   const d = useMemo(() => {
     if (!data) return null

@@ -45,6 +45,8 @@ __all__ = [
     "PublishActionEcho",
     "PublishActionPreset",
     "PublishPropagationSurface",
+    "PublishProjectionSnapshot",
+    "PublishProjectionStore",
     "PublishPreviewSurface",
     "PublishSituationFrame",
     "PropagationStatusLane",
@@ -62,6 +64,7 @@ __all__ = [
     "get_pressure_intake_recovery_proof_surface",
     "get_pressure_intake_publish_propagation_surface",
     "get_pressure_intake_publish_preview_surface",
+    "projection_store",
     "apply_pressure_intake_publish_action",
 ]
 
@@ -83,4 +86,9 @@ from cygnus.publish.surface import (
     apply_pressure_intake_publish_action,
     get_pressure_intake_publish_propagation_surface,
     get_pressure_intake_publish_preview_surface,
+)
+from cygnus.publish.session_projection import (
+    PublishProjectionSnapshot,
+    PublishProjectionStore,
+    projection_store,
 )

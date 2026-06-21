@@ -44,6 +44,10 @@ store = InMemoryUserStore()
 
 
 def seed_default_admin() -> None:
+    if not settings.seed_default_admin:
+        return
+    if settings.default_admin_email is None or settings.default_admin_password is None:
+        raise RuntimeError("default admin seed requested without credentials")
     if store.find_by_email(settings.default_admin_email) is not None:
         return
     store.add(

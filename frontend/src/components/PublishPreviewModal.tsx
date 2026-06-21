@@ -12,7 +12,6 @@ import {
 } from '@/lib/api'
 import { useVocab } from '@/lib/vocab'
 import { useFocusTrap } from '@/lib/useFocusTrap'
-import { usePublishAction } from '@/lib/publishAction'
 
 const EFFECT_CHIP: Record<string, string> = {
   new_exposure: 'chip-high',
@@ -39,7 +38,6 @@ export default function PublishPreviewModal({
   const { t } = useTranslation()
   const v = useVocab()
   const navigate = useNavigate()
-  const recordPublishAction = usePublishAction().record
   const ref = useRef<HTMLDivElement>(null)
   useFocusTrap(ref, true, onClose)
   const [data, setData] = useState<PublishPreviewSurface | null>(null)
@@ -58,24 +56,17 @@ export default function PublishPreviewModal({
     applyPublishAction(objectRef, key)
       .then((r) => {
         setApplyResult(r)
-        // Record for the traceability what-if overlay. The drawer reads this
-        // and projects the post-apply state without claiming durable persistence.
-        recordPublishAction(objectRef, r)
       })
       .catch((e) => setApplyError(String(e)))
       .finally(() => setApplying(false))
   }
 
-  const load = (key?: string) => {
-    setLoading(true)
-    setError(null)
-    fetchPublishPreview(objectRef, key)
+  useEffect(() => {
+    fetchPublishPreview(objectRef, actionKey)
       .then(setData)
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false))
-  }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => load(actionKey), [actionKey])
+  }, [objectRef, actionKey])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -88,6 +79,8 @@ export default function PublishPreviewModal({
     setActionKey(key)
     setApplyResult(null)
     setApplyError(null)
+    setLoading(true)
+    setError(null)
   }
 
   const gotoPropagation = () => {

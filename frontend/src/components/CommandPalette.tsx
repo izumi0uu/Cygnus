@@ -34,11 +34,14 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
   const inputRef = useRef<HTMLInputElement>(null)
   const boxRef = useRef<HTMLDivElement>(null)
   useFocusTrap(boxRef, open, onClose)
+  const closePalette = () => {
+    setQuery('')
+    setActive(0)
+    onClose()
+  }
 
   useEffect(() => {
     if (!open) return
-    setQuery('')
-    setActive(0)
     inputRef.current?.focus()
     fetchCommandCenter()
       .then((d) =>
@@ -53,8 +56,7 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
         ),
       )
       .catch(() => setRisks([]))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+  }, [open, v])
 
   const sections: Item[] = useMemo(
     () => SECTIONS.map((s) => ({ id: s.navKey, group: 'sections' as const, label: t(`nav.${s.navKey}`), to: s.to })),
@@ -88,14 +90,12 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
     return filtered
   }, [query, sections, risks, coordItem])
 
-  useEffect(() => { setActive(0) }, [query])
-
   if (!open) return null
 
   const go = (item?: Item) => {
     const target = item ?? results[active]
     if (!target) return
-    onClose()
+    closePalette()
     if (target.group === 'coords') {
       // P3: Jump to coordinate — set zoom to 1.5 and pan so the target is centered
       resetView()
@@ -121,13 +121,13 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
     if (e.key === 'ArrowDown') { e.preventDefault(); setActive((a) => Math.min(a + 1, results.length - 1)) }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)) }
     else if (e.key === 'Enter') { e.preventDefault(); go() }
-    else if (e.key === 'Escape') { e.preventDefault(); onClose() }
+    else if (e.key === 'Escape') { e.preventDefault(); closePalette() }
   }
 
   let idx = -1
 
   return (
-    <div className="fixed inset-0 z-[150] flex items-start justify-center bg-foreground/25 pt-[12vh]" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-[150] flex items-start justify-center bg-foreground/25 pt-[12vh]" onMouseDown={closePalette}>
       <div
         ref={boxRef}
         role="dialog"
@@ -143,7 +143,10 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
           <input
             ref={inputRef}
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value)
+              setActive(0)
+            }}
             onKeyDown={onKeyDown}
             placeholder={t('palette.placeholder')}
             className="w-full bg-transparent py-3.5 text-sm outline-none placeholder:text-faint"

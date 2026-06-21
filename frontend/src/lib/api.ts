@@ -1,3 +1,5 @@
+import { authApi } from '@/lib/authApi'
+
 export interface AffectedAudience {
   visibility: string
   brands: string[]
@@ -45,9 +47,7 @@ export interface CommandCenterSurface {
 }
 
 export async function fetchCommandCenter(): Promise<CommandCenterSurface> {
-  const res = await fetch('/api/command-center')
-  if (!res.ok) throw new Error(`API ${res.status}`)
-  return res.json()
+  return authApi<CommandCenterSurface>('/api/command-center')
 }
 
 export type GraphNodeKind = 'object' | 'evidence' | 'audience'
@@ -79,9 +79,7 @@ export interface KnowledgeGraph {
 }
 
 export async function fetchKnowledgeGraph(): Promise<KnowledgeGraph> {
-  const res = await fetch('/api/knowledge-graph')
-  if (!res.ok) throw new Error(`API ${res.status}`)
-  return res.json()
+  return authApi<KnowledgeGraph>('/api/knowledge-graph')
 }
 
 // ============================================================
@@ -133,12 +131,11 @@ export interface TraceabilitySurface {
     publish_targets: string[]
   }
   trace: SourceTrace
+  projection: PublishApplyResult | null
 }
 
 export async function fetchTraceability(objectId: string): Promise<TraceabilitySurface> {
-  const res = await fetch(`/api/traceability/${encodeURIComponent(objectId)}`)
-  if (!res.ok) throw new Error(`API ${res.status}`)
-  return res.json()
+  return authApi<TraceabilitySurface>(`/api/traceability/${encodeURIComponent(objectId)}`)
 }
 
 export interface DriftContext {
@@ -166,9 +163,7 @@ export interface DriftSurface {
 }
 
 export async function fetchDriftSurface(): Promise<DriftSurface> {
-  const res = await fetch('/api/drift')
-  if (!res.ok) throw new Error(`API ${res.status}`)
-  return res.json()
+  return authApi<DriftSurface>('/api/drift')
 }
 
 export interface SourceBlindnessContext {
@@ -197,9 +192,7 @@ export interface SourceBlindnessSurface {
 }
 
 export async function fetchSourceBlindnessSurface(): Promise<SourceBlindnessSurface> {
-  const res = await fetch('/api/source-blindness')
-  if (!res.ok) throw new Error(`API ${res.status}`)
-  return res.json()
+  return authApi<SourceBlindnessSurface>('/api/source-blindness')
 }
 
 export interface GovernanceOpenLoop {
@@ -241,9 +234,7 @@ export interface GovernanceOverviewSurface {
 }
 
 export async function fetchGovernanceOverview(): Promise<GovernanceOverviewSurface> {
-  const res = await fetch('/api/recovery/overview')
-  if (!res.ok) throw new Error(`API ${res.status}`)
-  return res.json()
+  return authApi<GovernanceOverviewSurface>('/api/recovery/overview')
 }
 
 export interface ReviewIntakeBundle {
@@ -266,9 +257,7 @@ export interface ReviewIntakeSurface {
 }
 
 export async function fetchReviewIntake(): Promise<ReviewIntakeSurface> {
-  const res = await fetch('/api/review-intake')
-  if (!res.ok) throw new Error(`API ${res.status}`)
-  return res.json()
+  return authApi<ReviewIntakeSurface>('/api/review-intake')
 }
 
 // ============================================================
@@ -302,13 +291,17 @@ export interface PublishActionEcho {
   action_log: string[]
   opened_bindings: PublishBinding[]
   removed_bindings: PublishBinding[]
-  held_bindings: PublishBinding[]
+  held_bindings: PublishConflict[]
 }
 
 export interface PublishBinding {
   audience_filter: AffectedAudience
   audience_label: string
   channel: string
+}
+
+export interface PublishConflict extends PublishBinding {
+  reason: string
 }
 
 export interface BlastRadiusImpact {
@@ -371,9 +364,7 @@ export async function fetchPublishPreview(
   if (objectRef) params.set('object_ref', objectRef)
   if (actionKey) params.set('action_key', actionKey)
   const qs = params.toString()
-  const res = await fetch(`/api/publish-preview${qs ? `?${qs}` : ''}`)
-  if (!res.ok) throw new Error(`API ${res.status}`)
-  return res.json()
+  return authApi<PublishPreviewSurface>(`/api/publish-preview${qs ? `?${qs}` : ''}`)
 }
 
 // ============================================================
@@ -389,7 +380,7 @@ export interface PublishApplyResult {
   action_log: string[]
   opened_bindings: PublishBinding[]
   removed_bindings: PublishBinding[]
-  held_bindings: PublishBinding[]
+  held_bindings: PublishConflict[]
   updated_candidate: unknown
   preview: BlastRadiusPreview
   rehearsal: boolean
@@ -400,16 +391,10 @@ export async function applyPublishAction(
   objectRef: string | undefined,
   actionKey: string,
 ): Promise<PublishApplyResult> {
-  const res = await fetch('/api/publish/apply', {
+  return authApi<PublishApplyResult>('/api/publish/apply', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ object_ref: objectRef ?? null, action_key: actionKey }),
+    body: { object_ref: objectRef ?? null, action_key: actionKey },
   })
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(text || `API ${res.status}`)
-  }
-  return res.json()
 }
 
 // ============================================================
@@ -475,9 +460,7 @@ export async function fetchPublishPropagation(
   if (objectRef) params.set('object_ref', objectRef)
   if (actionKey) params.set('action_key', actionKey)
   const qs = params.toString()
-  const res = await fetch(`/api/publish-propagation${qs ? `?${qs}` : ''}`)
-  if (!res.ok) throw new Error(`API ${res.status}`)
-  return res.json()
+  return authApi<PublishPropagationSurface>(`/api/publish-propagation${qs ? `?${qs}` : ''}`)
 }
 
 // ============================================================
@@ -572,9 +555,7 @@ export interface RecoveryWindowSurface {
 }
 
 export async function fetchRecoveryWindow(commandId: string): Promise<RecoveryWindowSurface> {
-  const res = await fetch(`/api/recovery/window/${encodeURIComponent(commandId)}`)
-  if (!res.ok) throw new Error(`API ${res.status}`)
-  return res.json()
+  return authApi<RecoveryWindowSurface>(`/api/recovery/window/${encodeURIComponent(commandId)}`)
 }
 
 // ============================================================
@@ -628,7 +609,5 @@ export interface DownstreamRealityCheckSurface {
 }
 
 export async function fetchDownstreamRealityCheck(commandId: string): Promise<DownstreamRealityCheckSurface> {
-  const res = await fetch(`/api/recovery/downstream-reality-check/${encodeURIComponent(commandId)}`)
-  if (!res.ok) throw new Error(`API ${res.status}`)
-  return res.json()
+  return authApi<DownstreamRealityCheckSurface>(`/api/recovery/downstream-reality-check/${encodeURIComponent(commandId)}`)
 }

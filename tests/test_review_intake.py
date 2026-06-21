@@ -202,6 +202,28 @@ class ReviewIntakeTests(unittest.TestCase):
         existing_refs = {card["object_ref"] for card in payload["priority_stack"]}
         self.assertIn("ko-billing-refund-policy", existing_refs)
 
+    def test_existing_published_object_is_compiled_as_update_not_create(self) -> None:
+        record = PressureIntakeRecord(
+            signal_type=PressureSignalType.HUMAN_REWRITE,
+            signal_ref="refund-policy-rewrite",
+            proposal_id="ko-billing-refund-policy",
+            title="Refund policy rewrite pressure should stay on the existing governed object",
+            summary="Existing refund policy must be revised without pretending it is net-new.",
+            source_ref="rewrite/refund-policy-rewrite",
+            source_type=EvidenceSourceType.CHAT_TRANSCRIPT,
+            audience_filter=AudienceFilter(
+                visibility=Visibility.INTERNAL,
+                product_lines=("billing",),
+            ),
+            object_type=KnowledgeObjectType.POLICY_RULE,
+            affected_surfaces=("copilot", "macro"),
+        )
+
+        payload = compile_pressure_intake(record).as_proposal_bundle().proposal.to_dict()
+
+        self.assertEqual(payload["proposal_id"], "ko-billing-refund-policy")
+        self.assertEqual(payload["action"], "update")
+
 
 if __name__ == "__main__":
     unittest.main()

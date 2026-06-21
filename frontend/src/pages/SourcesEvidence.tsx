@@ -25,7 +25,9 @@ export default function SourcesEvidence() {
     setError(null)
     fetchSourceBlindnessSurface().then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false))
   }
-  useEffect(load, [])
+  useEffect(() => {
+    fetchSourceBlindnessSurface().then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false))
+  }, [])
 
   if (loading) return <PageSkeleton />
   if (error)

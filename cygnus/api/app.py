@@ -11,15 +11,18 @@ from cygnus.api.auth import (
     authenticate_user,
     create_access_token,
     get_current_user,
+    require_admin,
     seed_default_admin,
     user_to_dict,
 )
+from cygnus.api.config import settings
 from cygnus.domain.objects import TroubleshootingFlow
 from cygnus.publish import (
     apply_pressure_intake_publish_action,
     get_pressure_intake_publish_preview_surface,
     get_pressure_intake_publish_propagation_surface,
     get_pressure_intake_recovery_proof_surface,
+    projection_store,
 )
 from cygnus.recovery import (
     DownstreamRealityCheckQuery,
@@ -63,9 +66,10 @@ app = FastAPI(
 # Dev-open CORS: restrict to the real frontend origin before any non-local deployment.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=list(settings.cors_allowed_origins),
+    allow_credentials=True,
     allow_methods=["GET", "POST"],
-    allow_headers=["*"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 
@@ -108,13 +112,13 @@ def healthz() -> dict[str, str]:
 
 
 @app.get("/api/command-center")
-def command_center() -> dict[str, object]:
+def command_center(_current_user: User = Depends(get_current_user)) -> dict[str, object]:
     """Risk-ranked morning command brief for the Command Center surface."""
     return get_review_home_surface().to_dict()
 
 
 @app.get("/api/drift")
-def drift() -> dict[str, object]:
+def drift(_current_user: User = Depends(get_current_user)) -> dict[str, object]:
     """Release/incident drift governance surface — freshness loss forcing a governance path.
 
     Returns the drift-governance surface compiled from the review bundle set.
@@ -124,7 +128,7 @@ def drift() -> dict[str, object]:
 
 
 @app.get("/api/source-blindness")
-def source_blindness() -> dict[str, object]:
+def source_blindness(_current_user: User = Depends(get_current_user)) -> dict[str, object]:
     """Source-blindness governance surface — sync loss expressed as governance loss, not noise.
 
     Returns the source-health surface compiled from the review bundle set.
@@ -135,14 +139,16 @@ def source_blindness() -> dict[str, object]:
 
 
 @app.get("/api/review-intake")
-def review_intake() -> dict[str, object]:
+def review_intake(_current_user: User = Depends(get_current_user)) -> dict[str, object]:
     """Surface-ready review intake compiled from support pressure and source-loss signals."""
     return build_pressure_intake_surfaces(sample_pressure_intake_records()).to_dict()
 
 
 @app.get("/api/review-queue/{object_ref}")
 def review_queue_item(
-    object_ref: str, owner_state: str | None = None
+    object_ref: str,
+    owner_state: str | None = None,
+    _current_user: User = Depends(get_current_user),
 ) -> dict[str, object]:
     """Queue-preserving governance drilldown compiled from the pressure intake bundle set."""
     review_query = (
@@ -159,7 +165,9 @@ def review_queue_item(
 
 @app.get("/api/publish-preview")
 def publish_preview(
-    object_ref: str | None = None, action_key: str | None = None
+    object_ref: str | None = None,
+    action_key: str | None = None,
+    _current_user: User = Depends(get_current_user),
 ) -> dict[str, object]:
     """Blast-radius-first publish surface compiled from the same pressure intake bundle set."""
     return get_pressure_intake_publish_preview_surface(
@@ -176,7 +184,10 @@ class PublishApplyRequest(BaseModel):
 
 
 @app.post("/api/publish/apply")
-def publish_apply(body: PublishApplyRequest) -> dict[str, object]:
+def publish_apply(
+    body: PublishApplyRequest,
+    _current_user: User = Depends(require_admin),
+) -> dict[str, object]:
     """Execute a real publish governance command and return the full result.
 
     Runs the same executor the preview surface rehearses, but returns the complete
@@ -205,12 +216,19 @@ def publish_apply(body: PublishApplyRequest) -> dict[str, object]:
     payload["rehearsal"] = True
     payload["persisted"] = False
     payload["selected_action"] = body.action_key
+    projection_store.remember(
+        payload["updated_candidate"]["object_id"],
+        selected_action=body.action_key,
+        result=result,
+    )
     return payload
 
 
 @app.get("/api/publish-propagation")
 def publish_propagation(
-    object_ref: str | None = None, action_key: str | None = None
+    object_ref: str | None = None,
+    action_key: str | None = None,
+    _current_user: User = Depends(get_current_user),
 ) -> dict[str, object]:
     """Supporting-surface propagation theater compiled from the current publish command rehearsal."""
     return get_pressure_intake_publish_propagation_surface(
@@ -222,7 +240,9 @@ def publish_propagation(
 
 @app.get("/api/recovery-proof")
 def recovery_proof(
-    object_ref: str | None = None, action_key: str | None = None
+    object_ref: str | None = None,
+    action_key: str | None = None,
+    _current_user: User = Depends(get_current_user),
 ) -> dict[str, object]:
     """Frontline reality-check surface proving whether a governance command changed support behavior."""
     return get_pressure_intake_recovery_proof_surface(
@@ -233,7 +253,10 @@ def recovery_proof(
 
 
 @app.get("/api/recovery/downstream-reality-check/{command_id}")
-def downstream_reality_check(command_id: str) -> dict[str, object]:
+def downstream_reality_check(
+    command_id: str,
+    _current_user: User = Depends(get_current_user),
+) -> dict[str, object]:
     """Frontline recovery feedback for a specific governance command."""
     return get_downstream_reality_check_surface(
         DownstreamRealityCheckQuery(command_id=command_id)
@@ -241,7 +264,10 @@ def downstream_reality_check(command_id: str) -> dict[str, object]:
 
 
 @app.get("/api/recovery/window/{command_id}")
-def recovery_window(command_id: str) -> dict[str, object]:
+def recovery_window(
+    command_id: str,
+    _current_user: User = Depends(get_current_user),
+) -> dict[str, object]:
     """Before/after recovery proof for a specific governance command."""
     return get_recovery_window_surface(
         RecoveryWindowQuery(command_id=command_id)
@@ -249,7 +275,9 @@ def recovery_window(command_id: str) -> dict[str, object]:
 
 
 @app.get("/api/recovery/overview")
-def governance_overview() -> dict[str, object]:
+def governance_overview(
+    _current_user: User = Depends(get_current_user),
+) -> dict[str, object]:
     """Compare open loops to choose the next highest-leverage command."""
     return get_governance_overview_surface(
         GovernanceOverviewQuery(
@@ -259,7 +287,7 @@ def governance_overview() -> dict[str, object]:
 
 
 @app.get("/api/knowledge-graph")
-def knowledge_graph() -> dict[str, object]:
+def knowledge_graph(_current_user: User = Depends(get_current_user)) -> dict[str, object]:
     """Typed knowledge objects, evidence, and audiences as a relationship graph.
 
     Nodes:
@@ -363,7 +391,10 @@ def knowledge_graph() -> dict[str, object]:
 
 
 @app.get("/api/traceability/{object_id}")
-def traceability(object_id: str) -> dict[str, object]:
+def traceability(
+    object_id: str,
+    _current_user: User = Depends(get_current_user),
+) -> dict[str, object]:
     """Full evidence→source→freshness traceability chain for one knowledge object.
 
     Implements the product invariant "traceability first": every answer is one
@@ -403,4 +434,16 @@ def traceability(object_id: str) -> dict[str, object]:
             "publish_targets": object_dict.get("publish_targets", []),
         },
         "trace": trace.to_dict(),
+        "projection": (
+            (
+                snapshot.result.to_dict()
+                | {
+                    "selected_action": snapshot.selected_action,
+                    "persisted": False,
+                    "rehearsal": True,
+                }
+            )
+            if (snapshot := projection_store.get(selected.object_id)) is not None
+            else None
+        ),
     }

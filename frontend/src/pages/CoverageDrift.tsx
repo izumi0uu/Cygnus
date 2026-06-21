@@ -23,7 +23,9 @@ export default function CoverageDrift() {
     setError(null)
     fetchDriftSurface().then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false))
   }
-  useEffect(load, [])
+  useEffect(() => {
+    fetchDriftSurface().then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false))
+  }, [])
 
   if (loading) return <PageSkeleton />
   if (error)

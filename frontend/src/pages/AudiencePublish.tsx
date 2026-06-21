@@ -36,7 +36,9 @@ export default function AudiencePublish() {
     setError(null)
     fetchPublishPreview().then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false))
   }
-  useEffect(load, [])
+  useEffect(() => {
+    fetchPublishPreview().then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false))
+  }, [])
 
   if (loading) return <PageSkeleton />
   if (error)

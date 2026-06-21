@@ -61,8 +61,6 @@ export default function RecoveryDetail() {
 
   useEffect(() => {
     if (!commandId) return
-    setLoading(true)
-    setError(null)
     Promise.all([
       fetchRecoveryWindow(commandId).catch((e) => { throw new Error(`window: ${e}`) }),
       fetchDownstreamRealityCheck(commandId).catch((e) => { throw new Error(`reality: ${e}`) }),

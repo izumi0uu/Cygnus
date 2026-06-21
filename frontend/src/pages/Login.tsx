@@ -14,8 +14,8 @@ export default function Login() {
   const location = useLocation()
   const from = (location.state as { from?: string } | null)?.from ?? '/console'
 
-  const [email, setEmail] = useState('admin@cygnus.local')
-  const [password, setPassword] = useState('admin123')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -84,7 +84,7 @@ export default function Login() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin@cygnus.local"
+                placeholder="support@company.com"
                 className="border border-[color-mix(in_srgb,var(--primary)_30%,transparent)] bg-transparent px-3 py-2 font-mono text-[13px] outline-none transition-colors focus:border-primary"
               />
             </label>

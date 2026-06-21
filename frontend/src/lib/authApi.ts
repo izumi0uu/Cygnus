@@ -54,8 +54,7 @@ export async function authApi<T = unknown>(path: string, options: RequestOptions
   }
 
   if (!res.ok) {
-    let data: unknown = null
-    try { data = await res.json() } catch { data = null }
+    const data = await res.json().catch(() => null)
     const message = (data as { detail?: string })?.detail || `API Error ${res.status}`
     throw new ApiError(res.status, message, data)
   }

@@ -5,7 +5,6 @@ import AppShell from '@/components/layout/AppShell'
 import RequireAuth from '@/components/RequireAuth'
 import { AuthProvider } from '@/lib/auth'
 import { ToastProvider } from '@/lib/toast'
-import { PublishActionProvider } from '@/lib/publishAction'
 import Login from '@/pages/Login'
 
 const Overview = lazy(() => import('@/pages/Overview'))
@@ -22,25 +21,23 @@ export default function App() {
   return (
     <AuthProvider>
       <ToastProvider>
-        <PublishActionProvider>
-          <Routes>
-            <Route path="/" element={<Landing />} />
-            <Route path="/login" element={<Login />} />
-            <Route element={<RequireAuth />}>
-              <Route path="/console" element={<AppShell />}>
-                <Route index element={<Overview />} />
-                <Route path="queue" element={<ReviewQueue />} />
-                <Route path="objects" element={<KnowledgeObjects />} />
-                <Route path="sources" element={<SourcesEvidence />} />
-                <Route path="audience" element={<AudiencePublish />} />
-                <Route path="drift" element={<CoverageDrift />} />
-                <Route path="propagation" element={<Propagation />} />
-                <Route path="recovery/:commandId" element={<RecoveryDetail />} />
-                <Route path="audit" element={<Placeholder sectionKey="audit" />} />
-              </Route>
+        <Routes>
+          <Route path="/" element={<Landing />} />
+          <Route path="/login" element={<Login />} />
+          <Route element={<RequireAuth />}>
+            <Route path="/console" element={<AppShell />}>
+              <Route index element={<Overview />} />
+              <Route path="queue" element={<ReviewQueue />} />
+              <Route path="objects" element={<KnowledgeObjects />} />
+              <Route path="sources" element={<SourcesEvidence />} />
+              <Route path="audience" element={<AudiencePublish />} />
+              <Route path="drift" element={<CoverageDrift />} />
+              <Route path="propagation" element={<Propagation />} />
+              <Route path="recovery/:commandId" element={<RecoveryDetail />} />
+              <Route path="audit" element={<Placeholder sectionKey="audit" />} />
             </Route>
-          </Routes>
-        </PublishActionProvider>
+          </Route>
+        </Routes>
       </ToastProvider>
     </AuthProvider>
   )

@@ -3,11 +3,19 @@ import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { X } from 'lucide-react'
 import ForceGraph2D from 'react-force-graph-2d'
-import { fetchKnowledgeGraph, fetchTraceability, type KnowledgeGraph, type KnowledgeGraphNode, type TraceabilitySurface } from '@/lib/api'
+import type { ForceGraphMethods, GraphData, LinkObject, NodeObject } from 'react-force-graph-2d'
+import {
+  fetchKnowledgeGraph,
+  fetchTraceability,
+  type KnowledgeGraph,
+  type KnowledgeGraphNode,
+  type PublishBinding,
+  type PublishConflict,
+  type TraceabilitySurface,
+} from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { useVocab } from '@/lib/vocab'
 import { useTheme } from '@/lib/theme'
-import { usePublishAction } from '@/lib/publishAction'
 import { PageSkeleton } from '@/components/Skeleton'
 import { useFocusTrap } from '@/lib/useFocusTrap'
 
@@ -47,8 +55,12 @@ type GNode = {
   y?: number
 }
 
+type GraphLink = { source: string; target: string; kind: string }
+type ForceNode = NodeObject<GNode>
+type ForceLink = LinkObject<GNode, GraphLink>
+
 export default function KnowledgeObjects() {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
   const { resolvedTheme } = useTheme()
   const [data, setData] = useState<KnowledgeGraph | null>(null)
   const [loading, setLoading] = useState(true)
@@ -56,7 +68,7 @@ export default function KnowledgeObjects() {
   const [searchParams, setSearchParams] = useSearchParams()
 
   const wrapRef = useRef<HTMLDivElement>(null)
-  const fgRef = useRef<any>(null)
+  const fgRef = useRef<ForceGraphMethods<GNode, GraphLink> | undefined>(undefined)
   const [w, setW] = useState(0)
   const H = 540
 
@@ -65,12 +77,12 @@ export default function KnowledgeObjects() {
   const cv = useMemo(() => {
     const styles = getComputedStyle(document.documentElement)
     const get = (name: string) => styles.getPropertyValue(name).trim()
+    const dark = resolvedTheme === 'dark'
     return {
-      card: get('--card') || '#ffffff',
-      foreground: get('--foreground') || '#1a1d24',
+      card: get('--card') || (dark ? '#111318' : '#ffffff'),
+      foreground: get('--foreground') || (dark ? '#f2f4f8' : '#1a1d24'),
       faint: get('--faint') || '#7b828f',
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedTheme])
 
   const load = () => {
@@ -78,7 +90,9 @@ export default function KnowledgeObjects() {
     setError(null)
     fetchKnowledgeGraph().then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false))
   }
-  useEffect(load, [])
+  useEffect(() => {
+    fetchKnowledgeGraph().then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false))
+  }, [])
   useEffect(() => {
     const el = wrapRef.current
     if (!el) return
@@ -93,8 +107,8 @@ export default function KnowledgeObjects() {
   const closeObject = () =>
     setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('object'); return n }, { replace: true })
 
-  const graph = useMemo(() => {
-    if (!data) return { nodes: [] as GNode[], links: [] as { source: string; target: string; kind: string }[] }
+  const graph = useMemo<GraphData<GNode, GraphLink>>(() => {
+    if (!data) return { nodes: [], links: [] }
     const nodes: GNode[] = data.nodes.map((n) => {
       if (n.kind === 'object') {
         return { id: n.id, kind: 'object', name: n.label, r: 9, color: OBJ_COLOR[n.object_type ?? ''] ?? '#185ee0', node: n }
@@ -104,10 +118,9 @@ export default function KnowledgeObjects() {
       }
       return { id: n.id, kind: 'audience', name: n.visibility === 'external' ? 'EXT' : 'INT', r: 5, color: C_AUD, node: n }
     })
-    const links = data.edges.map((e) => ({ source: e.source, target: e.target, kind: e.kind }))
+    const links: GraphLink[] = data.edges.map((e) => ({ source: e.source, target: e.target, kind: e.kind }))
     return { nodes, links }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, i18n.language])
+  }, [data])
 
   if (loading) return <PageSkeleton />
   if (error)
@@ -122,7 +135,8 @@ export default function KnowledgeObjects() {
   const selectedId = searchParams.get('object')
   const selected = selectedId ? data.nodes.find((n) => n.id === selectedId && n.kind === 'object') ?? null : null
 
-  const drawNode = (node: any, ctx: CanvasRenderingContext2D, scale: number) => {
+  const drawNode = (node: ForceNode, ctx: CanvasRenderingContext2D, scale: number) => {
+    if (typeof node.x !== 'number' || typeof node.y !== 'number') return
     const r = node.r ?? 5
     ctx.beginPath()
     ctx.arc(node.x, node.y, r, 0, 2 * Math.PI)
@@ -140,7 +154,8 @@ export default function KnowledgeObjects() {
     ctx.fillStyle = node.kind === 'object' ? cv.foreground : node.kind === 'audience' ? node.color : cv.faint
     ctx.fillText(node.name, node.x, node.y + r + 2 / scale)
   }
-  const drawHit = (node: any, color: string, ctx: CanvasRenderingContext2D) => {
+  const drawHit = (node: ForceNode, color: string, ctx: CanvasRenderingContext2D) => {
+    if (typeof node.x !== 'number' || typeof node.y !== 'number') return
     ctx.beginPath()
     ctx.arc(node.x, node.y, (node.r ?? 5) + 2, 0, 2 * Math.PI)
     ctx.fillStyle = color
@@ -167,14 +182,14 @@ export default function KnowledgeObjects() {
             backgroundColor="rgba(0,0,0,0)"
             nodeLabel="name"
             nodeRelSize={5}
-            linkColor={(l: any) => EDGE_STYLE[l.kind]?.color ?? 'rgba(123,130,143,0.22)'}
-            linkWidth={(l: any) => EDGE_STYLE[l.kind]?.width ?? 1}
-            linkLineDash={(l: any) => (EDGE_STYLE[l.kind]?.dashed ? [4, 3] : null)}
+            linkColor={(l: ForceLink) => EDGE_STYLE[l.kind]?.color ?? 'rgba(123,130,143,0.22)'}
+            linkWidth={(l: ForceLink) => EDGE_STYLE[l.kind]?.width ?? 1}
+            linkLineDash={(l: ForceLink) => (EDGE_STYLE[l.kind]?.dashed ? [4, 3] : null)}
             cooldownTicks={120}
             onEngineStop={() => fgRef.current?.zoomToFit(400, 60)}
             nodeCanvasObject={drawNode}
             nodePointerAreaPaint={drawHit}
-            onNodeClick={(node: any) => { if (node.kind === 'object' && node.node) openObject(node.node.id) }}
+            onNodeClick={(node: ForceNode) => { if (node.kind === 'object' && node.node) openObject(node.node.id) }}
           />
         )}
       </div>
@@ -253,7 +268,7 @@ function Drawer({ node, edges, nodes, onClose }: { node: KnowledgeGraphNode; edg
             </div>
           </Section>
         )}
-        <TraceabilitySection objectId={node.id} />
+        <TraceabilitySection key={node.id} objectId={node.id} />
       </aside>
     </>
   )
@@ -262,19 +277,25 @@ function Drawer({ node, edges, nodes, onClose }: { node: KnowledgeGraphNode; edg
 function TraceabilitySection({ objectId }: { objectId: string }) {
   const { t } = useTranslation()
   const v = useVocab()
-  const { last: lastPublishAction } = usePublishAction()
   const [trace, setTrace] = useState<TraceabilitySurface | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    setLoading(true)
-    setError(null)
+    let cancelled = false
     fetchTraceability(objectId)
-      .then(setTrace)
-      .catch((e) => setError(String(e)))
-      .finally(() => setLoading(false))
+      .then((payload) => {
+        if (!cancelled) setTrace(payload)
+      })
+      .catch((e) => {
+        if (!cancelled) setError(String(e))
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [objectId])
 
   const FRESH_COLOR: Record<string, string> = {
@@ -315,13 +336,13 @@ function TraceabilitySection({ objectId }: { objectId: string }) {
               change, so this is a projection of what the action WOULD do, not a
               claim that the trace changed. Tagged explicitly so it never reads
               as durable post-publish state. */}
-          {lastPublishAction && lastPublishAction.objectRef === objectId && (
+          {trace.projection && (
             <WhatIfProjection
-              actionKey={lastPublishAction.result.selected_action}
-              opened={lastPublishAction.result.opened_bindings}
-              removed={lastPublishAction.result.removed_bindings}
-              held={lastPublishAction.result.held_bindings}
-              persisted={lastPublishAction.result.persisted}
+              actionKey={trace.projection.selected_action}
+              opened={trace.projection.opened_bindings}
+              removed={trace.projection.removed_bindings}
+              held={trace.projection.held_bindings}
+              persisted={trace.projection.persisted}
             />
           )}
 
@@ -388,9 +409,9 @@ function WhatIfProjection({
   persisted,
 }: {
   actionKey: string
-  opened: { audience_label: string; channel: string }[]
-  removed: { audience_label: string; channel: string }[]
-  held: { audience_label: string; channel: string }[]
+  opened: PublishBinding[]
+  removed: PublishBinding[]
+  held: PublishConflict[]
   persisted: boolean
 }) {
   const { t } = useTranslation()
@@ -421,7 +442,7 @@ function ProjectionGroup({
   dot,
 }: {
   label: string
-  bindings: { audience_label: string; channel: string }[]
+  bindings: Array<{ audience_label: string; channel: string; reason?: string }>
   tol: string
   dot: string
 }) {
@@ -439,6 +460,18 @@ function ProjectionGroup({
               {b.audience_label} · {v.surface(b.channel)}
             </span>
           ))}
+        </div>
+      )}
+      {bindings.some((binding) => binding.reason) && (
+        <div className="mt-1 flex flex-col gap-1">
+          {bindings.map(
+            (binding, index) =>
+              binding.reason && (
+                <p key={`${binding.channel}-${index}`} className="font-mono text-[10px] leading-relaxed text-faint">
+                  {binding.audience_label} · {v.surface(binding.channel)} — {binding.reason}
+                </p>
+              ),
+          )}
         </div>
       )}
     </div>

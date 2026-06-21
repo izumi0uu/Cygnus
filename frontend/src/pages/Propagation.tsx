@@ -43,15 +43,12 @@ export default function Propagation() {
   const objectRef = searchParams.get('object_ref') || undefined
   const actionKey = searchParams.get('action_key') || undefined
 
-  const load = () => {
-    setLoading(true)
-    setError(null)
+  useEffect(() => {
     fetchPublishPropagation(objectRef, actionKey)
       .then(setData)
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false))
-  }
-  useEffect(load, [objectRef, actionKey])
+  }, [objectRef, actionKey])
 
   const gotoObject = (ref: string) =>
     setSearchParams((p) => { const n = new URLSearchParams(p); n.set('object_ref', ref); return n }, { replace: true })
@@ -61,7 +58,20 @@ export default function Propagation() {
     return (
       <div className="bp-panel p-4">
         <div className="font-mono text-sm" style={{ color: 'var(--urgent)' }}>⚠ {t('state.error')}</div>
-        <Button variant="ghost" className="mt-3" onClick={load}>{t('state.retry')}</Button>
+        <Button
+          variant="ghost"
+          className="mt-3"
+          onClick={() => {
+            setLoading(true)
+            setError(null)
+            fetchPublishPropagation(objectRef, actionKey)
+              .then(setData)
+              .catch((e) => setError(String(e)))
+              .finally(() => setLoading(false))
+          }}
+        >
+          {t('state.retry')}
+        </Button>
       </div>
     )
   if (!data) return null

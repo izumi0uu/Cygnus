@@ -278,10 +278,11 @@ def sample_pressure_intake_records() -> tuple[PressureIntakeRecord, ...]:
 def _proposal_for_record(record: PressureIntakeRecord) -> CompilationProposal:
     proposal_id = record.proposal_id or record.signal_ref
     audience_note = _audience_note(record.audience_filter, record)
+    action = PlanAction.UPDATE if record.proposal_id else PlanAction.CREATE
     return CompilationProposal(
         proposal_id=proposal_id,
         object_type=record.object_type,
-        action=PlanAction.CREATE,
+        action=action,
         title=record.title,
         summary=record.summary,
         evidence_ids=(f"ev:{record.signal_type.value}:{record.signal_ref}",),

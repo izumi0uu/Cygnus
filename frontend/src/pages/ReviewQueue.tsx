@@ -30,7 +30,9 @@ export default function ReviewQueue() {
     setError(null)
     fetchReviewIntake().then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false))
   }
-  useEffect(load, [])
+  useEffect(() => {
+    fetchReviewIntake().then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false))
+  }, [])
 
   // bundle lookup by object_ref (proposal_id === object_ref)
   const bundlesByRef = useMemo(() => {

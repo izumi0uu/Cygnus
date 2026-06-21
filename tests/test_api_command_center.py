@@ -8,12 +8,15 @@ from cygnus.api.app import (
     governance_overview,
     healthz,
     knowledge_graph,
+    publish_apply,
     publish_preview,
     publish_propagation,
     recovery_proof,
     recovery_window,
     review_intake,
     review_queue_item,
+    traceability,
+    PublishApplyRequest,
 )
 
 
@@ -98,6 +101,54 @@ class CommandCenterApiTests(unittest.TestCase):
         edge_kinds = {edge["kind"] for edge in payload["edges"]}
         self.assertTrue({"object", "evidence", "audience"}.issubset(node_kinds))
         self.assertTrue({"cites", "serves"}.issubset(edge_kinds))
+
+    def test_publish_apply_runs_executor_and_returns_full_result(self) -> None:
+        payload = publish_apply(
+            PublishApplyRequest(object_ref="refund-enterprise-rewrite", action_key="hold_external")
+        )
+        # the executor actually ran: a real action_log line, not an echo summary
+        self.assertTrue(payload["action_log"])
+        self.assertTrue(any("hold_external" in entry for entry in payload["action_log"]))
+        self.assertIn("opened_bindings", payload)
+        self.assertIn("removed_bindings", payload)
+        self.assertIn("held_bindings", payload)
+        self.assertIn("updated_candidate", payload)
+        self.assertEqual(payload["selected_action"], "hold_external")
+        # honesty: fixture-backed write path is explicitly marked not persisted
+        self.assertFalse(payload["persisted"])
+        self.assertTrue(payload["rehearsal"])
+
+    def test_publish_apply_rejects_unknown_action_key(self) -> None:
+        from fastapi import HTTPException
+
+        with self.assertRaises(HTTPException) as ctx:
+            publish_apply(
+                PublishApplyRequest(object_ref="refund-enterprise-rewrite", action_key="not-a-real-command")
+            )
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    def test_traceability_returns_full_evidence_chain(self) -> None:
+        payload = traceability("ko-eu-invoice-delay")
+        self.assertEqual(payload["surface_id"], "traceability-chain")
+        self.assertEqual(payload["object"]["object_id"], "ko-eu-invoice-delay")
+        trace = payload["trace"]
+        self.assertIn("evidence_refs", trace)
+        self.assertGreater(len(trace["evidence_refs"]), 0)
+        # every evidence ref carries the real source chain, not invented fields
+        ref = trace["evidence_refs"][0]
+        self.assertIn("source_type", ref)
+        self.assertIn("source_ref", ref)
+        self.assertIn("freshness", ref)
+        # stale evidence is surfaced as a blind spot, not hidden
+        self.assertEqual(trace["freshness"], "stale")
+        self.assertIn("stale_evidence_present", trace["blind_spots"])
+
+    def test_traceability_rejects_unknown_object(self) -> None:
+        from fastapi import HTTPException
+
+        with self.assertRaises(HTTPException) as ctx:
+            traceability("does-not-exist")
+        self.assertEqual(ctx.exception.status_code, 404)
 
 
 if __name__ == "__main__":

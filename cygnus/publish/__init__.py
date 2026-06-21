@@ -62,6 +62,7 @@ __all__ = [
     "get_pressure_intake_recovery_proof_surface",
     "get_pressure_intake_publish_propagation_surface",
     "get_pressure_intake_publish_preview_surface",
+    "apply_pressure_intake_publish_action",
 ]
 
 from cygnus.publish.recovery import (
@@ -79,6 +80,7 @@ from cygnus.publish.surface import (
     PublishPreviewSurface,
     PublishSituationFrame,
     PropagationStatusLane,
+    apply_pressure_intake_publish_action,
     get_pressure_intake_publish_propagation_surface,
     get_pressure_intake_publish_preview_surface,
 )

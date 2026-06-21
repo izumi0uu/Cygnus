@@ -352,6 +352,35 @@ def get_pressure_intake_publish_preview_surface(
     )
 
 
+def apply_pressure_intake_publish_action(
+    selected_object_ref: str | None,
+    *,
+    action_key: str,
+    records: Iterable[PressureIntakeRecord] | None = None,
+) -> PublishGovernanceResult:
+    """Run a real publish governance command and return the full result.
+
+    Reuses the same bundle/candidate/preset machinery as the preview surface so
+    the action_key -> action mapping stays in one place. This is the write path
+    behind ``POST /api/publish/apply``: the executor actually runs and the full
+    ``PublishGovernanceResult`` (opened / removed / held bindings + action_log)
+    is returned rather than the flattened echo.
+    """
+    source_records = tuple(records) if records is not None else sample_pressure_intake_records()
+    queue_surface = get_pressure_intake_review_brief_surface(records=source_records)
+    queue_cards = queue_surface.priority_stack
+    if not queue_cards:
+        raise ValueError("publish apply requires at least one review queue card")
+
+    selected_card = _resolve_selected_card(queue_cards, selected_object_ref)
+    intake_bundles = compile_pressure_intake_bundle(source_records)
+    bundle = _require_intake_bundle(intake_bundles, selected_card.object_ref)
+    base_candidate = _build_candidate(bundle)
+    base_preview = build_publish_blast_radius_preview(base_candidate)
+    action_presets = _build_action_presets(bundle=bundle, candidate=base_candidate, preview=base_preview)
+    return _apply_selected_action(action_key, bundle=bundle, candidate=base_candidate, presets=action_presets)
+
+
 def get_pressure_intake_publish_propagation_surface(
     selected_object_ref: str | None = None,
     *,

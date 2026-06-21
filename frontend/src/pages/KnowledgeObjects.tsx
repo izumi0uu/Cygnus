@@ -3,9 +3,10 @@ import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { X } from 'lucide-react'
 import ForceGraph2D from 'react-force-graph-2d'
-import { fetchKnowledgeGraph, type KnowledgeGraph, type KnowledgeGraphNode } from '@/lib/api'
+import { fetchKnowledgeGraph, fetchTraceability, type KnowledgeGraph, type KnowledgeGraphNode, type TraceabilitySurface } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { useVocab } from '@/lib/vocab'
+import { useTheme } from '@/lib/theme'
 import { PageSkeleton } from '@/components/Skeleton'
 import { useFocusTrap } from '@/lib/useFocusTrap'
 
@@ -47,6 +48,7 @@ type GNode = {
 
 export default function KnowledgeObjects() {
   const { t, i18n } = useTranslation()
+  const { resolvedTheme } = useTheme()
   const [data, setData] = useState<KnowledgeGraph | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -56,6 +58,19 @@ export default function KnowledgeObjects() {
   const fgRef = useRef<any>(null)
   const [w, setW] = useState(0)
   const H = 540
+
+  // Canvas can't read CSS variables directly; resolve the theme-dependent fill/stroke/text
+  // colors from :root each time the resolved theme changes.
+  const cv = useMemo(() => {
+    const styles = getComputedStyle(document.documentElement)
+    const get = (name: string) => styles.getPropertyValue(name).trim()
+    return {
+      card: get('--card') || '#ffffff',
+      foreground: get('--foreground') || '#1a1d24',
+      faint: get('--faint') || '#7b828f',
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedTheme])
 
   const load = () => {
     setLoading(true)
@@ -96,8 +111,8 @@ export default function KnowledgeObjects() {
   if (loading) return <PageSkeleton />
   if (error)
     return (
-      <div className="rounded-xl border border-border bg-card p-4 shadow-card">
-        <div className="font-semibold" style={{ color: 'var(--urgent)' }}>⚠ {t('state.error')}</div>
+      <div className="bp-panel p-4">
+        <div className="font-mono text-sm" style={{ color: 'var(--urgent)' }}>⚠ {t('state.error')}</div>
         <Button variant="ghost" className="mt-3" onClick={load}>{t('state.retry')}</Button>
       </div>
     )
@@ -111,17 +126,17 @@ export default function KnowledgeObjects() {
     ctx.beginPath()
     ctx.arc(node.x, node.y, r, 0, 2 * Math.PI)
     if (node.kind === 'audience') {
-      ctx.fillStyle = '#ffffff'; ctx.fill()
+      ctx.fillStyle = cv.card; ctx.fill()
       ctx.lineWidth = 2 / scale; ctx.strokeStyle = node.color; ctx.stroke()
     } else {
       ctx.fillStyle = node.color; ctx.fill()
-      if (node.kind === 'object') { ctx.lineWidth = 2 / scale; ctx.strokeStyle = '#ffffff'; ctx.stroke() }
+      if (node.kind === 'object') { ctx.lineWidth = 2 / scale; ctx.strokeStyle = cv.card; ctx.stroke() }
     }
     const fontSize = (node.kind === 'object' ? 11 : 10) / scale
     ctx.font = `${node.kind === 'object' ? 600 : 400} ${fontSize}px Inter, sans-serif`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'top'
-    ctx.fillStyle = node.kind === 'object' ? '#1a1d24' : node.kind === 'audience' ? node.color : '#7b828f'
+    ctx.fillStyle = node.kind === 'object' ? cv.foreground : node.kind === 'audience' ? node.color : cv.faint
     ctx.fillText(node.name, node.x, node.y + r + 2 / scale)
   }
   const drawHit = (node: any, color: string, ctx: CanvasRenderingContext2D) => {
@@ -140,9 +155,10 @@ export default function KnowledgeObjects() {
         <span className="ml-auto font-mono text-[11px] text-faint">{t('kg.hint')}</span>
       </div>
 
-      <div ref={wrapRef} className="overflow-hidden rounded-xl border border-border bg-card shadow-soft" style={{ height: H }}>
+      <div ref={wrapRef} className="bp-panel overflow-hidden" style={{ height: H }}>
         {w > 0 && (
           <ForceGraph2D
+            key={resolvedTheme}
             ref={fgRef}
             width={w}
             height={H}
@@ -169,8 +185,8 @@ export default function KnowledgeObjects() {
 
 function Legend({ color, label, ring, hollow, extra }: { color: string; label: string; ring?: boolean; hollow?: boolean; extra?: string }) {
   return (
-    <span className="flex items-center gap-2 text-[12.5px] text-muted-foreground">
-      <span className="h-3 w-3 rounded-full" style={hollow ? { border: `2px solid ${color}`, background: '#fff' } : { background: color, boxShadow: ring ? '0 0 0 1.5px #fff inset' : undefined }} />
+    <span className="flex items-center gap-2 font-mono text-[12.5px] text-muted-foreground">
+      <span className="h-2.5 w-2.5 rotate-45" style={hollow ? { border: `2px solid ${color}`, background: 'var(--card)' } : { background: color, boxShadow: ring ? `0 0 0 1.5px var(--card) inset` : undefined }} />
       {label}
       {extra && <span className="font-mono text-[10px] text-faint">{extra}</span>}
     </span>
@@ -192,59 +208,151 @@ function Drawer({ node, edges, nodes, onClose }: { node: KnowledgeGraphNode; edg
   const citedEvidence = neighbours.filter((n) => n.kind === 'evidence')
   const audiences = neighbours.filter((n) => n.kind === 'audience')
   const linkedObjects = neighbours.filter((n) => n.kind === 'object')
-  const LC: Record<string, string> = { published: 'chip', in_review: 'chip-high', draft: 'chip-medium' }
+  const LC: Record<string, string> = { published: 'bp-tol-ok', in_review: 'bp-tol-high', draft: 'bp-tol-flat' }
   return (
     <>
       <div className="fixed inset-0 z-40 bg-foreground/25" onClick={onClose} />
-      <aside ref={ref} role="dialog" aria-modal="true" aria-labelledby="ko-drawer-title" tabIndex={-1} className="fixed right-0 top-0 z-50 flex h-full w-full max-w-[440px] flex-col overflow-y-auto border-l border-border bg-card p-5 shadow-soft outline-none">
+      <aside ref={ref} role="dialog" aria-modal="true" aria-labelledby="ko-drawer-title" tabIndex={-1} className="bp-panel fixed right-0 top-0 z-50 flex h-full w-full max-w-[440px] flex-col overflow-y-auto p-5 outline-none">
         <div className="flex items-center gap-2">
-          <span className="rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">{v.objectType(node.object_type ?? '')}</span>
-          <span className={`chip ${LC[node.lifecycle_state ?? ''] ?? 'chip'}`}>{node.lifecycle_state}</span>
-          <button className="ml-auto flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground hover:bg-muted" aria-label={t('detail.close')} onClick={onClose}><X size={15} /></button>
+          <span className="bp-tol bp-tol-flat">{v.objectType(node.object_type ?? '')}</span>
+          <span className={`bp-tol ${LC[node.lifecycle_state ?? ''] ?? 'bp-tol-flat'}`}>{node.lifecycle_state}</span>
+          <button className="ml-auto flex h-8 w-8 items-center justify-center bp-panel text-muted-foreground hover:bg-muted" aria-label={t('detail.close')} onClick={onClose}><X size={15} /></button>
         </div>
-        <h2 id="ko-drawer-title" className="mt-3 text-lg font-bold leading-tight">{node.label}</h2>
+        <h2 id="ko-drawer-title" className="mt-3 font-mono text-lg font-bold leading-tight">{node.label}</h2>
         <div className="mt-1 font-mono text-[11px] text-faint">{node.id}</div>
         <Section label={t('detail.summary')}>
-          <p className="text-sm leading-relaxed text-muted-foreground">{node.summary}</p>
+          <p className="font-mono text-[13px] leading-relaxed text-muted-foreground">{node.summary}</p>
         </Section>
         <Section label={t('detail.evidence')}>
           {citedEvidence.length ? (
             <ul className="space-y-2">
               {citedEvidence.map((e) => (
                 <li key={e.id} className="flex items-start gap-2">
-                  <span className="mt-1 h-2 w-2 shrink-0 rounded-full" style={{ background: EV_COLOR[e.source_type ?? ''] ?? '#aab0bd' }} />
+                  <span className="mt-1 h-2 w-2 shrink-0 rotate-45" style={{ background: EV_COLOR[e.source_type ?? ''] ?? '#aab0bd' }} />
                   <div>
-                    <div className="text-sm font-medium">{e.label}</div>
+                    <div className="font-mono text-sm font-medium">{e.label}</div>
                     <div className="font-mono text-[10px] text-faint">{e.source_type} · {e.freshness} · {e.source_ref}</div>
                   </div>
                 </li>
               ))}
             </ul>
-          ) : <p className="text-sm text-faint">{t('state.empty')}</p>}
+          ) : <p className="font-mono text-sm text-faint">{t('state.empty')}</p>}
         </Section>
         <Section label={t('detail.audiences')}>
           {audiences.length ? (
             <div className="flex flex-wrap gap-1.5">
-              {audiences.map((a) => <span key={a.id} className="chip">{v.visibility(a.visibility ?? '')}</span>)}
+              {audiences.map((a) => <span key={a.id} className="bp-tol bp-tol-flat">{v.visibility(a.visibility ?? '')}</span>)}
             </div>
-          ) : <p className="text-sm text-faint">{t('state.empty')}</p>}
+          ) : <p className="font-mono text-sm text-faint">{t('state.empty')}</p>}
         </Section>
         {linkedObjects.length > 0 && (
           <Section label={t('detail.linkedObjects')}>
             <div className="flex flex-wrap gap-1.5">
-              {linkedObjects.map((o) => <span key={o.id} className="chip">{o.label}</span>)}
+              {linkedObjects.map((o) => <span key={o.id} className="bp-tol bp-tol-flat">{o.label}</span>)}
             </div>
           </Section>
         )}
+        <TraceabilitySection objectId={node.id} />
       </aside>
     </>
   )
 }
 
+function TraceabilitySection({ objectId }: { objectId: string }) {
+  const { t } = useTranslation()
+  const v = useVocab()
+  const [trace, setTrace] = useState<TraceabilitySurface | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setLoading(true)
+    setError(null)
+    fetchTraceability(objectId)
+      .then(setTrace)
+      .catch((e) => setError(String(e)))
+      .finally(() => setLoading(false))
+  }, [objectId])
+
+  const FRESH_COLOR: Record<string, string> = {
+    fresh: 'var(--ok)',
+    stale: 'var(--urgent)',
+    unknown: 'var(--medium)',
+  }
+  const FRESH_TOL: Record<string, string> = {
+    fresh: 'bp-tol-ok',
+    stale: 'bp-tol-urgent',
+    unknown: 'bp-tol-flat',
+  }
+
+  return (
+    <Section label={t('trace.chain')}>
+      {loading && <p className="font-mono text-sm text-faint">…</p>}
+      {error && <p className="font-mono text-sm" style={{ color: 'var(--urgent)' }}>{error}</p>}
+      {trace && !loading && !error && (
+        <div className="space-y-3">
+          {/* freshness rollup + blind spots */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="bp-label-inline">{t('trace.freshness')}</span>
+            <span className={`bp-tol ${FRESH_TOL[trace.trace.freshness] ?? 'bp-tol-flat'}`} style={{ color: FRESH_COLOR[trace.trace.freshness] ?? 'var(--faint)' }}>
+              {trace.trace.freshness}
+            </span>
+          </div>
+          {trace.trace.blind_spots.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="bp-label-inline">{t('trace.blindSpots')}</span>
+              {trace.trace.blind_spots.map((b) => (
+                <span key={b} className="bp-tol bp-tol-urgent">{b}</span>
+              ))}
+            </div>
+          )}
+
+          {/* the evidence → source chain */}
+          {trace.trace.evidence_refs.length === 0 ? (
+            <p className="font-mono text-sm text-faint">{t('trace.noEvidence')}</p>
+          ) : (
+            <ul className="space-y-2">
+              {trace.trace.evidence_refs.map((ref) => (
+                <li key={ref.evidence_id} className="flex items-start gap-2">
+                  <span className="mt-1 h-2 w-2 shrink-0 rotate-45" style={{ background: FRESH_COLOR[ref.freshness] ?? 'var(--faint)' }} />
+                  <div className="min-w-0">
+                    <div className="font-mono text-sm font-medium">{ref.title}</div>
+                    <div className="font-mono text-[10px] text-faint">
+                      {v.surface(ref.source_type)} · {ref.freshness} · {t('trace.sourceRef')}: {ref.source_ref}
+                    </div>
+                    <div className="mt-0.5 font-mono text-[10px] leading-relaxed text-muted-foreground">{t('trace.excerpt')}: {ref.excerpt_ref}</div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {/* publish targets + review history */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="bp-label-inline">{t('trace.publishTargets')}</span>
+            {trace.object.publish_targets.length > 0 ? (
+              trace.object.publish_targets.map((c) => <span key={c} className="bp-tol bp-tol-flat">{v.surface(c)}</span>)
+            ) : <span className="font-mono text-[11px] text-faint">{t('trace.none')}</span>}
+          </div>
+          {trace.trace.review_history_summary.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="bp-label-inline">{t('trace.reviewHistory')}</span>
+              {trace.trace.review_history_summary.map((h, i) => (
+                <span key={i} className="bp-tol bp-tol-flat">{h.stage}: {h.status}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </Section>
+  )
+}
+
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="mt-5 border-t border-border pt-4">
-      <div className="mb-2 font-mono text-xs font-semibold uppercase tracking-widest text-muted-foreground">{label}</div>
+    <div className="bp-dim mt-5 pt-4">
+      <div className="mb-2 bp-label">{label}</div>
       {children}
     </div>
   )

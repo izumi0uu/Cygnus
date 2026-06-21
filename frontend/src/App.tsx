@@ -13,6 +13,8 @@ const AudiencePublish = lazy(() => import('@/pages/AudiencePublish'))
 const KnowledgeObjects = lazy(() => import('@/pages/KnowledgeObjects'))
 const SourcesEvidence = lazy(() => import('@/pages/SourcesEvidence'))
 const CoverageDrift = lazy(() => import('@/pages/CoverageDrift'))
+const Propagation = lazy(() => import('@/pages/Propagation'))
+const RecoveryDetail = lazy(() => import('@/pages/RecoveryDetail'))
 const Placeholder = lazy(() => import('@/pages/Placeholder'))
 
 export default function App() {
@@ -30,7 +32,8 @@ export default function App() {
               <Route path="sources" element={<SourcesEvidence />} />
               <Route path="audience" element={<AudiencePublish />} />
               <Route path="drift" element={<CoverageDrift />} />
-              <Route path="propagation" element={<Placeholder sectionKey="propagation" />} />
+              <Route path="propagation" element={<Propagation />} />
+              <Route path="recovery/:commandId" element={<RecoveryDetail />} />
               <Route path="audit" element={<Placeholder sectionKey="audit" />} />
             </Route>
           </Route>

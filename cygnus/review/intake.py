@@ -247,6 +247,31 @@ def sample_pressure_intake_records() -> tuple[PressureIntakeRecord, ...]:
             freshness_state=FreshnessState.STALE,
             evidence_excerpt="Incident feed is degraded while the workaround continues to be customer-facing.",
         ),
+        # Governance signal on an EXISTING published object — bridges the
+        # publish write-path (which keys on object_ref) to traceability (which
+        # resolves the same ko-* id). Human-rewrite pressure on the already-
+        # published refund policy => REPUBLISH / restrict_publish presets, so
+        # APPLY on ko-billing-refund-policy runs and the traceability drawer's
+        # post-apply what-if projection can trigger on matching ids.
+        PressureIntakeRecord(
+            signal_type=PressureSignalType.HUMAN_REWRITE,
+            signal_ref="refund-policy-rewrite",
+            proposal_id="ko-billing-refund-policy",
+            title="Refund policy is accumulating frontline rewrites that cross the plan boundary",
+            summary="Published refund policy needs a governed republish before enterprise exceptions leak further.",
+            source_ref="rewrite/refund-policy-rewrite",
+            source_type=EvidenceSourceType.CHAT_TRANSCRIPT,
+            audience_filter=AudienceFilter(
+                visibility=Visibility.INTERNAL,
+                product_lines=("billing",),
+            ),
+            object_type=KnowledgeObjectType.POLICY_RULE,
+            affected_surfaces=("copilot", "macro"),
+            trigger_signals=("rewrite_cluster", "audience_boundary_conflict"),
+            product_lines=("billing",),
+            evidence_excerpt="Agents keep softening enterprise-only refund clauses before sending replies.",
+            queue_owner="support-ops",
+        ),
     )
 
 

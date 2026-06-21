@@ -191,10 +191,16 @@ class ReviewIntakeTests(unittest.TestCase):
         payload = get_pressure_intake_review_brief_surface().to_dict()
 
         self.assertEqual(payload["surface_id"], "review-home")
-        self.assertEqual(payload["command_brief"]["summary_counts"]["ticket_pressure"], 2)
+        # 3 ticket_pressure signals: two create-proposals + one governance
+        # signal on the EXISTING published object ko-billing-refund-policy.
+        self.assertEqual(payload["command_brief"]["summary_counts"]["ticket_pressure"], 3)
         self.assertEqual(payload["priority_stack"][0]["risk_type"], "source_blindness")
         self.assertEqual(payload["priority_stack"][0]["object_ref"], "incident-sync-eu-billing")
         self.assertIn("assign_owner", payload["priority_stack"][1]["command_actions"])
+        # The publish write-path keys on object_ref; an existing ko-* object in
+        # the queue bridges APPLY to traceability (same id resolves on both sides).
+        existing_refs = {card["object_ref"] for card in payload["priority_stack"]}
+        self.assertIn("ko-billing-refund-policy", existing_refs)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ import { fetchKnowledgeGraph, fetchTraceability, type KnowledgeGraph, type Knowl
 import { Button } from '@/components/ui/button'
 import { useVocab } from '@/lib/vocab'
 import { useTheme } from '@/lib/theme'
+import { usePublishAction } from '@/lib/publishAction'
 import { PageSkeleton } from '@/components/Skeleton'
 import { useFocusTrap } from '@/lib/useFocusTrap'
 
@@ -261,6 +262,7 @@ function Drawer({ node, edges, nodes, onClose }: { node: KnowledgeGraphNode; edg
 function TraceabilitySection({ objectId }: { objectId: string }) {
   const { t } = useTranslation()
   const v = useVocab()
+  const { last: lastPublishAction } = usePublishAction()
   const [trace, setTrace] = useState<TraceabilitySurface | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -306,6 +308,21 @@ function TraceabilitySection({ objectId }: { objectId: string }) {
                 <span key={b} className="bp-tol bp-tol-urgent">{b}</span>
               ))}
             </div>
+          )}
+
+          {/* what-if projection from the last APPLY on this object.
+              persisted:false — the executor ran, but the fixture store did not
+              change, so this is a projection of what the action WOULD do, not a
+              claim that the trace changed. Tagged explicitly so it never reads
+              as durable post-publish state. */}
+          {lastPublishAction && lastPublishAction.objectRef === objectId && (
+            <WhatIfProjection
+              actionKey={lastPublishAction.result.selected_action}
+              opened={lastPublishAction.result.opened_bindings}
+              removed={lastPublishAction.result.removed_bindings}
+              held={lastPublishAction.result.held_bindings}
+              persisted={lastPublishAction.result.persisted}
+            />
           )}
 
           {/* the evidence → source chain */}
@@ -354,6 +371,76 @@ function Section({ label, children }: { label: string; children: React.ReactNode
     <div className="bp-dim mt-5 pt-4">
       <div className="mb-2 bp-label">{label}</div>
       {children}
+    </div>
+  )
+}
+
+// Post-apply what-if projection. The apply ran (opened/removed/held bindings
+// are real executor output) but persisted:false — the fixture store did not
+// change. So this is labelled PROJECTION, never "published". When there is
+// nothing to project (no bindings moved), we still render the stamp so the
+// user sees the apply was a no-op on bindings, not silently swallowed.
+function WhatIfProjection({
+  actionKey,
+  opened,
+  removed,
+  held,
+  persisted,
+}: {
+  actionKey: string
+  opened: { audience_label: string; channel: string }[]
+  removed: { audience_label: string; channel: string }[]
+  held: { audience_label: string; channel: string }[]
+  persisted: boolean
+}) {
+  const { t } = useTranslation()
+  const v = useVocab()
+  return (
+    <div className="bp-panel px-3 py-2.5">
+      <div className="mb-2 flex flex-wrap items-center gap-1.5">
+        <span className="bp-stamp" style={{ color: 'var(--high)', borderColor: 'color-mix(in srgb, var(--high) 45%, transparent)' }}>
+          {t('trace.projection')}
+        </span>
+        <span className="bp-label-inline">{v.command(actionKey)}</span>
+        <span className="bp-label-inline" style={{ color: 'var(--medium)', opacity: 0.7 }}>
+          {persisted ? t('trace.persisted') : t('trace.notPersisted')}
+        </span>
+      </div>
+      <ProjectionGroup label={t('trace.wouldOpen')} bindings={opened} tol="bp-tol-high" dot="var(--high)" />
+      <ProjectionGroup label={t('trace.wouldRemove')} bindings={removed} tol="bp-tol-flat" dot="var(--medium)" />
+      <ProjectionGroup label={t('trace.wouldHold')} bindings={held} tol="bp-tol-urgent" dot="var(--urgent)" />
+      <p className="mt-2 font-mono text-[10px] leading-relaxed text-faint">{t('trace.projectionNote')}</p>
+    </div>
+  )
+}
+
+function ProjectionGroup({
+  label,
+  bindings,
+  tol,
+  dot,
+}: {
+  label: string
+  bindings: { audience_label: string; channel: string }[]
+  tol: string
+  dot: string
+}) {
+  const v = useVocab()
+  return (
+    <div className="mb-1.5 last:mb-0">
+      <div className="mb-1 font-mono text-[10px] uppercase tracking-widest text-faint">
+        {label} · {bindings.length}
+      </div>
+      {bindings.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {bindings.map((b, i) => (
+            <span key={i} className={`bp-tol ${tol}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <span className="h-1.5 w-1.5 rounded-full" style={{ background: dot }} />
+              {b.audience_label} · {v.surface(b.channel)}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

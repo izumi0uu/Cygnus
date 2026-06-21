@@ -1,5 +1,4 @@
 import { fetchCommandCenter, type CommandCenterSurface, type PriorityItem } from '@/lib/api'
-import { authApi } from '@/lib/authApi'
 
 export type NotifSeverity = 'urgent' | 'high' | 'medium' | 'low'
 
@@ -95,44 +94,7 @@ export const commandCenterSource: NotificationSource = {
   },
 }
 
-// app.main persisted-notifications source. Same NotificationSource contract, so it is a
-// drop-in for commandCenterSource — but app.main needs a live backend (Postgres), so it is
-// only reachable once that infra is up. Select via VITE_NOTIF_SOURCE=arkon.
-type ArkonNotification = {
-  id: string
-  type: string
-  subject: string
-  body: string
-  target_type: string
-  target_id: string
-  read_at: string | null
-  created_at: string
-}
-
-export const arkonNotificationSource: NotificationSource = {
-  async list() {
-    const rows = await authApi<ArkonNotification[]>('/api/notifications')
-    return rows.map((n) => ({
-      id: String(n.id),
-      kind: n.type,
-      severity: 'medium' as NotifSeverity, // app.main notifications carry no severity yet
-      title: n.subject,
-      body: n.body,
-      objectRef: n.target_id,
-      to: FALLBACK_ROUTE.to,
-      navKey: FALLBACK_ROUTE.navKey,
-      ownerGap: false,
-      read: n.read_at != null,
-    }))
-  },
-  async markRead(id) {
-    await authApi(`/api/notifications/${id}/read`, { method: 'POST' })
-  },
-  async markAllRead() {
-    await authApi('/api/notifications/read-all', { method: 'POST' })
-  },
-}
-
-// Active source. Swap to the persisted backend with VITE_NOTIF_SOURCE=arkon once app.main is live.
-export const notificationSource: NotificationSource =
-  import.meta.env.VITE_NOTIF_SOURCE === 'arkon' ? arkonNotificationSource : commandCenterSource
+// Active source: derive alerts from the command-center feed; read state in localStorage.
+// When a Cygnus-native notifications endpoint is added, implement a new NotificationSource
+// and swap it in here.
+export const notificationSource: NotificationSource = commandCenterSource

@@ -26,24 +26,9 @@ type AuthState = {
 
 const AuthContext = createContext<AuthState | null>(null)
 
-// TEMPORARY: default-login bypass. While the ported app.main backend has no live
-// infra (Postgres/MinIO/Redis), this lets the console open without real auth.
-// Set to false to restore real /api/auth login.
-const DEV_DEFAULT_LOGIN = true
-const DEFAULT_USER: User = {
-  id: 'dev-admin',
-  name: 'support-lead',
-  email: 'admin@arkon.local',
-  role: 'admin',
-  department_ids: [],
-  department_names: [],
-  permissions: [],
-  workspace_memberships: [],
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(DEV_DEFAULT_LOGIN ? DEFAULT_USER : null)
-  const [loading, setLoading] = useState(!DEV_DEFAULT_LOGIN)
+  const [user, setUser] = useState<User | null>(null)
+  const [loading, setLoading] = useState(true)
 
   const refresh = useCallback(async () => {
     try {
@@ -58,16 +43,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    if (DEV_DEFAULT_LOGIN) return
     if (getToken()) void refresh()
     else setLoading(false)
   }, [refresh])
 
   const login = async (email: string, password: string) => {
-    if (DEV_DEFAULT_LOGIN) {
-      setUser({ ...DEFAULT_USER, email: email || DEFAULT_USER.email })
-      return
-    }
     const data = await authApi<{ access_token: string; user: User }>('/api/auth/login', {
       method: 'POST',
       body: { email, password },

@@ -1,7 +1,6 @@
-// Auth client for the ported Arkon backend (app.main) — a SEPARATE server from the
-// command-center API (cygnus.api.app on /api via Vite proxy). Auth therefore uses an
-// absolute base URL so it bypasses the /api → :8077 proxy.
-const AUTH_BASE = import.meta.env.VITE_AUTH_API_URL ?? 'http://localhost:8000'
+// Auth client — same-origin /api via Vite proxy, sharing the Cygnus backend with
+// the command-center API. No longer points at a separate Arkon server.
+const AUTH_BASE = ''
 const TOKEN_KEY = 'cygnus_token'
 const REQUEST_TIMEOUT_MS = 30_000
 

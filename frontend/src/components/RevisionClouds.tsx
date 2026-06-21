@@ -73,11 +73,29 @@ export function RevisionClouds({ zoom, panX, panY }: { zoom: number; panX: numbe
     setItems((prev) => prev.map((x) => ({ ...x, read: true })))
   }
 
+  // Clicking outside the selected cloud / its panel closes the detail view.
+  // Clouds and the panel stop propagation on their own clicks; anything else
+  // (blank canvas, page chrome) clears the selection.
+  useEffect(() => {
+    if (!selectedId) return
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as HTMLElement | null
+      if (target?.closest('.bp-cloud, .bp-cloud-panel')) return
+      setSelectedId(null)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [selectedId])
+
+  // Cap the drawing at the most important clouds (already sorted unread-first
+  // by severity in the source) so the canvas never gets crowded.
+  const MAX_CLOUDS = 5
+
   // Group clouds by position to stack nearby ones
   const clouds = items.map((n) => ({
     notif: n,
     pos: cloudPosition(n.id),
-  }))
+  })).slice(0, MAX_CLOUDS)
 
   const selectedCloud = clouds.find((c) => c.notif.id === selectedId)
 

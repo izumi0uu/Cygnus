@@ -1,189 +1,244 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link } from 'react-router-dom'
-import { ListTodo, Bell, Users, Share2, Database } from 'lucide-react'
-import { fetchCommandCenter, type CommandCenterSurface } from '@/lib/api'
+import { Link, useNavigate } from 'react-router-dom'
+import { fetchGovernanceOverview, type GovernanceOverviewSurface } from '@/lib/api'
 import { Button } from '@/components/ui/button'
-import { useVocab } from '@/lib/vocab'
-import { CmdButton } from '@/components/CmdButton'
 import { PageSkeleton } from '@/components/Skeleton'
-import { PieChart } from '@/components/charts/pie-chart'
-import { PieSlice } from '@/components/charts/pie-slice'
 
-const HEX: Record<string, string> = { urgent: '#e5484d', high: '#f76808', medium: '#e8930c', low: '#185ee0' }
-const RANK: Record<string, number> = { urgent: 3, high: 2, medium: 1, low: 0 }
+const RECOVERY_TOL: Record<string, string> = {
+  false_recovery: 'bp-tol-urgent',
+  recovering: 'bp-tol-high',
+  recovered: 'bp-tol-ok',
+  closed: 'bp-tol-ok',
+}
+const RECOVERY_COLOR: Record<string, string> = {
+  false_recovery: 'var(--urgent)',
+  recovering: 'var(--high)',
+  recovered: 'var(--ok)',
+  closed: 'var(--ok)',
+}
 
 export default function Overview() {
   const { t } = useTranslation()
-  const v = useVocab()
-  const [data, setData] = useState<CommandCenterSurface | null>(null)
+  const navigate = useNavigate()
+  const [data, setData] = useState<GovernanceOverviewSurface | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const load = () => {
     setLoading(true)
     setError(null)
-    fetchCommandCenter().then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false))
+    fetchGovernanceOverview().then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false))
   }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(load, [])
 
   const d = useMemo(() => {
     if (!data) return null
-    const stack = data.priority_stack
-    const by = (u: string) => stack.filter((it) => it.urgency === u).length
-    const surfCount: Record<string, number> = {}
-    stack.forEach((it) => it.affected_surfaces.forEach((s) => (surfCount[s] = (surfCount[s] || 0) + 1)))
-    const surfaces = Object.entries(surfCount).sort((a, b) => b[1] - a[1]).slice(0, 5)
-    const top = [...stack].sort((a, b) => (RANK[b.urgency] ?? 0) - (RANK[a.urgency] ?? 0)).slice(0, 4)
-    const pie = (['urgent', 'high', 'medium', 'low'] as const)
-      .map((u) => ({ label: t(`urgency.${u}`), value: by(u), color: HEX[u] }))
-      .filter((p) => p.value > 0)
+    const loops = data.open_loops
+    const falseRecovery = loops.filter((l) => l.assessment === 'false_recovery').length
+    const residualRisks = loops.reduce((s, l) => s + l.residual_risk_count, 0)
+    const pendingPropagation = loops.reduce((s, l) => s + l.pending_propagation_count, 0)
+    const topLoop = data.open_loops.find((l) => l.command_id === data.highest_leverage_command) ?? loops[0]
     return {
-      total: stack.length,
-      urgent: by('urgent'),
-      ownerGaps: data.situation_frame.owner_gaps,
-      surfacesTotal: data.situation_frame.affected_surfaces?.length ?? 0,
-      watched: new Set(stack.map((it) => it.object_ref)).size,
-      surfaces,
-      surfMax: surfaces[0]?.[1] ?? 1,
-      top,
-      pie,
+      total: loops.length,
+      falseRecovery,
+      residualRisks,
+      pendingPropagation,
+      ranks: [...data.open_loop_ranks].sort((a, b) => b.leverage_score - a.leverage_score),
+      topLoop,
     }
-  }, [data, t])
+  }, [data])
 
   if (loading) return <PageSkeleton />
   if (error)
     return (
-      <div className="rounded-xl border border-border bg-card p-4 shadow-card">
-        <div className="font-semibold" style={{ color: 'var(--urgent)' }}>⚠ {t('state.error')}</div>
+      <div className="bp-panel p-4">
+        <div className="font-mono text-sm" style={{ color: 'var(--urgent)' }}>⚠ {t('state.error')}</div>
         <Button variant="ghost" className="mt-3" onClick={load}>{t('state.retry')}</Button>
       </div>
     )
   if (!data || !d) return null
-  const sf = data.situation_frame
-
-  const tiles = [
-    { icon: ListTodo, n: d.total, label: t('overview.statRisks') },
-    { icon: Bell, n: d.urgent, label: t('frame.urgent'), tint: HEX.urgent },
-    { icon: Users, n: d.ownerGaps, label: t('frame.ownerGaps'), tint: HEX.high },
-    { icon: Share2, n: d.surfacesTotal, label: t('queue.statSurfaces') },
-    { icon: Database, n: d.watched, label: t('overview.statWatched') },
-  ]
 
   return (
-    <>
-      {/* hero — tinted briefing banner */}
-      <section
-        className="relative mb-4 overflow-hidden rounded-xl border border-border p-5 pl-[22px] shadow-soft"
-        style={{ background: 'linear-gradient(110deg, color-mix(in srgb, var(--accent) 55%, var(--card)), var(--card) 60%)' }}
-      >
-        <span className="absolute inset-y-0 left-0 w-[3px] bg-primary" />
-        <div className="flex items-start gap-4">
-          <span className="chip chip-urgent mt-0.5 shrink-0">{t('frame.label')}</span>
-          <div className="min-w-0">
-            <h2 className="text-[19px] font-bold leading-tight">{data.headline}</h2>
-            <p className="mt-1.5 max-w-[80ch] text-[13px] leading-relaxed text-muted-foreground">{sf.primary_tension}</p>
-          </div>
-          <div className="ml-auto hidden shrink-0 gap-5 sm:flex">
-            <div><div className="font-mono text-2xl font-bold" style={{ color: HEX.urgent }}>{sf.urgent_items}</div><div className="font-mono text-[10px] uppercase text-muted-foreground">{t('frame.urgent')}</div></div>
-            <div><div className="font-mono text-2xl font-bold" style={{ color: HEX.high }}>{sf.owner_gaps}</div><div className="font-mono text-[10px] uppercase text-muted-foreground">{t('frame.ownerGaps')}</div></div>
-          </div>
+    <div className="min-h-full p-6 pb-10 pt-5">
+      {/* Drawing header — title + revision stamp */}
+      <div className="mb-5 flex items-end gap-4">
+        <div>
+          <div className="bp-label mb-1">DWG-001 · GOVERNANCE OVERVIEW</div>
+          <h1 className="font-mono text-[22px] font-bold leading-none tracking-tight">{data.headline}</h1>
         </div>
-      </section>
-
-      {/* stat tiles */}
-      <div className="mb-4 flex flex-wrap gap-3">
-        {tiles.map((tl) => (
-          <div key={tl.label} className="min-w-[130px] flex-1 rounded-xl border border-border bg-card p-4 shadow-card transition-transform hover:-translate-y-px">
-            <div
-              className="mb-2.5 flex h-[30px] w-[30px] items-center justify-center rounded-lg"
-              style={{ background: tl.tint ? `color-mix(in srgb, ${tl.tint} 10%, transparent)` : 'var(--muted)', color: tl.tint ?? 'var(--muted-foreground)' }}
-            >
-              <tl.icon size={16} />
-            </div>
-            <div className="font-mono text-[26px] font-bold tracking-tight" style={tl.tint ? { color: tl.tint } : undefined}>{tl.n}</div>
-            <div className="mt-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">{tl.label}</div>
-          </div>
-        ))}
+        <span className="bp-stamp ml-auto" style={{ color: d.falseRecovery > 0 ? 'var(--urgent)' : 'var(--ok)', borderColor: d.falseRecovery > 0 ? 'var(--urgent)' : 'var(--ok)' }}>
+          {d.falseRecovery > 0 ? `REV · ${d.falseRecovery} FALSE` : 'REV · STABLE'}
+        </span>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* left: risk composition donut + surfaces bars */}
-        <div className="rounded-xl border border-border bg-card shadow-soft">
-          <div className="px-4 pt-3.5"><div className="text-[13px] font-bold">{t('overview.composition')}</div><div className="text-[11px] text-faint">{t('overview.byUrgency')}</div></div>
-          <div className="flex items-center gap-3 px-5 pb-5 pt-4">
-            <div className="relative shrink-0" style={{ width: 140, height: 140 }}>
-              <PieChart data={d.pie} size={140} innerRadius={46} cornerRadius={3} padAngle={0.04}>
-                {d.pie.map((_, i) => <PieSlice key={i} index={i} />)}
-              </PieChart>
-              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                <span className="font-mono text-[26px] font-bold leading-none">{d.total}</span>
-                <span className="font-mono text-[11px] text-muted-foreground">{t('overview.risks')}</span>
-              </div>
-            </div>
-            <div className="flex-1">
-              {d.pie.map((p) => (
-                <div key={p.label} className="flex items-center gap-2 border-b border-dashed border-border py-1.5 text-[12.5px] last:border-b-0">
-                  <span className="h-2 w-2 rounded-full" style={{ background: p.color }} />
-                  {p.label}
-                  <span className="ml-auto font-mono font-bold">{p.value}</span>
-                  <span className="w-[42px] text-right font-mono text-[11px] text-faint">{Math.round((p.value / d.total) * 100)}%</span>
-                </div>
-              ))}
-            </div>
+      {/* Dimension line separator */}
+      <div className="bp-dim mb-4" />
+
+      {/* Title block — parameter grid */}
+      <div className="bp-title-block mb-5">
+        <div className="bp-tb-row">
+          <div className="bp-tb-cell">
+            <div className="bp-tb-key">{t('overview.openLoops')}</div>
+            <div className="bp-tb-val">{d.total.toString().padStart(2, '0')}</div>
           </div>
-          <div className="border-t border-border px-5 pb-4 pt-3.5">
-            <div className="flex items-baseline"><div className="text-[13px] font-bold">{t('overview.surfaces')}</div><Link to="/console/audience" className="ml-auto font-mono text-[11px] font-semibold text-primary">{t('overview.view')}</Link></div>
-            <div className="mt-2.5 flex flex-col gap-2.5">
-              {d.surfaces.map(([s, c]) => (
-                <div key={s} className="flex items-center gap-2.5 text-[12.5px]">
-                  <span className="w-[84px] shrink-0 text-muted-foreground">{v.surface(s)}</span>
-                  <span className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                    <span className="block h-full rounded-full" style={{ width: `${(c / d.surfMax) * 100}%`, background: 'linear-gradient(90deg, var(--primary), #4f86ec)' }} />
-                  </span>
-                  <span className="w-[18px] text-right font-mono text-[11px] text-muted-foreground">{c}</span>
-                </div>
-              ))}
-            </div>
+          <div className="bp-tb-cell">
+            <div className="bp-tb-key">{t('overview.falseRecovery')}</div>
+            <div className="bp-tb-val" style={{ color: 'var(--urgent)' }}>±{d.falseRecovery.toString().padStart(2, '0')}</div>
+          </div>
+          <div className="bp-tb-cell">
+            <div className="bp-tb-key">{t('overview.residualRisks')}</div>
+            <div className="bp-tb-val" style={{ color: 'var(--high)' }}>±{d.residualRisks.toString().padStart(2, '0')}</div>
+          </div>
+          <div className="bp-tb-cell">
+            <div className="bp-tb-key">{t('overview.pendingPropagation')}</div>
+            <div className="bp-tb-val">{d.pendingPropagation.toString().padStart(2, '0')}</div>
           </div>
         </div>
+        <div className="bp-tb-row">
+          <div className="bp-tb-cell" style={{ flex: 2 }}>
+            <div className="bp-tb-key">SUMMARY · NOTES</div>
+            <div className="text-[12px] leading-relaxed text-muted-foreground" style={{ fontFamily: 'var(--font-mono)' }}>{data.summary}</div>
+          </div>
+        </div>
+      </div>
 
-        {/* right: top risks + recovery ghost */}
-        <div className="flex flex-col rounded-xl border border-border bg-card shadow-soft">
-          <div className="flex items-baseline px-4 pt-3.5"><div className="text-[13px] font-bold">{t('overview.top')}</div><Link to="/console/queue" className="ml-auto font-mono text-[11px] font-semibold text-primary">{t('overview.viewQueue')}</Link></div>
-          <div className="mt-1.5">
-            {d.top.map((it, i) => (
-              <div key={it.risk_id} className="flex items-start gap-2.5 border-b border-border px-4 py-3 transition-colors last:border-b-0 hover:bg-muted">
-                <span className="mt-0.5 w-3.5 shrink-0 font-mono text-[11px] text-faint">{String(i + 1).padStart(2, '0')}</span>
-                <div className="min-w-0">
-                  <div className="text-[13px] font-semibold leading-snug">{it.title}</div>
-                  <div className="mt-1 flex items-center gap-1.5">
-                    <span className="h-2 w-2 rounded-full" style={{ background: HEX[it.urgency] }} />
-                    <span className="rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">{v.riskType(it.risk_type)}</span>
-                    <CmdButton command={it.primary_command} />
+      {/* Two-column: open loops annotation table + command horizon */}
+      <div className="grid gap-5 lg:grid-cols-2">
+        {/* Left: Open loops as annotation table */}
+        <div className="bp-panel">
+          <div className="flex items-baseline justify-between border-b border-[color-mix(in_srgb,var(--primary)_25%,transparent)] px-4 py-2.5">
+            <span className="bp-label">SEC-A · {t('overview.openLoops')} ({t('overview.byLeverage')})</span>
+            <Link to="/console/queue" className="bp-label hover:opacity-100" style={{ opacity: 0.7 }}>{t('overview.viewQueue')}</Link>
+          </div>
+          <div>
+            {d.ranks.map((r, i) => {
+              const loop = data.open_loops.find((l) => l.command_id === r.command_id)
+              const color = RECOVERY_COLOR[r.recovery_status] ?? 'var(--faint)'
+              return (
+                <div
+                  key={r.command_id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => navigate(`/console/recovery/${r.command_id}`)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(`/console/recovery/${r.command_id}`) } }}
+                  className="bp-anno"
+                >
+                  <span className="bp-anno-idx">{String(i + 1).padStart(2, '0')}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[13px] font-semibold leading-snug" style={{ fontFamily: 'var(--font-mono)' }}>{r.label.replace(/^\d+\.\s*/, '')}</span>
+                      <span className={`bp-tol ${RECOVERY_TOL[r.recovery_status] ?? 'bp-tol-flat'}`}>{r.recovery_status.replace(/_/g, ' ')}</span>
+                    </div>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-2.5 font-mono text-[10px] text-muted-foreground">
+                      <span>LEV <b style={{ color: 'var(--primary)' }}>{r.leverage_score.toFixed(1)}</b></span>
+                      <span>· RES {r.residual_risk_count}</span>
+                      {r.pending_propagation_count > 0 && <span>· PROP {r.pending_propagation_count}</span>}
+                      {loop?.top_next_command && (
+                        <button
+                          className="bp-cmd ml-auto"
+                          onClick={(e) => { e.stopPropagation(); navigate(`/console/recovery/${r.command_id}`) }}
+                        >
+                          {loop.top_next_command.replace(/_/g, ' ')}
+                        </button>
+                      )}
+                    </div>
                   </div>
+                  <span className="ml-2 mt-1.5 h-2 w-2 shrink-0" style={{ background: color, transform: 'rotate(45deg)' }} />
                 </div>
-              </div>
-            ))}
-          </div>
-          <div className="mt-auto border-t border-border px-5 pb-4 pt-3.5">
-            <div className="flex items-baseline"><div className="text-[13px] font-bold">{t('overview.recovery')}</div><span className="ml-auto font-mono text-[11px] text-faint">{t('overview.pending')}</span></div>
-            <div className="relative mt-2.5 flex h-[90px] items-center justify-center overflow-hidden rounded-lg bg-muted">
-              <svg width="100%" height="90" viewBox="0 0 400 90" preserveAspectRatio="none" className="absolute inset-0">
-                <defs>
-                  <linearGradient id="recoveryFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="var(--primary)" stopOpacity="0.16" />
-                    <stop offset="100%" stopColor="var(--primary)" stopOpacity="0" />
-                  </linearGradient>
-                </defs>
-                <path d="M0,70 60,60 120,64 180,48 240,52 300,34 360,38 400,24 L400,90 L0,90 Z" fill="url(#recoveryFill)" />
-                <polyline points="0,70 60,60 120,64 180,48 240,52 300,34 360,38 400,24" fill="none" stroke="var(--faint)" strokeWidth="2" strokeDasharray="5 5" opacity="0.55" />
-              </svg>
-              <span className="z-10 font-mono text-[11px] uppercase tracking-wide text-faint">{t('overview.pendingNote')}</span>
-            </div>
+              )
+            })}
           </div>
         </div>
+
+        {/* Right: Command horizon + next commands + recovery proof */}
+        <div className="flex flex-col gap-5">
+          {/* Command horizon */}
+          <div className="bp-panel">
+            <div className="border-b border-[color-mix(in_srgb,var(--primary)_25%,transparent)] px-4 py-2.5">
+              <span className="bp-label">SEC-B · {t('overview.commandHorizon')}</span>
+            </div>
+            <div className="flex flex-col gap-0">
+              {data.command_horizon.map((h, i) => (
+                <div
+                  key={i}
+                  className="flex items-start gap-3 px-4 py-2.5 border-b border-[color-mix(in_srgb,var(--primary)_12%,transparent)] last:border-b-0"
+                >
+                  <span className="font-mono text-[10px] text-[var(--primary)] opacity-40 mt-0.5">{String(i + 1).padStart(2, '0')}</span>
+                  <span className="text-[12.5px] leading-relaxed text-muted-foreground" style={{ fontFamily: 'var(--font-mono)' }}>{h}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Next commands */}
+          {data.next_command_ribbon.length > 0 && (
+            <div className="bp-panel">
+              <div className="border-b border-[color-mix(in_srgb,var(--primary)_25%,transparent)] px-4 py-2.5">
+                <span className="bp-label">SEC-C · {t('overview.nextCommands')}</span>
+              </div>
+              <div className="flex flex-wrap gap-2 p-4">
+                {data.next_command_ribbon.map((cmd) => (
+                  <button
+                    key={cmd}
+                    className="bp-cmd"
+                    onClick={() => navigate('/console/queue')}
+                  >
+                    {cmd.replace(/_/g, ' ')}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Recovery proof — top loop */}
+          {d.topLoop && (
+            <div className="bp-panel">
+              <div className="flex items-baseline justify-between border-b border-[color-mix(in_srgb,var(--primary)_25%,transparent)] px-4 py-2.5">
+                <span className="bp-label">SEC-D · {t('overview.recovery')}</span>
+                <span
+                  className="bp-tol"
+                  style={{
+                    color: RECOVERY_COLOR[d.topLoop.assessment] ?? 'var(--faint)',
+                    borderColor: RECOVERY_COLOR[d.topLoop.assessment] ?? 'var(--faint)',
+                  }}
+                >
+                  {d.topLoop.assessment.replace(/_/g, ' ')}
+                </span>
+              </div>
+              <div className="px-4 py-3">
+                <p className="text-[12px] leading-relaxed text-muted-foreground" style={{ fontFamily: 'var(--font-mono)' }}>{d.topLoop.recovery_proof_summary}</p>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
-    </>
+
+      {/* Governance notes — like drawing general notes */}
+      {data.governance_notes.length > 0 && (
+        <div className="bp-panel mt-5">
+          <div className="border-b border-[color-mix(in_srgb,var(--primary)_25%,transparent)] px-4 py-2.5">
+            <span className="bp-label">NOTES · {t('overview.governanceNotes')}</span>
+          </div>
+          <div className="px-4 py-3">
+            <ul className="space-y-1.5">
+              {data.governance_notes.map((note, i) => (
+                <li key={i} className="flex items-start gap-3 text-[12px] leading-relaxed text-muted-foreground" style={{ fontFamily: 'var(--font-mono)' }}>
+                  <span className="text-[var(--primary)] opacity-40 mt-0.5">{String(i + 1).padStart(2, '0')}.</span>
+                  {note}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+
+      {/* Drawing footer — scale + sheet info */}
+      <div className="mt-5 flex items-center justify-between border-t border-[color-mix(in_srgb,var(--primary)_20%,transparent)] pt-2.5">
+        <span className="bp-label" style={{ opacity: 0.4 }}>SCALE 1:1 · SHEET 1/1 · DWG-001</span>
+        <span className="bp-label" style={{ opacity: 0.4 }}>CYGNUS · GOVERNANCE BLUEPRINT</span>
+      </div>
+    </div>
   )
 }

@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Search, CornerDownLeft } from 'lucide-react'
+import { Search, CornerDownLeft, Crosshair } from 'lucide-react'
 import { fetchCommandCenter } from '@/lib/api'
 import { routeForRisk } from '@/lib/notifications'
 import { useVocab } from '@/lib/vocab'
+import { useZoom } from '@/lib/zoom'
 import { useFocusTrap } from '@/lib/useFocusTrap'
 
-type Item = { id: string; group: 'sections' | 'risks'; label: string; sub?: string; to: string }
+type Item =
+  | { id: string; group: 'sections' | 'risks'; label: string; sub?: string; to: string }
+  | { id: string; group: 'coords'; label: string; sub: string; x: number; y: number }
 
 const SECTIONS: { navKey: string; to: string }[] = [
   { navKey: 'overview', to: '/console' },
@@ -24,6 +27,7 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
   const { t } = useTranslation()
   const v = useVocab()
   const navigate = useNavigate()
+  const { setZoom, panBy, resetView } = useZoom()
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
   const [risks, setRisks] = useState<Item[]>([])
@@ -53,16 +57,36 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
   }, [open])
 
   const sections: Item[] = useMemo(
-    () => SECTIONS.map((s) => ({ id: s.navKey, group: 'sections', label: t(`nav.${s.navKey}`), to: s.to })),
+    () => SECTIONS.map((s) => ({ id: s.navKey, group: 'sections' as const, label: t(`nav.${s.navKey}`), to: s.to })),
     [t],
   )
+
+  // P3: Parse coordinate input — "X,Y" or "X Y"
+  const coordItem: Item | null = useMemo(() => {
+    const q = query.trim()
+    const m = q.match(/^(-?\d+)\s*[, ]\s*(-?\d+)$/)
+    if (!m) return null
+    const x = parseInt(m[1], 10)
+    const y = parseInt(m[2], 10)
+    return {
+      id: 'coord-jump',
+      group: 'coords',
+      label: `${t('coord.jumpTo')} X:${x} Y:${y}`,
+      sub: t('coord.enterCoord'),
+      x,
+      y,
+    }
+  }, [query, t])
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase()
     const all = [...sections, ...risks]
     if (!q) return all
-    return all.filter((i) => i.label.toLowerCase().includes(q) || i.sub?.toLowerCase().includes(q))
-  }, [query, sections, risks])
+    const filtered = all.filter((i) => i.label.toLowerCase().includes(q) || i.sub?.toLowerCase().includes(q))
+    // If coordinate parsed, prepend it
+    if (coordItem) return [coordItem, ...filtered]
+    return filtered
+  }, [query, sections, risks, coordItem])
 
   useEffect(() => { setActive(0) }, [query])
 
@@ -72,7 +96,25 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
     const target = item ?? results[active]
     if (!target) return
     onClose()
-    navigate(target.to)
+    if (target.group === 'coords') {
+      // P3: Jump to coordinate — set zoom to 1.5 and pan so the target is centered
+      resetView()
+      setZoom(1.5)
+      // Calculate pan offset to center the coordinate in the viewport
+      // We need to scroll the canvas so (x,y) is centered
+      // The canvas inner uses transform: translate(panX, panY) scale(zoom)
+      // To center (x,y): panX = canvasWidth/2 - x*zoom, panY = canvasHeight/2 - y*zoom
+      // But we use panBy for relative, so we compute the delta after resetView
+      requestAnimationFrame(() => {
+        const canvas = document.querySelector('.bp-canvas') as HTMLElement | null
+        if (!canvas) return
+        const cx = canvas.clientWidth / 2 - target.x * 1.5
+        const cy = canvas.clientHeight / 2 - target.y * 1.5
+        panBy(cx, cy)
+      })
+    } else {
+      navigate(target.to)
+    }
   }
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -92,7 +134,8 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
         aria-modal="true"
         aria-label={t('palette.placeholder')}
         tabIndex={-1}
-        className="w-full max-w-[560px] overflow-hidden rounded-xl border border-border bg-card shadow-soft outline-none"
+        className="w-full max-w-[560px] overflow-hidden border border-border bg-card shadow-soft outline-none"
+        style={{ borderRadius: 0 }}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2.5 border-b border-border px-4">
@@ -111,12 +154,15 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
           {results.length === 0 ? (
             <div className="px-4 py-8 text-center text-sm text-muted-foreground">{t('palette.empty')}</div>
           ) : (
-            (['sections', 'risks'] as const).map((group) => {
+            (['coords', 'sections', 'risks'] as const).map((group) => {
               const groupItems = results.filter((i) => i.group === group)
               if (groupItems.length === 0) return null
               return (
                 <div key={group}>
-                  <div className="px-4 pb-1 pt-2 font-mono text-[10px] uppercase tracking-widest text-faint">{t(`palette.${group}`)}</div>
+                  <div className="px-4 pb-1 pt-2 font-mono text-[10px] uppercase tracking-widest text-faint flex items-center gap-1.5">
+                    {group === 'coords' && <Crosshair size={10} />}
+                    {t(`palette.${group}`)}
+                  </div>
                   {groupItems.map((item) => {
                     idx++
                     const isActive = idx === active

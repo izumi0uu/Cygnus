@@ -4,13 +4,16 @@ import { BrowserRouter } from 'react-router-dom'
 import './index.css'
 import './i18n'
 import { ThemeProvider } from '@/lib/theme'
+import { ZoomProvider } from '@/lib/zoom'
 import App from './App.tsx'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ThemeProvider>
       <BrowserRouter>
-        <App />
+        <ZoomProvider>
+          <App />
+        </ZoomProvider>
       </BrowserRouter>
     </ThemeProvider>
   </StrictMode>,

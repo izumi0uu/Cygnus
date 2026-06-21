@@ -10,10 +10,12 @@
 }
 
 /* ============================================================
-   Cygnus operation console — "Blue DNA" (light only)
-   Accent #185ee0, tint #e6eef9, soft blue elevation, rounded.
-   Operational portal structure modeled on Arkon; shadcn token
-   convention so `npx shadcn add` works. (No purple, no dark.)
+   Cygnus operation console — "Blue DNA" (light + dark)
+   Light:  accent #185ee0, tint #e6eef9, soft blue elevation.
+   Dark:   neutral charcoal base, blue as deliberate accent pop,
+           elevation via small bg deltas (not color shifts).
+           Inspired by GitHub Dark Dimmed / Linear — not a
+           mechanical inversion of the light palette.
    ============================================================ */
 :root {
   --background: #f6f8fc;
@@ -55,6 +57,65 @@
   --medium: #e8930c;
   --ok: #30a46c;
   --faint: #8b91a0;
+
+  /* elevation tints (used by shadow utilities below) */
+  --shadow-blue-05: rgba(24, 94, 224, 0.05);
+  --shadow-blue-07: rgba(24, 94, 224, 0.07);
+  --shadow-blue-06: rgba(24, 94, 224, 0.06);
+  --shadow-blue-10: rgba(24, 94, 224, 0.10);
+  --shadow-blue-15: rgba(24, 94, 224, 0.15);
+  --scrollbar-thumb: rgba(0, 0, 0, 0.08);
+}
+
+.dark {
+  /* Neutral charcoal base — blue is an accent, not the surface.
+     Elevation comes from small bg deltas, not color shifts. */
+  --background: #101113;
+  --foreground: #e3e5e9;
+  --card: #191b1e;
+  --card-foreground: #e3e5e9;
+  --popover: #1d1f23;
+  --popover-foreground: #e3e5e9;
+
+  --primary: #2f6fe6;
+  --primary-foreground: #ffffff;
+  --secondary: #222428;
+  --secondary-foreground: #b4b8c0;
+  --muted: #161719;
+  --muted-foreground: #888b92;
+  --accent: #1a1f2b;
+  --accent-foreground: #4d8bf0;
+  --destructive: #db5158;
+  --destructive-foreground: #ffffff;
+
+  --border: #25272b;
+  --input: #2c2f34;
+  --ring: #2f6fe6;
+
+  /* sidebar — slightly darker than content for depth */
+  --sidebar: #0b0c0d;
+  --sidebar-foreground: #e3e5e9;
+  --sidebar-primary: #2f6fe6;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #181c26;
+  --sidebar-accent-foreground: #4d8bf0;
+  --sidebar-border: #1e2024;
+  --sidebar-ring: #2f6fe6;
+
+  /* risk signal — softened, not neon-lifted */
+  --urgent: #db5158;
+  --high: #d97a45;
+  --medium: #c69438;
+  --ok: #3ba070;
+  --faint: #62656c;
+
+  /* elevation — near-invisible; dark UI elevates with bg delta, not heavy shadow */
+  --shadow-blue-05: rgba(0, 0, 0, 0.08);
+  --shadow-blue-07: rgba(0, 0, 0, 0.12);
+  --shadow-blue-06: rgba(0, 0, 0, 0.10);
+  --shadow-blue-10: rgba(0, 0, 0, 0.14);
+  --shadow-blue-15: rgba(0, 0, 0, 0.18);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.08);
 }
 
 @theme inline {
@@ -110,11 +171,11 @@
 }
 
 @layer components {
-  .shadow-soft { box-shadow: 0 1px 2px rgba(24, 94, 224, 0.05), 0 8px 24px rgba(24, 94, 224, 0.07); }
-  .shadow-card { box-shadow: 0 1px 3px rgba(24, 94, 224, 0.06); }
+  .shadow-soft { box-shadow: 0 1px 2px var(--shadow-blue-05), 0 8px 24px var(--shadow-blue-07); }
+  .shadow-card { box-shadow: 0 1px 3px var(--shadow-blue-06); }
 
   /* segmented control with sliding glider (from the reference) */
-  .seg { position: relative; display: inline-flex; background: var(--card); box-shadow: 0 0 1px 0 rgba(24,94,224,.15), 0 4px 10px 0 rgba(24,94,224,.10); padding: 5px; border-radius: 99px; }
+  .seg { position: relative; display: inline-flex; background: var(--card); box-shadow: 0 0 1px 0 var(--shadow-blue-15), 0 4px 10px 0 var(--shadow-blue-10); padding: 5px; border-radius: 99px; }
   .seg-btn { position: relative; z-index: 2; height: 30px; padding: 0 16px; border: none; background: none; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--muted-foreground); border-radius: 99px; cursor: pointer; transition: color .15s ease-in; }
   .seg-btn[data-on="true"] { color: var(--primary); }
   .seg-glider { position: absolute; z-index: 1; top: 5px; left: 5px; height: 30px; background: var(--accent); border-radius: 99px; transition: transform .25s ease-out, width .25s ease-out; }
@@ -132,6 +193,865 @@
 
   /* Notion-style thin sidebar scrollbar */
   .thin-scroll::-webkit-scrollbar { width: 4px; }
-  .thin-scroll::-webkit-scrollbar-thumb { background: rgba(0,0,0,.08); border-radius: 4px; }
-  .thin-scroll { scrollbar-width: thin; scrollbar-color: rgba(0,0,0,.08) transparent; }
+  .thin-scroll::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
+  .thin-scroll { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
+
+  /* ============================================================
+     Day/Night theme toggle — standalone dark track checkbox
+     ============================================================ */
+  .theme-switch {
+    font-size: 16px;
+    cursor: pointer;
+    background-color: rgba(0, 0, 0, 0.7);
+    border-radius: 0.75em;
+    box-shadow: 0.125em 0.125em 0 0.125em rgba(0, 0, 0, 0.3) inset;
+    color: #fdea7b;
+    display: inline-flex;
+    align-items: center;
+    margin: 0;
+    padding: 0.15em;
+    width: 3em;
+    height: 1.5em;
+    transition: background-color 0.1s 0.3s ease-out, box-shadow 0.1s 0.3s ease-out;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    flex-shrink: 0;
+  }
+  .theme-switch:before,
+  .theme-switch:after { content: ""; display: block; }
+  .theme-switch:before {
+    background-color: #d7d7d7;
+    border-radius: 50%;
+    width: 1.2em;
+    height: 1.2em;
+    transition: background-color 0.1s 0.3s ease-out, transform 0.3s ease-out;
+    z-index: 1;
+  }
+  .theme-switch:after {
+    background:
+      linear-gradient(transparent 50%, rgba(0, 0, 0, 0.15) 0) 0 50% / 50% 100%,
+      repeating-linear-gradient(90deg, #bbb 0, #bbb, #bbb 20%, #999 20%, #999 40%)
+        0 50% / 50% 100%,
+      radial-gradient(circle at 50% 50%, #888 25%, transparent 26%);
+    background-repeat: no-repeat;
+    border: 0.25em solid transparent;
+    border-left: 0.4em solid #d8d8d8;
+    border-right: 0 solid transparent;
+    transition: border-left-color 0.1s 0.3s ease-out, transform 0.3s ease-out;
+    transform: translateX(-22.5%);
+    transform-origin: 25% 50%;
+    width: 1.2em;
+    height: 1em;
+    box-sizing: border-box;
+  }
+  .theme-switch:checked {
+    background-color: rgba(0, 0, 0, 0.45);
+    box-shadow: 0.125em 0.125em 0 0.125em rgba(0, 0, 0, 0.1) inset;
+  }
+  .theme-switch:checked:before {
+    background-color: currentColor;
+    transform: translateX(125%);
+  }
+  .theme-switch:checked:after {
+    border-left-color: currentColor;
+    transform: translateX(-2.5%) rotateY(180deg);
+  }
+  .theme-switch:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  /* ============================================================
+     Skewed ON/OFF language toggle — 中 / EN
+     ============================================================ */
+  .lang-toggle-wrapper .lang-tgl { display: none; }
+  .lang-toggle-wrapper .lang-tgl,
+  .lang-toggle-wrapper .lang-tgl:after,
+  .lang-toggle-wrapper .lang-tgl:before,
+  .lang-toggle-wrapper .lang-tgl *,
+  .lang-toggle-wrapper .lang-tgl *:after,
+  .lang-toggle-wrapper .lang-tgl *:before,
+  .lang-toggle-wrapper .lang-tgl + .lang-tgl-btn { box-sizing: border-box; }
+  .lang-toggle-wrapper .lang-tgl + .lang-tgl-btn {
+    outline: 0;
+    display: block;
+    width: 4em;
+    height: 2em;
+    position: relative;
+    cursor: pointer;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+  .lang-toggle-wrapper .lang-tgl + .lang-tgl-btn:after,
+  .lang-toggle-wrapper .lang-tgl + .lang-tgl-btn:before {
+    position: relative;
+    display: block;
+    content: "";
+    width: 50%;
+    height: 100%;
+  }
+  .lang-toggle-wrapper .lang-tgl + .lang-tgl-btn:after { left: 0; }
+  .lang-toggle-wrapper .lang-tgl + .lang-tgl-btn:before { display: none; }
+  .lang-toggle-wrapper .lang-tgl:checked + .lang-tgl-btn:after { left: 50%; }
+
+  .lang-toggle-wrapper .lang-tgl-skewed + .lang-tgl-btn {
+    overflow: hidden;
+    transform: skew(-10deg);
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
+    transition: all 0.2s ease;
+    font-family: var(--font-mono);
+    background: #888;
+  }
+  .lang-toggle-wrapper .lang-tgl-skewed + .lang-tgl-btn:after,
+  .lang-toggle-wrapper .lang-tgl-skewed + .lang-tgl-btn:before {
+    transform: skew(10deg);
+    display: inline-block;
+    transition: all 0.2s ease;
+    width: 100%;
+    text-align: center;
+    position: absolute;
+    line-height: 2em;
+    font-weight: bold;
+    color: #fff;
+    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
+  }
+  .lang-toggle-wrapper .lang-tgl-skewed + .lang-tgl-btn:after {
+    left: 100%;
+    content: attr(data-tg-on);
+  }
+  .lang-toggle-wrapper .lang-tgl-skewed + .lang-tgl-btn:before {
+    left: 0;
+    content: attr(data-tg-off);
+  }
+  .lang-toggle-wrapper .lang-tgl-skewed + .lang-tgl-btn:active { background: #888; }
+  .lang-toggle-wrapper .lang-tgl-skewed + .lang-tgl-btn:active:before { left: -10%; }
+  .lang-toggle-wrapper .lang-tgl-skewed:checked + .lang-tgl-btn { background: #86d993; }
+  .lang-toggle-wrapper .lang-tgl-skewed:checked + .lang-tgl-btn:before { left: -100%; }
+  .lang-toggle-wrapper .lang-tgl-skewed:checked + .lang-tgl-btn:after { left: 0; }
+  .lang-toggle-wrapper .lang-tgl-skewed:checked + .lang-tgl-btn:active:after { left: 10%; }
+
+  /* ============================================================
+     Blueprint / Schematic — engineering drawing aesthetic
+     Grid paper, thin lines, no fills, no shadows, no rounding.
+     ============================================================ */
+  .bp-grid {
+    background-image:
+      linear-gradient(color-mix(in srgb, var(--primary) 7%, transparent) 1px, transparent 1px),
+      linear-gradient(90deg, color-mix(in srgb, var(--primary) 7%, transparent) 1px, transparent 1px),
+      linear-gradient(color-mix(in srgb, var(--primary) 3%, transparent) 1px, transparent 1px),
+      linear-gradient(90deg, color-mix(in srgb, var(--primary) 3%, transparent) 1px, transparent 1px);
+    background-size: 80px 80px, 80px 80px, 20px 20px, 20px 20px;
+  }
+
+  .bp-panel {
+    border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent);
+    background: color-mix(in srgb, var(--background) 85%, transparent);
+    border-radius: 0;
+    box-shadow: none;
+    position: relative;
+  }
+
+  /* Corner registration marks — like drawing corner ticks */
+  .bp-panel::before,
+  .bp-panel::after {
+    content: "";
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border-color: var(--primary);
+    border-style: solid;
+    pointer-events: none;
+  }
+  .bp-panel::before {
+    top: -1px; left: -1px;
+    border-width: 1px 0 0 1px;
+  }
+  .bp-panel::after {
+    bottom: -1px; right: -1px;
+    border-width: 0 1px 1px 0;
+  }
+
+  .bp-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: var(--primary);
+    opacity: 0.7;
+  }
+  .bp-label-inline {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: var(--primary);
+    opacity: 0.7;
+  }
+
+  .bp-dim {
+    border-top: 1px dashed color-mix(in srgb, var(--primary) 25%, transparent);
+  }
+
+  /* Title block — engineering drawing parameter grid */
+  .bp-title-block {
+    border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent);
+    border-radius: 0;
+    background: color-mix(in srgb, var(--background) 80%, transparent);
+    box-shadow: none;
+    overflow: hidden;
+  }
+  .bp-tb-row {
+    display: flex;
+    border-bottom: 1px solid color-mix(in srgb, var(--primary) 20%, transparent);
+  }
+  .bp-tb-row:last-child { border-bottom: none; }
+  .bp-tb-cell {
+    padding: 8px 14px;
+    border-right: 1px solid color-mix(in srgb, var(--primary) 20%, transparent);
+    flex: 1;
+    min-width: 0;
+  }
+  .bp-tb-cell:last-child { border-right: none; }
+  .bp-tb-key {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--faint);
+    margin-bottom: 2px;
+  }
+  .bp-tb-val {
+    font-family: var(--font-mono);
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  /* Annotation row — leader line + index + callout text */
+  .bp-anno {
+    display: flex;
+    align-items: flex-start;
+    gap: 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--primary) 15%, transparent);
+    padding: 10px 14px;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  .bp-anno:last-child { border-bottom: none; }
+  .bp-anno:hover {
+    background: color-mix(in srgb, var(--primary) 5%, transparent);
+  }
+  .bp-anno-idx {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--primary);
+    opacity: 0.5;
+    width: 28px;
+    flex-shrink: 0;
+    padding-top: 2px;
+    border-right: 1px solid color-mix(in srgb, var(--primary) 15%, transparent);
+    margin-right: 12px;
+    text-align: center;
+  }
+
+  /* Tolerance chip — ± symbol with value */
+  .bp-tol {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border: 1px solid;
+    border-radius: 0;
+    white-space: nowrap;
+  }
+  .bp-tol-urgent { color: var(--urgent); border-color: color-mix(in srgb, var(--urgent) 40%, transparent); }
+  .bp-tol-high   { color: var(--high);   border-color: color-mix(in srgb, var(--high) 40%, transparent); }
+  .bp-tol-ok     { color: var(--ok);     border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+  .bp-tol-flat   { color: var(--faint);  border-color: color-mix(in srgb, var(--primary) 25%, transparent); }
+
+  /* Schematic command button — electrical switch symbol */
+  .bp-cmd {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--primary);
+    background: transparent;
+    border: 1px solid color-mix(in srgb, var(--primary) 35%, transparent);
+    border-radius: 0;
+    padding: 4px 10px;
+    cursor: pointer;
+    transition: all .15s;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .bp-cmd:hover {
+    background: color-mix(in srgb, var(--primary) 8%, transparent);
+    border-color: var(--primary);
+  }
+  .bp-cmd::before {
+    content: "○─";
+    opacity: 0.5;
+  }
+  .bp-cmd:hover::before {
+    content: "●─";
+    opacity: 1;
+  }
+
+  /* Crosshair marker — center of drawing */
+  .bp-crosshair {
+    position: relative;
+  }
+  .bp-crosshair::before {
+    content: "+";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--primary);
+    opacity: 0.15;
+    pointer-events: none;
+  }
+
+  /* Drawing stamp — like a revision/approval stamp */
+  .bp-stamp {
+    display: inline-block;
+    border: 1.5px solid;
+    border-radius: 0;
+    padding: 3px 10px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    transform: rotate(-1.5deg);
+  }
+
+  /* ============================================================
+     Blueprint AppShell — drawing directory panel + title block
+     ============================================================ */
+
+  /* Drawing directory — left sidebar as CAD layer manager */
+  .bp-dir {
+    border-right: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
+    background: color-mix(in srgb, var(--background) 60%, transparent);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .bp-dir-header {
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid color-mix(in srgb, var(--primary) 20%, transparent);
+  }
+
+  .bp-dir-dwg-id {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: var(--primary);
+    opacity: 0.5;
+  }
+
+  .bp-dir-dwg-title {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin-top: 2px;
+  }
+
+  /* Layer group header */
+  .bp-dir-group {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: var(--primary);
+    opacity: 0.4;
+    padding: 12px 16px 6px;
+  }
+
+  /* Layer item — like CAD layer toggle row */
+  .bp-dir-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 16px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--muted-foreground);
+    cursor: pointer;
+    border-left: 2px solid transparent;
+    transition: all .15s;
+    text-decoration: none;
+  }
+  .bp-dir-item:hover {
+    color: var(--foreground);
+    background: color-mix(in srgb, var(--primary) 5%, transparent);
+  }
+  .bp-dir-item[data-active="true"] {
+    color: var(--primary);
+    border-left-color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 8%, transparent);
+    font-weight: 700;
+  }
+
+  /* Layer visibility toggle — checkbox square */
+  .bp-dir-vis {
+    width: 10px;
+    height: 10px;
+    border: 1px solid color-mix(in srgb, var(--primary) 40%, transparent);
+    flex-shrink: 0;
+    transition: all .15s;
+  }
+  .bp-dir-item:hover .bp-dir-vis {
+    border-color: var(--primary);
+  }
+  .bp-dir-item[data-active="true"] .bp-dir-vis {
+    background: var(--primary);
+    border-color: var(--primary);
+  }
+  .bp-dir-item[data-active="true"] .bp-dir-vis::after {
+    content: "✓";
+    display: block;
+    text-align: center;
+    font-size: 7px;
+    line-height: 10px;
+    color: var(--background);
+    font-weight: 900;
+  }
+
+  /* Layer code — SEC-A, SEC-B ... */
+  .bp-dir-code {
+    font-size: 9px;
+    opacity: 0.4;
+    width: 36px;
+    flex-shrink: 0;
+  }
+  .bp-dir-item[data-active="true"] .bp-dir-code {
+    opacity: 0.7;
+  }
+
+  /* Layer badge count — revision marker */
+  .bp-dir-badge {
+    margin-left: auto;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border: 1px solid color-mix(in srgb, var(--urgent) 40%, transparent);
+    color: var(--urgent);
+    border-radius: 0;
+  }
+
+  /* Drawing coordinate bar — replaces top header */
+  .bp-coord-bar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 0 20px;
+    height: 44px;
+    border-bottom: 1px solid color-mix(in srgb, var(--primary) 20%, transparent);
+    background: color-mix(in srgb, var(--background) 50%, transparent);
+    flex-shrink: 0;
+  }
+
+  .bp-coord-dwg {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--primary);
+  }
+
+  .bp-coord-sec {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--faint);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .bp-coord-sep {
+    color: var(--primary);
+    opacity: 0.2;
+    font-family: var(--font-mono);
+    font-size: 10px;
+  }
+
+  /* Title block — fixed bottom-right, like engineering drawing */
+  .bp-titleblock {
+    position: fixed;
+    bottom: 0;
+    right: 0;
+    z-index: 30;
+    border-top: 1px solid color-mix(in srgb, var(--primary) 30%, transparent);
+    border-left: 1px solid color-mix(in srgb, var(--primary) 30%, transparent);
+    background: color-mix(in srgb, var(--background) 90%, transparent);
+    backdrop-filter: blur(8px);
+    display: flex;
+    align-items: stretch;
+    font-family: var(--font-mono);
+  }
+  .bp-tb-col {
+    padding: 6px 14px;
+    border-right: 1px solid color-mix(in srgb, var(--primary) 20%, transparent);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-width: 0;
+  }
+  .bp-tb-col:last-child { border-right: none; }
+  .bp-tb-col-key {
+    font-size: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--faint);
+    margin-bottom: 1px;
+  }
+  .bp-tb-col-val {
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  /* Directory footer — user info as drafter stamp */
+  .bp-dir-footer {
+    padding: 10px 16px;
+    border-top: 1px solid color-mix(in srgb, var(--primary) 20%, transparent);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .bp-dir-footer-info {
+    min-width: 0;
+    flex: 1;
+  }
+  .bp-dir-footer-name {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .bp-dir-footer-email {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .bp-dir-footer-btn {
+    border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
+    background: transparent;
+    border-radius: 0;
+    padding: 3px 8px;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--faint);
+    cursor: pointer;
+    transition: all .15s;
+    flex-shrink: 0;
+  }
+  .bp-dir-footer-btn:hover {
+    color: var(--urgent);
+    border-color: var(--urgent);
+  }
+
+  /* ============================================================
+     P1 — Zoom navigation: controls + canvas + dynamic grid
+     ============================================================ */
+
+  /* Zoom control buttons — CAD style */
+  .bp-zoom-ctrl {
+    display: flex;
+    align-items: center;
+    border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
+    border-radius: 0;
+    overflow: hidden;
+  }
+  .bp-zoom-btn {
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--faint);
+    background: transparent;
+    border: none;
+    border-right: 1px solid color-mix(in srgb, var(--primary) 20%, transparent);
+    cursor: pointer;
+    transition: all .15s;
+    padding: 0;
+  }
+  .bp-zoom-btn:last-child { border-right: none; }
+  .bp-zoom-btn:hover {
+    color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 8%, transparent);
+  }
+  .bp-zoom-btn:active {
+    background: color-mix(in srgb, var(--primary) 15%, transparent);
+  }
+  .bp-zoom-display {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--primary);
+    padding: 0 8px;
+    min-width: 48px;
+    text-align: center;
+    border-right: 1px solid color-mix(in srgb, var(--primary) 20%, transparent);
+    line-height: 26px;
+  }
+
+  /* Zoomable drawing canvas — transform origin top-left */
+  .bp-canvas {
+    flex: 1;
+    overflow: auto;
+    position: relative;
+    cursor: grab;
+  }
+  .bp-canvas[data-panning="true"] {
+    cursor: grabbing;
+  }
+
+  /* The inner content layer that actually gets transformed */
+  .bp-canvas-inner {
+    position: relative;
+    top: 0;
+    left: 0;
+    width: 100%;
+    min-height: 100%;
+    transform-origin: 0 0;
+    will-change: transform;
+  }
+  /* Spring-back transition when drag is released — not during active drag */
+  .bp-canvas[data-panning="false"] .bp-canvas-inner {
+    transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  .bp-canvas[data-panning="true"] .bp-canvas-inner {
+    transition: none;
+  }
+
+  /* Dynamic grid overlay — separate layer so grid scales independently */
+  .bp-canvas-grid {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Content sits above grid */
+  .bp-canvas-inner > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Coordinate readout — live mouse position on drawing */
+  .bp-coord-readout {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--primary);
+    opacity: 0.5;
+    white-space: nowrap;
+    min-width: 72px;
+    cursor: text;
+    transition: opacity .15s;
+  }
+  .bp-coord-readout:hover {
+    opacity: 1;
+  }
+
+  /* ============================================================
+     P3 — Coordinate system: clickable readout + section ranges
+     ============================================================ */
+  .bp-coord-jump {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--primary);
+    opacity: 0.5;
+    white-space: nowrap;
+  }
+  .bp-coord-range {
+    font-family: var(--font-mono);
+    font-size: 8px;
+    color: var(--primary);
+    opacity: 0.35;
+    white-space: nowrap;
+  }
+
+  /* ============================================================
+     P4 — Revision cloud notifications on canvas
+     ============================================================ */
+
+  /* Revision cloud — engineering drawing "change mark" */
+  .bp-cloud {
+    position: absolute;
+    pointer-events: auto;
+    cursor: pointer;
+    z-index: 20;
+    transition: opacity .25s ease;
+  }
+  .bp-cloud svg {
+    display: block;
+    overflow: visible;
+  }
+  .bp-cloud-read {
+    opacity: 0.15;
+  }
+  .bp-cloud-read:hover {
+    opacity: 0.4;
+  }
+  .bp-cloud-unread {
+    opacity: 0.85;
+  }
+  .bp-cloud-unread:hover {
+    opacity: 1;
+  }
+
+  /* Cloud label tag — appears on hover */
+  .bp-cloud-tag {
+    position: absolute;
+    top: -28px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+    padding: 3px 8px;
+    border: 1px solid;
+    border-radius: 0;
+    background: var(--background);
+    opacity: 0;
+    transition: opacity .15s;
+    pointer-events: none;
+  }
+  .bp-cloud:hover .bp-cloud-tag {
+    opacity: 1;
+  }
+
+  /* Cloud pulse animation for unread urgent items */
+  @keyframes bp-cloud-pulse {
+    0%, 100% { opacity: 0.85; }
+    50% { opacity: 0.45; }
+  }
+  .bp-cloud-pulse {
+    animation: bp-cloud-pulse 2.5s ease-in-out infinite;
+  }
+
+  /* Cloud notification panel — popup when clicking a cloud */
+  .bp-cloud-panel {
+    position: absolute;
+    z-index: 50;
+    width: 320px;
+    border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent);
+    border-radius: 0;
+    background: color-mix(in srgb, var(--background) 95%, transparent);
+    backdrop-filter: blur(8px);
+    box-shadow: 0 4px 24px var(--shadow-blue-15);
+  }
+  .bp-cloud-panel-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    border-bottom: 1px solid color-mix(in srgb, var(--primary) 20%, transparent);
+  }
+  .bp-cloud-panel-title {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--primary);
+  }
+  .bp-cloud-panel-body {
+    padding: 10px 12px;
+  }
+  .bp-cloud-panel-item {
+    display: flex;
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--primary) 12%, transparent);
+  }
+  .bp-cloud-panel-item:last-child { border-bottom: none; }
+  .bp-cloud-panel-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    margin-top: 5px;
+    flex-shrink: 0;
+  }
+  .bp-cloud-panel-item-content {
+    min-width: 0;
+    flex: 1;
+  }
+  .bp-cloud-panel-item-title {
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+  .bp-cloud-panel-item-body {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    line-height: 1.4;
+    color: var(--muted-foreground);
+    margin-top: 2px;
+  }
+  .bp-cloud-panel-item-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+    font-family: var(--font-mono);
+    font-size: 9px;
+  }
+
+  /* Cloud summary button in coordinate bar — replaces bell */
+  .bp-cloud-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
+    border-radius: 0;
+    background: transparent;
+    padding: 4px 10px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--faint);
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .bp-cloud-btn:hover {
+    color: var(--primary);
+    border-color: var(--primary);
+  }
+  .bp-cloud-btn-count {
+    color: var(--urgent);
+    font-weight: 700;
+  }
+  .bp-cloud-btn[data-has-unread="true"] {
+    border-color: color-mix(in srgb, var(--urgent) 40%, transparent);
+    color: var(--urgent);
+  }
 }

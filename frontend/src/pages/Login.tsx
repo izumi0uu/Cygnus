@@ -3,6 +3,7 @@ import { useNavigate, useLocation, Navigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Loader2 } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
+import { PlotterPanel } from '@/components/PlotterPanel'
 
 // DWG-000 — the access control sheet. Login is the gate before the drawing set,
 // so it gets the same engineering-drawing treatment as the console: grid paper,
@@ -73,8 +74,8 @@ export default function Login() {
           </div>
         </div>
 
-        {/* the form itself — a panel, no rounding, no shadow */}
-        <div className="bp-panel p-6">
+        {/* the form itself — drawn in by the pen plotter on mount (HANDOFF §12.1) */}
+        <PlotterPanel className="p-6" lapDuration={1.05}>
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <label className="flex flex-col gap-1.5">
               <span className="bp-label-inline">SEC-A · {t('auth.email')}</span>
@@ -124,7 +125,7 @@ export default function Login() {
               )}
             </button>
           </form>
-        </div>
+        </PlotterPanel>
 
         {/* drawing footer — like the sheet scale/info line */}
         <div className="mt-5 flex items-center justify-between">

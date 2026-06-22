@@ -16,6 +16,7 @@ const CoverageDrift = lazy(() => import('@/pages/CoverageDrift'))
 const Propagation = lazy(() => import('@/pages/Propagation'))
 const RecoveryDetail = lazy(() => import('@/pages/RecoveryDetail'))
 const Placeholder = lazy(() => import('@/pages/Placeholder'))
+const PlotterDemo = lazy(() => import('@/pages/PlotterDemo'))
 
 export default function App() {
   return (
@@ -24,6 +25,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/demo/plotter" element={<PlotterDemo />} />
           <Route element={<RequireAuth />}>
             <Route path="/console" element={<AppShell />}>
               <Route index element={<Overview />} />

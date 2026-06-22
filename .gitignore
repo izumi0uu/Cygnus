@@ -14,6 +14,10 @@ frontend/README.md
 __pycache__/
 *.pyc
 
+# Local env (secrets) — the .env.example template is tracked, real .env is not
+.env
+.env.local
+
 # Local prototype exports
 prototypes/
 .tmp/

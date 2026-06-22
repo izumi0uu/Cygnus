@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from secrets import token_urlsafe
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -22,7 +22,11 @@ class Settings(BaseSettings):
     default_admin_password: str | None = None
     jwt_expire_hours: int = 24
     jwt_algorithm: str = "HS256"
-    cors_allowed_origins: tuple[str, ...] = (
+    # NoDecode: pydantic-settings would otherwise json.loads() the env value
+    # (because tuple is a complex type) before the validator runs. With
+    # NoDecode the raw string reaches validate_cors_allowed_origins, which
+    # accepts both a comma-separated list and a JSON array.
+    cors_allowed_origins: Annotated[tuple[str, ...], NoDecode] = (
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     )

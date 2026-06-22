@@ -3,13 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 MRP_BASELINE_FILES = [
-    "app/ai/mrp/__init__.py",
-    "app/ai/mrp/mapper.py",
-    "app/ai/mrp/merger.py",
-    "app/ai/mrp/pipeline.py",
-    "app/ai/mrp/reducer.py",
-    "app/ai/mrp/verifier.py",
-    "app/ai/mrp/writer.py",
+    "cygnus/backend/ai/mrp/__init__.py",
+    "cygnus/backend/ai/mrp/mapper.py",
+    "cygnus/backend/ai/mrp/merger.py",
+    "cygnus/backend/ai/mrp/pipeline.py",
+    "cygnus/backend/ai/mrp/reducer.py",
+    "cygnus/backend/ai/mrp/verifier.py",
+    "cygnus/backend/ai/mrp/writer.py",
 ]
 
 

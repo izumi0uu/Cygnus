@@ -42,31 +42,31 @@ class _HealthyRedis:
 
 class ApiBootSmokeTests(unittest.TestCase):
     def test_fastapi_app_can_boot_with_stubbed_infra_dependencies(self) -> None:
-        from app import main as app_main
+        from cygnus.backend import main as app_main
 
         with (
             patch.object(app_main, "seed_default_admin", AsyncMock(return_value=None)) as seed_admin,
-            patch("app.services.storage_service.storage_service.ensure_bucket", AsyncMock(return_value=None)) as ensure_bucket,
-            patch("app.scripts.seed_skills.seed_builtin_skills", AsyncMock(return_value=None)) as seed_skills,
+            patch("cygnus.backend.services.storage_service.storage_service.ensure_bucket", AsyncMock(return_value=None)) as ensure_bucket,
+            patch("cygnus.backend.scripts.seed_skills.seed_builtin_skills", AsyncMock(return_value=None)) as seed_skills,
         ):
             with TestClient(app_main.app) as client:
                 response = client.get("/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["name"], "Arkon")
+        self.assertEqual(response.json()["name"], "Cygnus")
         seed_admin.assert_awaited_once()
         ensure_bucket.assert_awaited()
         seed_skills.assert_awaited()
 
     def test_health_routes_have_minimal_smoke_path_when_services_are_stubbed(self) -> None:
-        from app import main as app_main
+        from cygnus.backend import main as app_main
 
         with (
             patch.object(app_main, "seed_default_admin", AsyncMock(return_value=None)),
-            patch("app.services.storage_service.storage_service.ensure_bucket", AsyncMock(return_value=None)),
-            patch("app.scripts.seed_skills.seed_builtin_skills", AsyncMock(return_value=None)),
-            patch("app.database.async_session_factory", new=_HealthySessionFactory()),
-            patch("app.routers.sources.get_arq_pool", new=AsyncMock(return_value=_HealthyArqPool())),
+            patch("cygnus.backend.services.storage_service.storage_service.ensure_bucket", AsyncMock(return_value=None)),
+            patch("cygnus.backend.scripts.seed_skills.seed_builtin_skills", AsyncMock(return_value=None)),
+            patch("cygnus.backend.database.async_session_factory", new=_HealthySessionFactory()),
+            patch("cygnus.backend.routers.sources.get_arq_pool", new=AsyncMock(return_value=_HealthyArqPool())),
             patch("redis.asyncio.Redis", new=_HealthyRedis),
         ):
             with TestClient(app_main.app) as client:
@@ -83,7 +83,7 @@ class ApiBootSmokeTests(unittest.TestCase):
 
 class WorkerBootSmokeTests(unittest.IsolatedAsyncioTestCase):
     async def test_worker_hooks_expose_a_bootable_contract(self) -> None:
-        from app.worker import WorkerSettings
+        from cygnus.backend.worker import WorkerSettings
 
         await WorkerSettings.on_startup({})
         await WorkerSettings.on_shutdown({})
@@ -92,7 +92,7 @@ class WorkerBootSmokeTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(len(WorkerSettings.cron_jobs), 1)
 
     async def test_arq_pool_lazy_init_only_calls_factory_once(self) -> None:
-        import app.worker as worker_module
+        import cygnus.backend.worker as worker_module
 
         fake_pool = object()
         fake_create_pool = AsyncMock(return_value=fake_pool)
@@ -111,7 +111,7 @@ class WorkerBootSmokeTests(unittest.IsolatedAsyncioTestCase):
 
 class MrpResumeSmokeTests(unittest.IsolatedAsyncioTestCase):
     async def test_map_reduce_reenters_plan_review_without_rerunning_extract_phases(self) -> None:
-        import app.ai.mrp.pipeline as pipeline_module
+        import cygnus.backend.ai.mrp.pipeline as pipeline_module
 
         source_id = uuid.uuid4()
         source = types.SimpleNamespace(id=source_id, pipeline_phase="plan_review")
@@ -139,7 +139,7 @@ class MrpResumeSmokeTests(unittest.IsolatedAsyncioTestCase):
         reduce_phase.assert_not_called()
 
     async def test_refine_pipeline_resumes_from_verify_using_persisted_page_drafts(self) -> None:
-        import app.ai.mrp.pipeline as pipeline_module
+        import cygnus.backend.ai.mrp.pipeline as pipeline_module
 
         source_id = uuid.uuid4()
         source = types.SimpleNamespace(id=source_id, pipeline_phase="verify")

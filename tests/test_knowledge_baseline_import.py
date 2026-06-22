@@ -3,15 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 
 KNOWLEDGE_BASELINE_FILES = [
-    "app/ai/__init__.py",
-    "app/ai/embedding_catalog.py",
-    "app/ai/llm_catalog.py",
-    "app/ai/registry.py",
-    "app/ai/vision_catalog.py",
-    "app/ai/wiki_agent.py",
-    "app/ai/wiki_agent_tools.py",
-    "app/ai/wiki_analyzer.py",
-    "app/ai/wiki_compiler.py",
+    "cygnus/backend/ai/__init__.py",
+    "cygnus/backend/ai/embedding_catalog.py",
+    "cygnus/backend/ai/llm_catalog.py",
+    "cygnus/backend/ai/registry.py",
+    "cygnus/backend/ai/vision_catalog.py",
+    "cygnus/backend/ai/wiki_agent.py",
+    "cygnus/backend/ai/wiki_agent_tools.py",
+    "cygnus/backend/ai/wiki_analyzer.py",
+    "cygnus/backend/ai/wiki_compiler.py",
 ]
 
 

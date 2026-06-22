@@ -51,4 +51,4 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["cygnus*", "app*"]
+include = ["cygnus*"]

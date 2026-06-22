@@ -4,7 +4,7 @@ from pathlib import Path
 
 SERVICE_BASELINE_FILES = sorted(
     str(path)
-    for path in Path("app/services").rglob("*.py")
+    for path in Path("cygnus/backend/services").rglob("*.py")
     if "__pycache__" not in path.parts
 )
 

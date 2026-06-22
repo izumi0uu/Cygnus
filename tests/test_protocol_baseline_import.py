@@ -3,12 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 PROTOCOL_BASELINE_FILES = [
-    "app/ai/agent_protocol.py",
-    "app/ai/providers/__init__.py",
-    "app/ai/providers/base.py",
-    "app/ai/providers/openai_provider.py",
-    "app/ai/providers/anthropic_provider.py",
-    "app/ai/providers/google.py",
+    "cygnus/backend/ai/agent_protocol.py",
+    "cygnus/backend/ai/providers/__init__.py",
+    "cygnus/backend/ai/providers/base.py",
+    "cygnus/backend/ai/providers/openai_provider.py",
+    "cygnus/backend/ai/providers/anthropic_provider.py",
+    "cygnus/backend/ai/providers/google.py",
 ]
 
 

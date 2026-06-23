@@ -5,7 +5,7 @@ The old PolicyEngine (based on ScopeMembership/ScopeRole/Action enums) has been
 replaced by the new dual-realm permission engine in permission_engine.py.
 
 This module is kept for backward compatibility with any code that still references it.
-New code should use app.services.permission_engine directly.
+New code should use cygnus.backend.services.permission_engine directly.
 """
 
 import uuid

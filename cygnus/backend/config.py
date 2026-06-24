@@ -2,6 +2,7 @@
 Application configuration loaded from environment variables.
 """
 
+from functools import lru_cache
 
 from pydantic import Field
 from pydantic_settings import BaseSettings
@@ -110,4 +111,10 @@ class Settings(BaseSettings):
         return [o.strip() for o in value.split(",") if o.strip()]
 
 
-settings = Settings()
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    """Return the cached backend settings instance for app assembly and workers."""
+    return Settings()
+
+
+settings = get_settings()

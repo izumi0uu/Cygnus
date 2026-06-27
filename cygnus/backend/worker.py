@@ -836,6 +836,13 @@ async def ingest_map_reduce_task(ctx: dict, source_id: str):
                     await session.commit()
                 logger.info(f"Source {source_id} plan ready: {result.get('plan_id')}")
             elif result.get("status") == "plan_auto_approved":
+                src = await session.get(Source, sid)
+                if src:
+                    job_id = result.get("job_id")
+                    if job_id:
+                        src.job_id = job_id
+                    src.auto_recover_count = 0
+                    await session.commit()
                 logger.info(f"Source {source_id} plan auto-approved, refine task enqueued")
             else:
                 logger.info(f"Source {source_id} map-reduce result: {result}")

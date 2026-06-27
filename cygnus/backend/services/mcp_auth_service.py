@@ -23,7 +23,7 @@ from sqlalchemy import exists, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from cygnus.backend.config import settings
+from cygnus.backend.config import get_settings
 from cygnus.backend.database.models import (
     Employee,
     EmployeeDepartment,
@@ -43,8 +43,9 @@ def hash_token(token: str) -> str:
     sufficient — there is no practical brute-force surface. The pepper means a
     raw DB dump alone is not enough to forge tokens.
     """
+    resolved_settings = get_settings()
     return hmac.new(
-        settings.mcp_token_pepper.encode("utf-8"),
+        resolved_settings.mcp_token_pepper.encode("utf-8"),
         token.encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()

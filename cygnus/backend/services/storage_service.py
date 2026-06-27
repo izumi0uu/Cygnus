@@ -3,6 +3,7 @@ MinIO storage service — file upload, download, presigned URLs.
 """
 
 import io
+from collections.abc import Callable
 from datetime import timedelta
 from typing import IO, Optional
 
@@ -10,24 +11,40 @@ from loguru import logger
 from minio import Minio
 from minio.error import S3Error
 
-from cygnus.backend.config import settings
+from cygnus.backend.config import Settings, get_settings
 
 
 class StorageService:
     """S3-compatible object storage via MinIO."""
 
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        settings_provider: Callable[[], Settings] = get_settings,
+        client_factory: Callable[..., Minio] = Minio,
+    ):
+        self._settings_provider = settings_provider
+        self._client_factory = client_factory
         self._client: Optional[Minio] = None
         self._presign_client: Optional[Minio] = None
+
+    def _settings(self) -> Settings:
+        return self._settings_provider()
+
+    def reset_clients(self) -> None:
+        """Drop cached clients so updated wiring is picked up on next access."""
+        self._client = None
+        self._presign_client = None
 
     @property
     def client(self) -> Minio:
         if self._client is None:
-            self._client = Minio(
-                endpoint=settings.minio_endpoint,
-                access_key=settings.minio_access_key,
-                secret_key=settings.minio_secret_key,
-                secure=settings.minio_secure,
+            resolved_settings = self._settings()
+            self._client = self._client_factory(
+                endpoint=resolved_settings.minio_endpoint,
+                access_key=resolved_settings.minio_access_key,
+                secret_key=resolved_settings.minio_secret_key,
+                secure=resolved_settings.minio_secure,
             )
         return self._client
 
@@ -40,25 +57,26 @@ class StorageService:
         MinIO always uses us-east-1 by default.
         """
         if self._presign_client is None:
-            public = settings.minio_public_endpoint or settings.minio_endpoint
+            resolved_settings = self._settings()
+            public = resolved_settings.minio_public_endpoint or resolved_settings.minio_endpoint
             # When a public endpoint is explicitly set, we're behind a reverse
             # proxy that terminates TLS — presigned URLs must use https://.
             presign_secure = (
-                True if settings.minio_public_endpoint else settings.minio_secure
+                True if resolved_settings.minio_public_endpoint else resolved_settings.minio_secure
             )
-            client = Minio(
+            client = self._client_factory(
                 endpoint=public,
-                access_key=settings.minio_access_key,
-                secret_key=settings.minio_secret_key,
+                access_key=resolved_settings.minio_access_key,
+                secret_key=resolved_settings.minio_secret_key,
                 secure=presign_secure,
             )
-            client._region_map[settings.minio_bucket] = "us-east-1"
+            client._region_map[resolved_settings.minio_bucket] = "us-east-1"
             self._presign_client = client
         return self._presign_client
 
     async def ensure_bucket(self):
         """Create the default bucket if it doesn't exist."""
-        bucket = settings.minio_bucket
+        bucket = self._settings().minio_bucket
         try:
             if not self.client.bucket_exists(bucket):
                 self.client.make_bucket(bucket)
@@ -76,7 +94,7 @@ class StorageService:
         content_type: str = "application/octet-stream",
     ) -> str:
         """Upload a file to MinIO. Returns the object key."""
-        bucket = settings.minio_bucket
+        bucket = self._settings().minio_bucket
         self.client.put_object(
             bucket_name=bucket,
             object_name=object_name,
@@ -89,7 +107,7 @@ class StorageService:
 
     def download_file(self, object_name: str) -> bytes:
         """Download a file from MinIO and return its bytes."""
-        bucket = settings.minio_bucket
+        bucket = self._settings().minio_bucket
         response = None
         try:
             response = self.client.get_object(bucket, object_name)
@@ -107,7 +125,7 @@ class StorageService:
         content_type: str = "application/octet-stream",
     ) -> str:
         """Upload from a stream."""
-        bucket = settings.minio_bucket
+        bucket = self._settings().minio_bucket
         self.client.put_object(
             bucket_name=bucket,
             object_name=object_name,
@@ -140,34 +158,36 @@ class StorageService:
         Uses a dedicated client configured with minio_public_endpoint so the
         HMAC signature is computed against the browser-accessible hostname.
         """
-        hours = expiry_hours or settings.minio_presign_expiry_hours
+        resolved_settings = self._settings()
+        hours = expiry_hours or resolved_settings.minio_presign_expiry_hours
         return self.presign_client.presigned_get_object(
-            bucket_name=settings.minio_bucket,
+            bucket_name=resolved_settings.minio_bucket,
             object_name=object_name,
             expires=timedelta(hours=hours),
         )
 
     def delete_object(self, object_name: str):
         """Delete a file from MinIO."""
-        self.client.remove_object(settings.minio_bucket, object_name)
+        self.client.remove_object(self._settings().minio_bucket, object_name)
         logger.debug(f"Deleted {object_name} from MinIO")
 
     def list_objects(self, prefix: str, recursive: bool = True):
         """List all objects under a given prefix."""
-        return self.client.list_objects(settings.minio_bucket, prefix=prefix, recursive=recursive)
+        return self.client.list_objects(self._settings().minio_bucket, prefix=prefix, recursive=recursive)
 
     def delete_prefix(self, prefix: str):
         """Delete all objects with a given prefix (e.g. a source's files)."""
-        objects = self.client.list_objects(settings.minio_bucket, prefix=prefix, recursive=True)
+        bucket = self._settings().minio_bucket
+        objects = self.client.list_objects(bucket, prefix=prefix, recursive=True)
         for obj in objects:
             if obj.object_name:
-                self.client.remove_object(settings.minio_bucket, obj.object_name)
+                self.client.remove_object(bucket, obj.object_name)
         logger.debug(f"Deleted all objects with prefix: {prefix}")
 
     def copy_object(self, src_key: str, dest_key: str):
         """Copy a single object within the same bucket."""
         from minio.commonconfig import CopySource
-        bucket = settings.minio_bucket
+        bucket = self._settings().minio_bucket
         self.client.copy_object(
             bucket,
             dest_key,
@@ -176,7 +196,7 @@ class StorageService:
 
     def copy_prefix(self, src_prefix: str, dest_prefix: str):
         """Copy all objects from one prefix to another (recursively)."""
-        bucket = settings.minio_bucket
+        bucket = self._settings().minio_bucket
         
         # Check if src_prefix is a specific file using stat_object (more reliable)
         is_file = False
@@ -209,7 +229,7 @@ class StorageService:
     
     def move_prefix(self, src_prefix: str, dest_prefix: str):
         """Move all objects from one prefix to another (recursively), then delete source."""
-        bucket = settings.minio_bucket
+        bucket = self._settings().minio_bucket
         
         # Determine if it's a file or folder before moving
         is_file = False
@@ -236,7 +256,7 @@ class StorageService:
         Uses object names and ETags to detect any content or structure change.
         """
         import hashlib
-        bucket = settings.minio_bucket
+        bucket = self._settings().minio_bucket
         p = prefix if prefix.endswith("/") else f"{prefix}/"
         
         objects = self.client.list_objects(bucket, prefix=p, recursive=True)

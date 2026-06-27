@@ -9,7 +9,7 @@ Permission model v2:
 import uuid
 from typing import Optional
 
-from arq.connections import ArqRedis, create_pool
+from arq.connections import ArqRedis
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from loguru import logger
 from pydantic import BaseModel
@@ -31,19 +31,14 @@ from cygnus.backend.services.permission_engine import (
     _get_user_permissions,
     get_scope_level,
 )
+from cygnus.backend.worker import get_arq_pool as get_worker_arq_pool
 
 router = APIRouter()
 
-_arq_pool: Optional[ArqRedis] = None
-
 
 async def get_arq_pool() -> ArqRedis:
-    """Lazy-init arq Redis connection pool."""
-    global _arq_pool
-    if _arq_pool is None:
-        from cygnus.backend.worker import _get_redis_settings
-        _arq_pool = await create_pool(_get_redis_settings())
-    return _arq_pool
+    """Delegate to the shared worker arq pool wiring."""
+    return await get_worker_arq_pool()
 
 
 class SourceResponse(BaseModel):

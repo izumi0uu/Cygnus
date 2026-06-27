@@ -18,11 +18,12 @@ async def seed_default_admin():
     """Create default admin account from .env if no admin exists yet."""
     from sqlalchemy import select
 
-    from cygnus.backend.database import async_session_factory
+    from cygnus.backend.database import get_async_session_factory
     from cygnus.backend.database.models import Department, Employee, EmployeeDepartment
     from cygnus.backend.services.auth_service import hash_password
 
     try:
+        async_session_factory = get_async_session_factory()
         async with async_session_factory() as session:
             stmt = select(Employee).where(Employee.role == "admin").limit(1)
             result = await session.execute(stmt)
@@ -53,6 +54,10 @@ async def seed_default_admin():
 def create_app(*, app_settings: Settings | None = None) -> FastAPI:
     """Assemble the full-port FastAPI app around explicit backend settings."""
     resolved_settings = app_settings or get_settings()
+    from cygnus.backend.database import get_async_session_factory
+    from cygnus.backend.services.storage_service import storage_service
+    from cygnus.backend.worker import get_arq_pool as get_worker_arq_pool
+    from cygnus.backend.worker import get_redis_settings
 
     # Create the MCP server and its HTTP app (lifespan must be composed with FastAPI)
     mcp_server = create_mcp_server()
@@ -104,6 +109,10 @@ def create_app(*, app_settings: Settings | None = None) -> FastAPI:
     app.state.settings = resolved_settings
     app.state.mcp_server = mcp_server
     app.state.mcp_http_app = mcp_http_app
+    app.state.session_factory = get_async_session_factory()
+    app.state.storage_service = storage_service
+    app.state.get_arq_pool = get_worker_arq_pool
+    app.state.redis_settings = get_redis_settings()
 
     # --- CORS ---
     logger.info(f"Allowed CORS origins: {resolved_settings.cors_origin_list}")
@@ -221,7 +230,9 @@ def create_app(*, app_settings: Settings | None = None) -> FastAPI:
         try:
             from sqlalchemy import text
 
-            from cygnus.backend.database import async_session_factory
+            from cygnus.backend.database import get_async_session_factory
+
+            async_session_factory = get_async_session_factory()
             async with async_session_factory() as session:
                 await session.execute(text("SELECT 1"))
             services["database"] = "healthy"
@@ -260,7 +271,7 @@ def create_app(*, app_settings: Settings | None = None) -> FastAPI:
         """Detailed health check for API, database, and worker (Redis)."""
         from sqlalchemy import text
 
-        from cygnus.backend.database import async_session_factory
+        from cygnus.backend.database import get_async_session_factory
 
         result = {
             "api": "healthy",
@@ -269,6 +280,7 @@ def create_app(*, app_settings: Settings | None = None) -> FastAPI:
         }
 
         try:
+            async_session_factory = get_async_session_factory()
             async with async_session_factory() as session:
                 await session.execute(text("SELECT 1"))
             result["database"] = "healthy"

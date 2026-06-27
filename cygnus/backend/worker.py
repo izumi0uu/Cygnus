@@ -19,16 +19,24 @@ from arq.connections import ArqRedis, RedisSettings, create_pool
 from loguru import logger
 from sqlalchemy import select
 
-from cygnus.backend.config import settings
+from cygnus.backend.config import get_settings
+
+settings = get_settings()
+
+
+def get_redis_settings() -> RedisSettings:
+    resolved_settings = get_settings()
+    return RedisSettings(
+        host=resolved_settings.redis_host,
+        port=resolved_settings.redis_port,
+        database=resolved_settings.redis_db,
+        password=resolved_settings.redis_password or None,
+    )
 
 
 def _get_redis_settings() -> RedisSettings:
-    return RedisSettings(
-        host=settings.redis_host,
-        port=settings.redis_port,
-        database=settings.redis_db,
-        password=settings.redis_password or None,
-    )
+    """Backward-compatible alias for legacy imports."""
+    return get_redis_settings()
 
 
 # arq Redis pool (lazy init)
@@ -39,8 +47,18 @@ async def get_arq_pool() -> ArqRedis:
     """Lazy-init arq Redis connection pool."""
     global _arq_pool
     if _arq_pool is None:
-        _arq_pool = await create_pool(_get_redis_settings())
+        _arq_pool = await create_pool(get_redis_settings())
     return _arq_pool
+
+
+async def reset_arq_pool() -> None:
+    """Drop the shared arq pool so infra wiring can be rebuilt cleanly."""
+    global _arq_pool
+    if _arq_pool is not None:
+        close = getattr(_arq_pool, "aclose", None)
+        if callable(close):
+            await close()
+    _arq_pool = None
 
 
 # ---------------------------------------------------------------------------

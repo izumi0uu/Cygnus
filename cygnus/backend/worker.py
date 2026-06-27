@@ -61,6 +61,30 @@ async def reset_arq_pool() -> None:
     _arq_pool = None
 
 
+def resolve_post_extraction_task(*, has_images: bool) -> str:
+    """Return the next worker job after pre-extraction completes."""
+    return "caption_images_task" if has_images else "ingest_map_reduce_task"
+
+
+def resolve_retry_task(
+    *,
+    source_type: str,
+    pipeline_phase: str | None,
+    current_status: str | None,
+) -> str:
+    """Resolve which worker job should resume a source retry.
+
+    This turns persisted source lifecycle truth (`status` + `pipeline_phase`)
+    into a concrete arq job name so retry/resume paths can re-enter the real
+    worker pipeline instead of restarting from a generic placeholder path.
+    """
+    if pipeline_phase in ("refine", "verify", "commit"):
+        return "ingest_refine_task"
+    if pipeline_phase in ("map", "reduce", "plan_review") or current_status == "plan_ready":
+        return "ingest_map_reduce_task"
+    return "ingest_url_task" if source_type == "url" else "ingest_file_task"
+
+
 # ---------------------------------------------------------------------------
 # Progress helper (re-exported from utils for backward compatibility)
 # ---------------------------------------------------------------------------
@@ -78,7 +102,7 @@ async def enqueue_post_extraction_pipeline(source_id: str, has_images: bool) -> 
     Returns the enqueued job_id, or None if enqueue failed.
     """
     pool = await get_arq_pool()
-    task_name = "caption_images_task" if has_images else "ingest_map_reduce_task"
+    task_name = resolve_post_extraction_task(has_images=has_images)
     job = await pool.enqueue_job(task_name, source_id)
     return job.job_id if job else None
 

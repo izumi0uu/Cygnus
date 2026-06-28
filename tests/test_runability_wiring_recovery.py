@@ -29,8 +29,8 @@ def test_pyproject_carries_imported_backend_dependency_surface() -> None:
 
 
 def test_seed_skills_wiring_module_exists() -> None:
-    script = Path("cygnus/backend/scripts/seed_skills.py")
-    assert script.is_file(), "expected cygnus/backend/scripts/seed_skills.py to exist for app.main startup wiring"
+    script = Path("cygnus/runtime/scripts/seed_skills.py")
+    assert script.is_file(), "expected cygnus/runtime/scripts/seed_skills.py to exist for app.main startup wiring"
 
     text = script.read_text(encoding="utf-8")
     assert "async def seed_builtin_skills" in text
@@ -38,13 +38,13 @@ def test_seed_skills_wiring_module_exists() -> None:
 
 
 def test_main_references_existing_seed_skills_module() -> None:
-    main_text = Path("cygnus/backend/main.py").read_text(encoding="utf-8")
-    assert "from cygnus.backend.scripts.seed_skills import seed_builtin_skills" in main_text
-    assert Path("cygnus/backend/scripts/__init__.py").is_file()
+    main_text = Path("cygnus/runtime/main.py").read_text(encoding="utf-8")
+    assert "from cygnus.runtime.scripts.seed_skills import seed_builtin_skills" in main_text
+    assert Path("cygnus/runtime/scripts/__init__.py").is_file()
 
 
 def test_all_local_app_imports_have_structural_targets() -> None:
-    root = Path("cygnus/backend")
+    root = Path("cygnus/runtime")
     local_modules: set[str] = set()
 
     for path in root.rglob("*.py"):
@@ -58,12 +58,12 @@ def test_all_local_app_imports_have_structural_targets() -> None:
     for path in root.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("cygnus.backend."):
+            if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("cygnus.runtime."):
                 if node.module not in local_modules:
                     missing.append((str(path), node.module))
             elif isinstance(node, ast.Import):
                 for alias in node.names:
-                    if alias.name.startswith("cygnus.backend.") and alias.name not in local_modules:
+                    if alias.name.startswith("cygnus.runtime.") and alias.name not in local_modules:
                         missing.append((str(path), alias.name))
 
     assert not missing, f"missing local app module targets: {missing}"

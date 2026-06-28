@@ -6,30 +6,30 @@ import unittest
 from pathlib import Path
 
 PROVIDER_BASELINE_FILES = [
-    "cygnus/backend/ai/providers/__init__.py",
-    "cygnus/backend/ai/providers/base.py",
-    "cygnus/backend/ai/providers/openai_provider.py",
-    "cygnus/backend/ai/providers/anthropic_provider.py",
-    "cygnus/backend/ai/providers/google.py",
+    "cygnus/runtime/ai/providers/__init__.py",
+    "cygnus/runtime/ai/providers/base.py",
+    "cygnus/runtime/ai/providers/openai_provider.py",
+    "cygnus/runtime/ai/providers/anthropic_provider.py",
+    "cygnus/runtime/ai/providers/google.py",
 ]
 
 PROVIDER_BASELINE_MODULES = {
-    "cygnus.backend.ai.providers.base": [
+    "cygnus.runtime.ai.providers.base": [
         "ProviderType",
         "ProviderConfig",
         "EmbeddingProvider",
         "LLMProvider",
         "VisionProvider",
     ],
-    "cygnus.backend.ai.providers.openai_provider": [
+    "cygnus.runtime.ai.providers.openai_provider": [
         "OpenAIEmbedding",
         "OpenAILLM",
         "OpenAIVision",
     ],
-    "cygnus.backend.ai.providers.anthropic_provider": [
+    "cygnus.runtime.ai.providers.anthropic_provider": [
         "AnthropicLLM",
     ],
-    "cygnus.backend.ai.providers.google": [
+    "cygnus.runtime.ai.providers.google": [
         "GoogleEmbedding",
         "GoogleLLM",
         "GoogleVision",
@@ -49,7 +49,7 @@ class ProviderBaselineImportTests(unittest.TestCase):
 
     def test_provider_baseline_topology_is_exactly_the_upstream_module_family(self) -> None:
         expected = {Path(path).name for path in PROVIDER_BASELINE_FILES}
-        actual = {path.name for path in Path("cygnus/backend/ai/providers").glob("*.py")}
+        actual = {path.name for path in Path("cygnus/runtime/ai/providers").glob("*.py")}
 
         self.assertEqual(expected, actual)
 
@@ -66,7 +66,7 @@ class ProviderBaselineImportTests(unittest.TestCase):
                 )
 
     def test_provider_base_defines_neutral_provider_contracts(self) -> None:
-        source = Path("cygnus/backend/ai/providers/base.py").read_text(encoding="utf-8")
+        source = Path("cygnus/runtime/ai/providers/base.py").read_text(encoding="utf-8")
 
         for token in ["ProviderType", "ProviderConfig", "EmbeddingProvider", "LLMProvider", "VisionProvider"]:
             self.assertIn(token, source, f"provider base lost contract token: {token}")

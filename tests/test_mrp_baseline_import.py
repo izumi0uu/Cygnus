@@ -5,45 +5,45 @@ import inspect
 from pathlib import Path
 
 MRP_BASELINE_FILES = [
-    "cygnus/backend/ai/mrp/__init__.py",
-    "cygnus/backend/ai/mrp/mapper.py",
-    "cygnus/backend/ai/mrp/merger.py",
-    "cygnus/backend/ai/mrp/pipeline.py",
-    "cygnus/backend/ai/mrp/reducer.py",
-    "cygnus/backend/ai/mrp/verifier.py",
-    "cygnus/backend/ai/mrp/writer.py",
+    "cygnus/runtime/ai/mrp/__init__.py",
+    "cygnus/runtime/ai/mrp/mapper.py",
+    "cygnus/runtime/ai/mrp/merger.py",
+    "cygnus/runtime/ai/mrp/pipeline.py",
+    "cygnus/runtime/ai/mrp/reducer.py",
+    "cygnus/runtime/ai/mrp/verifier.py",
+    "cygnus/runtime/ai/mrp/writer.py",
 ]
 
 MRP_BASELINE_MODULES = {
-    "cygnus.backend.ai.mrp.mapper": [
+    "cygnus.runtime.ai.mrp.mapper": [
         "DocumentChunk",
         "build_chunks",
         "extract_chunk",
         "run_map_phase",
     ],
-    "cygnus.backend.ai.mrp.reducer": [
+    "cygnus.runtime.ai.mrp.reducer": [
         "collect_raw_items",
         "reconcile_with_kb",
         "run_planning_call",
         "run_reduce_phase",
     ],
-    "cygnus.backend.ai.mrp.writer": [
+    "cygnus.runtime.ai.mrp.writer": [
         "PageWriteResult",
         "SectionRef",
         "WriterPassBatch",
         "assemble_evidence",
         "run_refine_phase",
     ],
-    "cygnus.backend.ai.mrp.verifier": [
+    "cygnus.runtime.ai.mrp.verifier": [
         "check_coverage",
         "check_conflicts",
         "assess_page_status",
         "run_verify_phase",
     ],
-    "cygnus.backend.ai.mrp.merger": [
+    "cygnus.runtime.ai.mrp.merger": [
         "merge_page_content",
     ],
-    "cygnus.backend.ai.mrp.pipeline": [
+    "cygnus.runtime.ai.mrp.pipeline": [
         "run_mrp_pipeline",
         "run_refine_pipeline",
         "run_commit_phase",
@@ -73,7 +73,7 @@ def test_mrp_baseline_files_are_syntax_valid() -> None:
 
 def test_mrp_baseline_topology_is_exactly_the_upstream_module_family() -> None:
     expected = {Path(path).name for path in MRP_BASELINE_FILES}
-    actual = {path.name for path in Path("cygnus/backend/ai/mrp").glob("*.py")}
+    actual = {path.name for path in Path("cygnus/runtime/ai/mrp").glob("*.py")}
 
     assert actual == expected
 
@@ -91,7 +91,7 @@ def test_mrp_baseline_modules_import_and_expose_upstream_entrypoints() -> None:
 
 
 def test_mrp_pipeline_preserves_map_reduce_review_refine_verify_commit_markers() -> None:
-    pipeline_source = Path("cygnus/backend/ai/mrp/pipeline.py").read_text(encoding="utf-8")
+    pipeline_source = Path("cygnus/runtime/ai/mrp/pipeline.py").read_text(encoding="utf-8")
 
     for marker in MRP_PIPELINE_PHASE_MARKERS:
         assert marker in pipeline_source, f"MRP pipeline lost phase marker: {marker}"
@@ -114,9 +114,9 @@ def test_mrp_baseline_has_no_legacy_app_namespace_imports() -> None:
 
 
 def test_mrp_writer_uses_mirrored_upstream_prompt_helper() -> None:
-    writer_source = Path("cygnus/backend/ai/mrp/writer.py").read_text(encoding="utf-8")
-    prompt_helper = Path("cygnus/backend/ai/prompt_library.py")
+    writer_source = Path("cygnus/runtime/ai/mrp/writer.py").read_text(encoding="utf-8")
+    prompt_helper = Path("cygnus/runtime/ai/prompt_library.py")
 
     assert prompt_helper.is_file(), "MRP writer's upstream prompt helper must be mirrored"
     assert "build_wiki_writer_system_prompt" in writer_source
-    assert "cygnus.backend.ai.prompt_library" in writer_source
+    assert "cygnus.runtime.ai.prompt_library" in writer_source

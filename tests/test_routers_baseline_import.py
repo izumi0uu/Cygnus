@@ -5,26 +5,26 @@ import unittest
 from pathlib import Path
 
 ROUTER_BASELINE_FILES = [
-    "cygnus/backend/routers/__init__.py",
-    "cygnus/backend/routers/admin_embeddings.py",
-    "cygnus/backend/routers/admin_models.py",
-    "cygnus/backend/routers/admin_settings.py",
-    "cygnus/backend/routers/admin_stats.py",
-    "cygnus/backend/routers/audit.py",
-    "cygnus/backend/routers/auth.py",
-    "cygnus/backend/routers/knowledge_types.py",
-    "cygnus/backend/routers/notes.py",
-    "cygnus/backend/routers/notifications.py",
-    "cygnus/backend/routers/oauth.py",
-    "cygnus/backend/routers/rbac.py",
-    "cygnus/backend/routers/scopes.py",
-    "cygnus/backend/routers/skill_contributions.py",
-    "cygnus/backend/routers/skills.py",
-    "cygnus/backend/routers/sources.py",
-    "cygnus/backend/routers/wiki.py",
-    "cygnus/backend/routers/wiki_branches.py",
-    "cygnus/backend/routers/wiki_drafts.py",
-    "cygnus/backend/routers/wiki_images.py",
+    "cygnus/runtime/routers/__init__.py",
+    "cygnus/runtime/routers/admin_embeddings.py",
+    "cygnus/runtime/routers/admin_models.py",
+    "cygnus/runtime/routers/admin_settings.py",
+    "cygnus/runtime/routers/admin_stats.py",
+    "cygnus/runtime/routers/audit.py",
+    "cygnus/runtime/routers/auth.py",
+    "cygnus/runtime/routers/knowledge_types.py",
+    "cygnus/runtime/routers/notes.py",
+    "cygnus/runtime/routers/notifications.py",
+    "cygnus/runtime/routers/oauth.py",
+    "cygnus/runtime/routers/rbac.py",
+    "cygnus/runtime/routers/scopes.py",
+    "cygnus/runtime/routers/skill_contributions.py",
+    "cygnus/runtime/routers/skills.py",
+    "cygnus/runtime/routers/sources.py",
+    "cygnus/runtime/routers/wiki.py",
+    "cygnus/runtime/routers/wiki_branches.py",
+    "cygnus/runtime/routers/wiki_drafts.py",
+    "cygnus/runtime/routers/wiki_images.py",
 ]
 
 # Mirrors the routers assembled by upstream Arkon main.py and Cygnus main.py.
@@ -32,39 +32,39 @@ ROUTER_BASELINE_FILES = [
 # mounted by upstream main.py either; keep it as dormant baseline until a P2/P2.5
 # wiring ticket decides whether to repair or remove that legacy surface.
 MAIN_ASSEMBLED_ROUTER_MODULES = {
-    "cygnus.backend.routers.admin_embeddings": ["router"],
-    "cygnus.backend.routers.admin_models": ["router"],
-    "cygnus.backend.routers.admin_settings": ["router"],
-    "cygnus.backend.routers.admin_stats": ["router"],
-    "cygnus.backend.routers.audit": ["router"],
-    "cygnus.backend.routers.auth": ["router"],
-    "cygnus.backend.routers.knowledge_types": ["router"],
-    "cygnus.backend.routers.notes": ["router"],
-    "cygnus.backend.routers.notifications": ["router"],
-    "cygnus.backend.routers.oauth": ["router", "wellknown_router"],
-    "cygnus.backend.routers.rbac": ["router"],
-    "cygnus.backend.routers.skill_contributions": ["router"],
-    "cygnus.backend.routers.skills": ["router"],
-    "cygnus.backend.routers.sources": ["router"],
-    "cygnus.backend.routers.wiki": ["router"],
-    "cygnus.backend.routers.wiki_branches": ["router"],
-    "cygnus.backend.routers.wiki_drafts": ["router"],
-    "cygnus.backend.routers.wiki_images": ["router"],
+    "cygnus.runtime.routers.admin_embeddings": ["router"],
+    "cygnus.runtime.routers.admin_models": ["router"],
+    "cygnus.runtime.routers.admin_settings": ["router"],
+    "cygnus.runtime.routers.admin_stats": ["router"],
+    "cygnus.runtime.routers.audit": ["router"],
+    "cygnus.runtime.routers.auth": ["router"],
+    "cygnus.runtime.routers.knowledge_types": ["router"],
+    "cygnus.runtime.routers.notes": ["router"],
+    "cygnus.runtime.routers.notifications": ["router"],
+    "cygnus.runtime.routers.oauth": ["router", "wellknown_router"],
+    "cygnus.runtime.routers.rbac": ["router"],
+    "cygnus.runtime.routers.skill_contributions": ["router"],
+    "cygnus.runtime.routers.skills": ["router"],
+    "cygnus.runtime.routers.sources": ["router"],
+    "cygnus.runtime.routers.wiki": ["router"],
+    "cygnus.runtime.routers.wiki_branches": ["router"],
+    "cygnus.runtime.routers.wiki_drafts": ["router"],
+    "cygnus.runtime.routers.wiki_images": ["router"],
 }
 
 REQUIRED_ROUTER_SURFACE_TOKENS = {
-    "cygnus/backend/routers/auth.py": ["/auth/login", "/auth/me", "/auth/status"],
-    "cygnus/backend/routers/sources.py": ["/sources", "/sources/upload", "/sources/{source_id}/plan/approve"],
-    "cygnus/backend/routers/wiki.py": ["/wiki/pages", "/wiki/index", "/wiki/graph"],
-    "cygnus/backend/routers/wiki_drafts.py": ["/wiki/drafts", "/wiki/drafts/{draft_id}/approve"],
-    "cygnus/backend/routers/wiki_branches.py": ["/wiki/branches", "/wiki/branches/{branch_id}/merge"],
-    "cygnus/backend/routers/skills.py": ["/skills", "/skills/upload"],
-    "cygnus/backend/routers/skill_contributions.py": ["/skill-contributions", "/admin/skill-contributions"],
-    "cygnus/backend/routers/rbac.py": ["/departments", "/employees", "/my/mcp-token/status"],
-    "cygnus/backend/routers/audit.py": ['prefix="/audit"', '"/log"'],
-    "cygnus/backend/routers/notifications.py": ["/notifications", "/notifications/unread-count"],
-    "cygnus/backend/routers/knowledge_types.py": ["/knowledge-types"],
-    "cygnus/backend/routers/scopes.py": ["/scopes/{scope_type}/{scope_id}/members", "/my/scopes"],
+    "cygnus/runtime/routers/auth.py": ["/auth/login", "/auth/me", "/auth/status"],
+    "cygnus/runtime/routers/sources.py": ["/sources", "/sources/upload", "/sources/{source_id}/plan/approve"],
+    "cygnus/runtime/routers/wiki.py": ["/wiki/pages", "/wiki/index", "/wiki/graph"],
+    "cygnus/runtime/routers/wiki_drafts.py": ["/wiki/drafts", "/wiki/drafts/{draft_id}/approve"],
+    "cygnus/runtime/routers/wiki_branches.py": ["/wiki/branches", "/wiki/branches/{branch_id}/merge"],
+    "cygnus/runtime/routers/skills.py": ["/skills", "/skills/upload"],
+    "cygnus/runtime/routers/skill_contributions.py": ["/skill-contributions", "/admin/skill-contributions"],
+    "cygnus/runtime/routers/rbac.py": ["/departments", "/employees", "/my/mcp-token/status"],
+    "cygnus/runtime/routers/audit.py": ['prefix="/audit"', '"/log"'],
+    "cygnus/runtime/routers/notifications.py": ["/notifications", "/notifications/unread-count"],
+    "cygnus/runtime/routers/knowledge_types.py": ["/knowledge-types"],
+    "cygnus/runtime/routers/scopes.py": ["/scopes/{scope_type}/{scope_id}/members", "/my/scopes"],
 }
 
 
@@ -79,10 +79,10 @@ class RouterBaselineImportTests(unittest.TestCase):
             compile(source, relative_path, "exec")
 
     def test_router_baseline_topology_is_exactly_the_upstream_module_family(self) -> None:
-        expected = {Path(path).relative_to("cygnus/backend/routers") for path in ROUTER_BASELINE_FILES}
+        expected = {Path(path).relative_to("cygnus/runtime/routers") for path in ROUTER_BASELINE_FILES}
         actual = {
-            path.relative_to("cygnus/backend/routers")
-            for path in Path("cygnus/backend/routers").rglob("*.py")
+            path.relative_to("cygnus/runtime/routers")
+            for path in Path("cygnus/runtime/routers").rglob("*.py")
             if "__pycache__" not in path.parts
         }
 
@@ -117,10 +117,10 @@ class RouterBaselineImportTests(unittest.TestCase):
                 self.assertIn(route_token, source, f"{relative_path} lost upstream route surface: {route_token}")
 
     def test_dormant_scopes_router_is_source_baseline_not_current_api_assembly(self) -> None:
-        main_source = Path("cygnus/backend/main.py").read_text(encoding="utf-8")
-        scopes_source = Path("cygnus/backend/routers/scopes.py").read_text(encoding="utf-8")
+        main_source = Path("cygnus/runtime/main.py").read_text(encoding="utf-8")
+        scopes_source = Path("cygnus/runtime/routers/scopes.py").read_text(encoding="utf-8")
 
-        self.assertIn("cygnus/backend/routers/scopes.py", ROUTER_BASELINE_FILES)
+        self.assertIn("cygnus/runtime/routers/scopes.py", ROUTER_BASELINE_FILES)
         self.assertIn("router = APIRouter", scopes_source)
         self.assertIn("/scopes/{scope_type}/{scope_id}/members", scopes_source)
         self.assertNotIn("scopes.router", main_source)

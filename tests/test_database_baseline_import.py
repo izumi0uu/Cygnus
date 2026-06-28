@@ -3,10 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 DATABASE_BASELINE_FILES = [
-    "cygnus/backend/database/__init__.py",
-    "cygnus/backend/database/models.py",
-    "cygnus/backend/database/oauth_models.py",
-    "cygnus/backend/database/repository.py",
+    "cygnus/runtime/database/__init__.py",
+    "cygnus/runtime/database/models.py",
+    "cygnus/runtime/database/oauth_models.py",
+    "cygnus/runtime/database/repository.py",
 ]
 
 

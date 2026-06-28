@@ -7,12 +7,12 @@ from unittest.mock import AsyncMock, patch
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cygnus.backend.config import Settings
+from cygnus.runtime.config import Settings
 
 
 class DatabaseWiringRecoveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_database_runtime_provider_builds_engine_and_session_factory(self) -> None:
-        import cygnus.backend.database as database_module
+        import cygnus.runtime.database as database_module
 
         runtime_settings = Settings(
             database_url="postgresql+asyncpg://infra:secret@localhost:5432/cygnus_infra",
@@ -34,8 +34,8 @@ class DatabaseWiringRecoveryTests(unittest.IsolatedAsyncioTestCase):
 
 class RedisWiringRecoveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_sources_delegate_to_shared_worker_arq_pool(self) -> None:
-        import cygnus.backend.routers.sources as sources_module
-        import cygnus.backend.worker as worker_module
+        import cygnus.runtime.routers.sources as sources_module
+        import cygnus.runtime.worker as worker_module
 
         fake_pool = object()
         fake_create_pool = AsyncMock(return_value=fake_pool)
@@ -54,7 +54,7 @@ class RedisWiringRecoveryTests(unittest.IsolatedAsyncioTestCase):
 
 class StorageWiringRecoveryTests(unittest.TestCase):
     def test_storage_service_rebuilds_clients_from_explicit_settings_provider(self) -> None:
-        from cygnus.backend.services.storage_service import StorageService
+        from cygnus.runtime.services.storage_service import StorageService
 
         class _FakeMinio:
             def __init__(self, **kwargs):
@@ -101,7 +101,7 @@ class StorageWiringRecoveryTests(unittest.TestCase):
 
 class OAuthAndNotificationWiringRecoveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_notification_dispatch_pending_uses_database_session_provider(self) -> None:
-        import cygnus.backend.services.notification_service as notification_service
+        import cygnus.runtime.services.notification_service as notification_service
 
         staged = [object()]
         fake_session = object()
@@ -119,18 +119,18 @@ class OAuthAndNotificationWiringRecoveryTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch.object(notification_service, "take_pending_dispatch", return_value=staged),
-            patch("cygnus.backend.database.get_async_session_factory", return_value=_SessionFactory()),
-            patch("cygnus.backend.services.notification_dispatch.dispatch_external", AsyncMock()) as dispatch_external,
+            patch("cygnus.runtime.database.get_async_session_factory", return_value=_SessionFactory()),
+            patch("cygnus.runtime.services.notification_dispatch.dispatch_external", AsyncMock()) as dispatch_external,
         ):
             await notification_service.dispatch_pending()
 
         dispatch_external.assert_awaited_once_with(fake_session, staged)
 
     async def test_app_state_exposes_recovered_infra_wiring_contract(self) -> None:
-        from cygnus.backend.database import get_async_session_factory
-        from cygnus.backend.main import app
-        from cygnus.backend.services.storage_service import storage_service
-        from cygnus.backend.worker import get_arq_pool, get_redis_settings
+        from cygnus.runtime.database import get_async_session_factory
+        from cygnus.runtime.main import app
+        from cygnus.runtime.services.storage_service import storage_service
+        from cygnus.runtime.worker import get_arq_pool, get_redis_settings
 
         self.assertIs(app.state.session_factory, get_async_session_factory())
         self.assertIs(app.state.storage_service, storage_service)
@@ -138,7 +138,7 @@ class OAuthAndNotificationWiringRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(app.state.redis_settings.host, get_redis_settings().host)
 
     async def test_mcp_token_hash_uses_runtime_settings_provider(self) -> None:
-        from cygnus.backend.services.mcp_auth_service import hash_token
+        from cygnus.runtime.services.mcp_auth_service import hash_token
 
         runtime_settings = Settings(mcp_token_pepper="pepper-cyg-54")
         token = "ark-runtime-token"
@@ -148,7 +148,7 @@ class OAuthAndNotificationWiringRecoveryTests(unittest.IsolatedAsyncioTestCase):
             hashlib.sha256,
         ).hexdigest()
 
-        with patch("cygnus.backend.services.mcp_auth_service.get_settings", return_value=runtime_settings):
+        with patch("cygnus.runtime.services.mcp_auth_service.get_settings", return_value=runtime_settings):
             self.assertEqual(hash_token(token), expected)
 
 

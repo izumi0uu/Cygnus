@@ -3,14 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 RUNTIME_SPINE_FILES = [
-    "cygnus/backend/__init__.py",
-    "cygnus/backend/main.py",
-    "cygnus/backend/config.py",
-    "cygnus/backend/worker.py",
-    "cygnus/backend/utils/__init__.py",
-    "cygnus/backend/utils/progress.py",
-    "cygnus/backend/utils/text.py",
-    "cygnus/backend/utils/tokens.py",
+    "cygnus/runtime/__init__.py",
+    "cygnus/runtime/main.py",
+    "cygnus/runtime/config.py",
+    "cygnus/runtime/worker.py",
+    "cygnus/runtime/utils/__init__.py",
+    "cygnus/runtime/utils/progress.py",
+    "cygnus/runtime/utils/text.py",
+    "cygnus/runtime/utils/tokens.py",
 ]
 
 

@@ -115,9 +115,9 @@ class _FakeArqPool:
 
 class WorkerSmokeRunRecoveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_url_ingest_to_wiki_commit_smoke_run_regains_minimal_closure(self) -> None:
-        import cygnus.backend.worker as worker_module
-        from cygnus.backend.ai.mrp.writer import PageWriteResult
-        from cygnus.backend.config import settings as runtime_settings
+        import cygnus.runtime.worker as worker_module
+        from cygnus.runtime.ai.mrp.writer import PageWriteResult
+        from cygnus.runtime.config import settings as runtime_settings
 
         repo = _RepoState()
         fake_pool = _FakeArqPool(repo)
@@ -199,27 +199,27 @@ class WorkerSmokeRunRecoveryTests(unittest.IsolatedAsyncioTestCase):
             return None
 
         with ExitStack() as stack:
-            stack.enter_context(patch("cygnus.backend.database.async_session_factory", new=_SessionFactory(repo)))
-            stack.enter_context(patch("cygnus.backend.ai.registry.ProviderRegistry", new=_FakeRegistry))
+            stack.enter_context(patch("cygnus.runtime.database.async_session_factory", new=_SessionFactory(repo)))
+            stack.enter_context(patch("cygnus.runtime.ai.registry.ProviderRegistry", new=_FakeRegistry))
             stack.enter_context(patch.object(worker_module, "get_arq_pool", AsyncMock(return_value=fake_pool)))
-            stack.enter_context(patch("cygnus.backend.services.kb_service._extract_text_from_url", side_effect=_extract_text_from_url))
-            stack.enter_context(patch("cygnus.backend.services.source_outline.build_outline", side_effect=_build_outline))
-            stack.enter_context(patch("cygnus.backend.services.source_outline.assemble_full_text", side_effect=_assemble_full_text))
-            stack.enter_context(patch("cygnus.backend.utils.tokens.count_tokens", return_value=18))
+            stack.enter_context(patch("cygnus.runtime.services.kb_service._extract_text_from_url", side_effect=_extract_text_from_url))
+            stack.enter_context(patch("cygnus.runtime.services.source_outline.build_outline", side_effect=_build_outline))
+            stack.enter_context(patch("cygnus.runtime.services.source_outline.assemble_full_text", side_effect=_assemble_full_text))
+            stack.enter_context(patch("cygnus.runtime.utils.tokens.count_tokens", return_value=18))
             stack.enter_context(patch.object(runtime_settings, "mrp_auto_approve_plan", True))
-            stack.enter_context(patch("cygnus.backend.ai.mrp.pipeline.run_map_phase", side_effect=_run_map_phase))
-            stack.enter_context(patch("cygnus.backend.ai.mrp.pipeline.run_reduce_phase", side_effect=_run_reduce_phase))
-            stack.enter_context(patch("cygnus.backend.ai.mrp.pipeline._load_plan", AsyncMock(side_effect=lambda *_args, **_kwargs: repo.plan)))
-            stack.enter_context(patch("cygnus.backend.ai.mrp.pipeline._load_chunk_extracts", AsyncMock(return_value=[{"chunk_id": "chunk-1"}])))
-            stack.enter_context(patch("cygnus.backend.ai.mrp.pipeline._get_embedding_spec", AsyncMock(return_value=(None, None))))
-            stack.enter_context(patch("cygnus.backend.ai.mrp.pipeline._resolve_wiki_scopes", AsyncMock(return_value=[("global", None)])))
-            stack.enter_context(patch("cygnus.backend.ai.mrp.pipeline.run_refine_phase", side_effect=_run_refine_phase))
-            stack.enter_context(patch("cygnus.backend.ai.mrp.pipeline.run_verify_phase", side_effect=_run_verify_phase))
-            stack.enter_context(patch("cygnus.backend.services.wiki_service.get_page_by_slug", side_effect=_get_page_by_slug))
-            stack.enter_context(patch("cygnus.backend.services.wiki_service.apply_create", side_effect=_apply_create))
-            stack.enter_context(patch("cygnus.backend.services.wiki_service.apply_update", side_effect=_apply_update))
-            stack.enter_context(patch("cygnus.backend.services.wiki_service.regenerate_index", side_effect=_regenerate_index))
-            stack.enter_context(patch("cygnus.backend.services.wiki_service.append_log", side_effect=_append_log))
+            stack.enter_context(patch("cygnus.runtime.ai.mrp.pipeline.run_map_phase", side_effect=_run_map_phase))
+            stack.enter_context(patch("cygnus.runtime.ai.mrp.pipeline.run_reduce_phase", side_effect=_run_reduce_phase))
+            stack.enter_context(patch("cygnus.runtime.ai.mrp.pipeline._load_plan", AsyncMock(side_effect=lambda *_args, **_kwargs: repo.plan)))
+            stack.enter_context(patch("cygnus.runtime.ai.mrp.pipeline._load_chunk_extracts", AsyncMock(return_value=[{"chunk_id": "chunk-1"}])))
+            stack.enter_context(patch("cygnus.runtime.ai.mrp.pipeline._get_embedding_spec", AsyncMock(return_value=(None, None))))
+            stack.enter_context(patch("cygnus.runtime.ai.mrp.pipeline._resolve_wiki_scopes", AsyncMock(return_value=[("global", None)])))
+            stack.enter_context(patch("cygnus.runtime.ai.mrp.pipeline.run_refine_phase", side_effect=_run_refine_phase))
+            stack.enter_context(patch("cygnus.runtime.ai.mrp.pipeline.run_verify_phase", side_effect=_run_verify_phase))
+            stack.enter_context(patch("cygnus.runtime.services.wiki_service.get_page_by_slug", side_effect=_get_page_by_slug))
+            stack.enter_context(patch("cygnus.runtime.services.wiki_service.apply_create", side_effect=_apply_create))
+            stack.enter_context(patch("cygnus.runtime.services.wiki_service.apply_update", side_effect=_apply_update))
+            stack.enter_context(patch("cygnus.runtime.services.wiki_service.regenerate_index", side_effect=_regenerate_index))
+            stack.enter_context(patch("cygnus.runtime.services.wiki_service.append_log", side_effect=_append_log))
             ingest_result = await worker_module.ingest_url_task({}, str(repo.source.id))
             map_reduce_result = await worker_module.ingest_map_reduce_task({}, str(repo.source.id))
             refine_result = await worker_module.ingest_refine_task({}, str(repo.source.id))

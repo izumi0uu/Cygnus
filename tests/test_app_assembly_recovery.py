@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from fastapi.routing import APIRoute, Mount
 
-from cygnus.backend.config import Settings, get_settings
-from cygnus.backend.main import app, create_app
+from cygnus.runtime.config import Settings, get_settings
+from cygnus.runtime.main import app, create_app
 
 
 def test_backend_settings_provider_is_cached_and_parses_cors_list(monkeypatch) -> None:
@@ -31,11 +31,17 @@ def test_backend_app_factory_exposes_boot_entry_with_settings_state() -> None:
 
     http_routes = {route.path for route in assembled.routes if isinstance(route, APIRoute)}
     mount_routes = {route.path for route in assembled.routes if isinstance(route, Mount)}
+    openapi_paths = set(assembled.openapi()["paths"])
 
     assert "/" in http_routes
     assert "/health" in http_routes
     assert "/api/health" in http_routes
     assert "/mcp" in mount_routes
+    assert "/healthz" in openapi_paths
+    assert "/api/command-center" in openapi_paths
+    assert "/api/publish/apply" in openapi_paths
+    assert "/api/auth/login" in openapi_paths
+    assert "/api/auth/me" in openapi_paths
 
 
 def test_module_level_app_uses_same_boot_contract() -> None:

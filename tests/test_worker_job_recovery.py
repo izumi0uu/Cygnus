@@ -8,13 +8,13 @@ from unittest.mock import AsyncMock, patch
 
 class WorkerJobRoutingRecoveryTests(unittest.TestCase):
     def test_post_extraction_routing_prefers_caption_before_map_reduce(self) -> None:
-        from cygnus.backend.worker import resolve_post_extraction_task
+        from cygnus.runtime.worker import resolve_post_extraction_task
 
         self.assertEqual(resolve_post_extraction_task(has_images=True), "caption_images_task")
         self.assertEqual(resolve_post_extraction_task(has_images=False), "ingest_map_reduce_task")
 
     def test_retry_routing_reenters_map_reduce_for_plan_ready_sources(self) -> None:
-        from cygnus.backend.worker import resolve_retry_task
+        from cygnus.runtime.worker import resolve_retry_task
 
         task_name = resolve_retry_task(
             source_type="file",
@@ -25,7 +25,7 @@ class WorkerJobRoutingRecoveryTests(unittest.TestCase):
         self.assertEqual(task_name, "ingest_map_reduce_task")
 
     def test_retry_routing_reenters_refine_for_late_pipeline_phases(self) -> None:
-        from cygnus.backend.worker import resolve_retry_task
+        from cygnus.runtime.worker import resolve_retry_task
 
         for phase in ("refine", "verify", "commit"):
             with self.subTest(phase=phase):
@@ -39,7 +39,7 @@ class WorkerJobRoutingRecoveryTests(unittest.TestCase):
                 )
 
     def test_worker_settings_publish_real_ingest_and_resume_jobs(self) -> None:
-        from cygnus.backend.worker import WorkerSettings
+        from cygnus.runtime.worker import WorkerSettings
 
         job_names = {
             getattr(item, "name", None)
@@ -62,7 +62,7 @@ class WorkerJobRoutingRecoveryTests(unittest.TestCase):
 
 class WorkerJobExecutionRecoveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_enqueue_post_extraction_pipeline_uses_worker_job_topology(self) -> None:
-        import cygnus.backend.worker as worker_module
+        import cygnus.runtime.worker as worker_module
 
         fake_pool = types.SimpleNamespace(
             enqueue_job=AsyncMock(return_value=types.SimpleNamespace(job_id="job-55-caption"))
@@ -78,8 +78,8 @@ class WorkerJobExecutionRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(job_id, "job-55-caption")
 
     async def test_auto_trigger_refine_promotes_plan_and_enqueues_resume_job(self) -> None:
-        import cygnus.backend.ai.mrp.pipeline as pipeline_module
-        from cygnus.backend.database.models import Source, SourceCompilationPlan
+        import cygnus.runtime.ai.mrp.pipeline as pipeline_module
+        from cygnus.runtime.database.models import Source, SourceCompilationPlan
 
         source_id = uuid.uuid4()
         plan_id = uuid.uuid4()
@@ -125,8 +125,8 @@ class WorkerJobExecutionRecoveryTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with (
-            patch("cygnus.backend.database.async_session_factory", new=_SessionFactory()),
-            patch("cygnus.backend.worker.get_arq_pool", AsyncMock(return_value=fake_pool)),
+            patch("cygnus.runtime.database.async_session_factory", new=_SessionFactory()),
+            patch("cygnus.runtime.worker.get_arq_pool", AsyncMock(return_value=fake_pool)),
         ):
             result = await pipeline_module._auto_trigger_refine(
                 source_id,

@@ -6,38 +6,38 @@ import unittest
 from pathlib import Path
 
 SERVICE_BASELINE_FILES = [
-    "cygnus/backend/services/__init__.py",
-    "cygnus/backend/services/ai_review/__init__.py",
-    "cygnus/backend/services/ai_review/llm_checks.py",
-    "cygnus/backend/services/ai_review/regex_checks.py",
-    "cygnus/backend/services/ai_review/runner.py",
-    "cygnus/backend/services/ai_review/semantic_checks.py",
-    "cygnus/backend/services/ai_review/structural_checks.py",
-    "cygnus/backend/services/audit_service.py",
-    "cygnus/backend/services/auth_service.py",
-    "cygnus/backend/services/config_service.py",
-    "cygnus/backend/services/contribution_service.py",
-    "cygnus/backend/services/embedding_storage.py",
-    "cygnus/backend/services/image_service.py",
-    "cygnus/backend/services/kb_service.py",
-    "cygnus/backend/services/mcp_auth_service.py",
-    "cygnus/backend/services/notification_dispatch.py",
-    "cygnus/backend/services/notification_service.py",
-    "cygnus/backend/services/oauth_service.py",
-    "cygnus/backend/services/permission_engine.py",
-    "cygnus/backend/services/permissions.py",
-    "cygnus/backend/services/policy_engine.py",
-    "cygnus/backend/services/skill_service.py",
-    "cygnus/backend/services/source_outline.py",
-    "cygnus/backend/services/stats_aggregator.py",
-    "cygnus/backend/services/storage_service.py",
-    "cygnus/backend/services/verbatim_service.py",
-    "cygnus/backend/services/wiki_service.py",
+    "cygnus/runtime/services/__init__.py",
+    "cygnus/runtime/services/ai_review/__init__.py",
+    "cygnus/runtime/services/ai_review/llm_checks.py",
+    "cygnus/runtime/services/ai_review/regex_checks.py",
+    "cygnus/runtime/services/ai_review/runner.py",
+    "cygnus/runtime/services/ai_review/semantic_checks.py",
+    "cygnus/runtime/services/ai_review/structural_checks.py",
+    "cygnus/runtime/services/audit_service.py",
+    "cygnus/runtime/services/auth_service.py",
+    "cygnus/runtime/services/config_service.py",
+    "cygnus/runtime/services/contribution_service.py",
+    "cygnus/runtime/services/embedding_storage.py",
+    "cygnus/runtime/services/image_service.py",
+    "cygnus/runtime/services/kb_service.py",
+    "cygnus/runtime/services/mcp_auth_service.py",
+    "cygnus/runtime/services/notification_dispatch.py",
+    "cygnus/runtime/services/notification_service.py",
+    "cygnus/runtime/services/oauth_service.py",
+    "cygnus/runtime/services/permission_engine.py",
+    "cygnus/runtime/services/permissions.py",
+    "cygnus/runtime/services/policy_engine.py",
+    "cygnus/runtime/services/skill_service.py",
+    "cygnus/runtime/services/source_outline.py",
+    "cygnus/runtime/services/stats_aggregator.py",
+    "cygnus/runtime/services/storage_service.py",
+    "cygnus/runtime/services/verbatim_service.py",
+    "cygnus/runtime/services/wiki_service.py",
 ]
 
 SERVICE_BASELINE_MODULES = {
-    "cygnus.backend.services.audit_service": ["log_audit"],
-    "cygnus.backend.services.auth_service": [
+    "cygnus.runtime.services.audit_service": ["log_audit"],
+    "cygnus.runtime.services.auth_service": [
         "hash_password",
         "verify_password",
         "create_access_token",
@@ -47,8 +47,8 @@ SERVICE_BASELINE_MODULES = {
         "require_admin",
         "require_permission",
     ],
-    "cygnus.backend.services.config_service": ["ConfigService", "get_effective_config"],
-    "cygnus.backend.services.contribution_service": [
+    "cygnus.runtime.services.config_service": ["ConfigService", "get_effective_config"],
+    "cygnus.runtime.services.contribution_service": [
         "ContributionAdapter",
         "WikiDraftAdapter",
         "SkillContributionAdapter",
@@ -60,7 +60,7 @@ SERVICE_BASELINE_MODULES = {
         "notify_approved",
         "notify_rejected",
     ],
-    "cygnus.backend.services.embedding_storage": [
+    "cygnus.runtime.services.embedding_storage": [
         "compute_content_hash",
         "embedding_input_text",
         "upsert_page_embedding",
@@ -69,11 +69,11 @@ SERVICE_BASELINE_MODULES = {
         "upsert_chunk_embedding",
         "delete_source_chunk_embeddings",
     ],
-    "cygnus.backend.services.image_service": ["ImageInfo", "extract_images_from_pdf", "extract_images_from_docx", "extract_images"],
-    "cygnus.backend.services.kb_service": ["ingest_source"],
-    "cygnus.backend.services.mcp_auth_service": ["ResolvedIdentity", "MCPAuthService", "apply_scope_filter"],
-    "cygnus.backend.services.notification_dispatch": ["dispatch_external"],
-    "cygnus.backend.services.notification_service": [
+    "cygnus.runtime.services.image_service": ["ImageInfo", "extract_images_from_pdf", "extract_images_from_docx", "extract_images"],
+    "cygnus.runtime.services.kb_service": ["ingest_source"],
+    "cygnus.runtime.services.mcp_auth_service": ["ResolvedIdentity", "MCPAuthService", "apply_scope_filter"],
+    "cygnus.runtime.services.notification_dispatch": ["dispatch_external"],
+    "cygnus.runtime.services.notification_service": [
         "NotificationType",
         "notify",
         "notify_each",
@@ -81,8 +81,8 @@ SERVICE_BASELINE_MODULES = {
         "dispatch_pending",
         "get_reviewers_for_scope",
     ],
-    "cygnus.backend.services.oauth_service": ["OAuthService"],
-    "cygnus.backend.services.permission_engine": [
+    "cygnus.runtime.services.oauth_service": ["OAuthService"],
+    "cygnus.runtime.services.permission_engine": [
         "parse_permission",
         "has_permission",
         "has_any_permission",
@@ -92,19 +92,19 @@ SERVICE_BASELINE_MODULES = {
         "build_skill_filter",
         "get_effective_permissions",
     ],
-    "cygnus.backend.services.policy_engine": ["PolicyDecision", "PolicyEngine"],
-    "cygnus.backend.services.skill_service": ["SkillService"],
-    "cygnus.backend.services.source_outline": [
+    "cygnus.runtime.services.policy_engine": ["PolicyDecision", "PolicyEngine"],
+    "cygnus.runtime.services.skill_service": ["SkillService"],
+    "cygnus.runtime.services.source_outline": [
         "assemble_full_text",
         "slice_pages_by_range",
         "parse_page_range",
         "build_outline",
         "flatten_outline",
     ],
-    "cygnus.backend.services.stats_aggregator": ["run_daily_rollup"],
-    "cygnus.backend.services.storage_service": ["StorageService"],
-    "cygnus.backend.services.verbatim_service": ["VerbatimChunk", "build_verbatim_chunks", "index_verbatim_source"],
-    "cygnus.backend.services.wiki_service": [
+    "cygnus.runtime.services.stats_aggregator": ["run_daily_rollup"],
+    "cygnus.runtime.services.storage_service": ["StorageService"],
+    "cygnus.runtime.services.verbatim_service": ["VerbatimChunk", "build_verbatim_chunks", "index_verbatim_source"],
+    "cygnus.runtime.services.wiki_service": [
         "extract_wikilinks",
         "refresh_links",
         "get_backlinks",
@@ -121,16 +121,16 @@ SERVICE_BASELINE_MODULES = {
         "append_log",
         "delete_page_cascade",
     ],
-    "cygnus.backend.services.ai_review.llm_checks": ["run"],
-    "cygnus.backend.services.ai_review.regex_checks": ["run"],
-    "cygnus.backend.services.ai_review.runner": [
+    "cygnus.runtime.services.ai_review.llm_checks": ["run"],
+    "cygnus.runtime.services.ai_review.regex_checks": ["run"],
+    "cygnus.runtime.services.ai_review.runner": [
         "CheckResult",
         "run_sync_checks",
         "run_async_checks",
         "merge_results",
     ],
-    "cygnus.backend.services.ai_review.semantic_checks": ["run"],
-    "cygnus.backend.services.ai_review.structural_checks": ["run"],
+    "cygnus.runtime.services.ai_review.semantic_checks": ["run"],
+    "cygnus.runtime.services.ai_review.structural_checks": ["run"],
 }
 
 
@@ -145,10 +145,10 @@ class ServicesBaselineImportTests(unittest.TestCase):
             compile(source, relative_path, "exec")
 
     def test_services_baseline_topology_is_exactly_the_upstream_module_family(self) -> None:
-        expected = {Path(path).relative_to("cygnus/backend/services") for path in SERVICE_BASELINE_FILES}
+        expected = {Path(path).relative_to("cygnus/runtime/services") for path in SERVICE_BASELINE_FILES}
         actual = {
-            path.relative_to("cygnus/backend/services")
-            for path in Path("cygnus/backend/services").rglob("*.py")
+            path.relative_to("cygnus/runtime/services")
+            for path in Path("cygnus/runtime/services").rglob("*.py")
             if "__pycache__" not in path.parts
         }
 

@@ -1,4 +1,10 @@
-"""Cygnus support knowledge operating system."""
+"""Cygnus support knowledge operating system package.
+
+Ownership:
+- top-level exports surface Cygnus-owned support-domain and integration entrypoints
+- runtime shell ownership remains under ``cygnus.runtime``
+- this package is the product boundary, not an app-shell compatibility layer
+"""
 
 from cygnus.domain import (
     AnswerCard,

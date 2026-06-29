@@ -1,3 +1,10 @@
+"""Governance control-plane review modules for Cygnus.
+
+Ownership:
+- review queue, pressure intake, drilldown, and source-blindness governance live here
+- this package owns governance semantics, not runtime app-shell wiring
+"""
+
 from cygnus.review.briefing import OwnerState, ReviewCommandBrief, ReviewRiskItem, ReviewRiskType, WhyNowFrame, risk_item_from_proposal
 from cygnus.review.detail import ReviewItemQuery, get_review_item_detail
 from cygnus.review.drift import (

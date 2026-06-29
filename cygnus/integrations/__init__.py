@@ -1,3 +1,10 @@
+"""External and session-facing integration adapters for Cygnus.
+
+Ownership:
+- Nanobot/MCP-facing tool adapters and outward integration surfaces live here
+- this package is an adapter boundary, not the core governance domain itself
+"""
+
 from cygnus.integrations.nanobot_tools import (
     build_default_tool_registry,
     get_downstream_reality_check,

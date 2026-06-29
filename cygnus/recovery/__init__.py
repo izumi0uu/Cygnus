@@ -1,3 +1,10 @@
+"""Governance control-plane recovery modules for Cygnus.
+
+Ownership:
+- downstream reality check, governance overview, and recovery window surfaces live here
+- this package owns governance recovery semantics, not runtime app-shell wiring
+"""
+
 from cygnus.recovery.fixtures import (
     sample_all_recovery_residual_risks,
     sample_recovery_alignment_planes,

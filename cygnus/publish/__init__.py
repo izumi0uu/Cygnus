@@ -1,3 +1,10 @@
+"""Governance control-plane publish modules for Cygnus.
+
+Ownership:
+- publish preview, blast radius, propagation, and publish recovery proof live here
+- this package owns publish governance semantics, not runtime app-shell wiring
+"""
+
 from cygnus.publish.actions import (
     PublishGovernanceAction,
     PublishGovernanceActionType,

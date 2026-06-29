@@ -1,3 +1,10 @@
+"""Object/evidence retrieval and source-trace query layer for Cygnus.
+
+Ownership:
+- knowledge-object search, evidence lookup, and source-trace resolution live here
+- this package serves retrieval truth, not runtime entry wiring
+"""
+
 from cygnus.retrieval.contracts import (
     EvidenceHit,
     KnowledgeObjectHit,

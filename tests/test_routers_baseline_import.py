@@ -12,6 +12,12 @@ ROUTER_BASELINE_FILES = [
     "cygnus/runtime/routers/admin_stats.py",
     "cygnus/runtime/routers/audit.py",
     "cygnus/runtime/routers/auth.py",
+    "cygnus/runtime/routers/governance/__init__.py",
+    "cygnus/runtime/routers/governance/command_center.py",
+    "cygnus/runtime/routers/governance/knowledge_graph.py",
+    "cygnus/runtime/routers/governance/publish.py",
+    "cygnus/runtime/routers/governance/recovery.py",
+    "cygnus/runtime/routers/governance/review.py",
     "cygnus/runtime/routers/knowledge_types.py",
     "cygnus/runtime/routers/notes.py",
     "cygnus/runtime/routers/notifications.py",
@@ -27,7 +33,8 @@ ROUTER_BASELINE_FILES = [
     "cygnus/runtime/routers/wiki_images.py",
 ]
 
-# Mirrors the routers assembled by upstream Arkon main.py and Cygnus main.py.
+# Mirrors the current runtime router family. Governance seam adapters are
+# intentional additions in this branch and must stay in the baseline.
 # `scopes.py` is intentionally present in the source-parity baseline but is not
 # mounted by upstream main.py either; keep it as dormant baseline until a P2/P2.5
 # wiring ticket decides whether to repair or remove that legacy surface.
@@ -38,6 +45,11 @@ MAIN_ASSEMBLED_ROUTER_MODULES = {
     "cygnus.runtime.routers.admin_stats": ["router"],
     "cygnus.runtime.routers.audit": ["router"],
     "cygnus.runtime.routers.auth": ["router"],
+    "cygnus.runtime.routers.governance.command_center": ["router"],
+    "cygnus.runtime.routers.governance.knowledge_graph": ["router"],
+    "cygnus.runtime.routers.governance.publish": ["router"],
+    "cygnus.runtime.routers.governance.recovery": ["router"],
+    "cygnus.runtime.routers.governance.review": ["router"],
     "cygnus.runtime.routers.knowledge_types": ["router"],
     "cygnus.runtime.routers.notes": ["router"],
     "cygnus.runtime.routers.notifications": ["router"],

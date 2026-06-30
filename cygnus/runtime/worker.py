@@ -202,10 +202,8 @@ async def ingest_file_task(ctx: dict, source_id: str):
     from cygnus.runtime.database import async_session_factory
     from cygnus.runtime.database.models import Source, SourceImage
     from cygnus.substrate.source_images import extract_images, inline_image_markers
-    from cygnus.runtime.services.kb_service import (
-        _extract_text_from_file,
-    )
     from cygnus.substrate.source_outline import assemble_full_text, build_outline
+    from cygnus.substrate.source_text import _extract_text_from_file
     from cygnus.runtime.services.storage_service import storage_service
     from cygnus.runtime.utils.tokens import count_tokens
 
@@ -358,8 +356,8 @@ async def ingest_url_task(ctx: dict, source_id: str):
     """arq task: URL ingestion → wiki compilation."""
     from cygnus.runtime.database import async_session_factory
     from cygnus.runtime.database.models import Source
-    from cygnus.runtime.services.kb_service import _extract_text_from_url
     from cygnus.substrate.source_outline import assemble_full_text, build_outline
+    from cygnus.substrate.source_text import _extract_text_from_url
     from cygnus.runtime.utils.tokens import count_tokens
 
     sid = uuid.UUID(source_id)
@@ -494,7 +492,7 @@ async def ingest_skill_task(ctx: dict, skill_id: str, version_id: str, file_path
 
             import asyncio
 
-            from cygnus.runtime.services.kb_service import _guess_content_type
+            from cygnus.substrate.source_text import _guess_content_type
 
             # 1. Unzip with streaming, security checks, and concurrent uploads
             MAX_UNCOMPRESSED_SIZE = 10 * 1024 * 1024  # 10 MB

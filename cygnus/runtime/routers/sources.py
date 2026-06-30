@@ -392,7 +392,7 @@ async def upload_source(
     await db.refresh(source)
 
     # Upload to MinIO before enqueuing so the worker downloads from storage
-    from cygnus.runtime.services.kb_service import _guess_content_type
+    from cygnus.substrate.source_text import _guess_content_type
     from cygnus.runtime.services.storage_service import storage_service
     minio_key = f"sources/{source.id}/original/{file_name}"
     storage_service.upload_file(

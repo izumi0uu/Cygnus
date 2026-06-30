@@ -5,6 +5,7 @@ Ownership:
 - pipeline phase/checkpoint primitives
 - source outline extraction and page-slice primitives
 - source image extraction primitives
+- source text extraction and content-type primitives
 - durable workflow primitives
 - not a second app shell or API entry layer
 - not a LangGraph runtime host; substrate contracts remain framework-neutral
@@ -32,6 +33,11 @@ from cygnus.substrate.source_images import (
     extract_images_from_pdf,
     inline_image_markers,
 )
+from cygnus.substrate.source_text import (
+    _extract_text_from_file,
+    _extract_text_from_url,
+    _guess_content_type,
+)
 
 __all__ = [
     "CompilationProposal",
@@ -46,6 +52,9 @@ __all__ = [
     "SourceImageStorage",
     "UrgencyLevel",
     "PAGE_JOIN_SEPARATOR",
+    "_extract_text_from_file",
+    "_extract_text_from_url",
+    "_guess_content_type",
     "assemble_full_text",
     "build_outline",
     "flatten_outline",

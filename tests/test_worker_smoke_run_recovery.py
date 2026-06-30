@@ -202,7 +202,7 @@ class WorkerSmokeRunRecoveryTests(unittest.IsolatedAsyncioTestCase):
             stack.enter_context(patch("cygnus.runtime.database.async_session_factory", new=_SessionFactory(repo)))
             stack.enter_context(patch("cygnus.runtime.ai.registry.ProviderRegistry", new=_FakeRegistry))
             stack.enter_context(patch.object(worker_module, "get_arq_pool", AsyncMock(return_value=fake_pool)))
-            stack.enter_context(patch("cygnus.runtime.services.kb_service._extract_text_from_url", side_effect=_extract_text_from_url))
+            stack.enter_context(patch("cygnus.substrate.source_text._extract_text_from_url", side_effect=_extract_text_from_url))
             stack.enter_context(patch("cygnus.substrate.source_outline.build_outline", side_effect=_build_outline))
             stack.enter_context(patch("cygnus.substrate.source_outline.assemble_full_text", side_effect=_assemble_full_text))
             stack.enter_context(patch("cygnus.runtime.utils.tokens.count_tokens", return_value=18))

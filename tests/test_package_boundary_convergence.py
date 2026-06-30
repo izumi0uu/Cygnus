@@ -222,6 +222,7 @@ def test_package_dunders_publish_single_owner_story() -> None:
             "Cygnus-owned substrate contracts",
             "source outline extraction and page-slice primitives",
             "source image extraction primitives",
+            "source text extraction and content-type primitives",
             "not a second app shell or API entry layer",
             "not a LangGraph runtime host",
         ],
@@ -245,6 +246,15 @@ def test_package_dunders_publish_single_owner_story() -> None:
             "class SourceImageStorage(Protocol):",
             "def extract_images(",
             "def inline_image_markers(",
+        ],
+        "cygnus/substrate/source_text.py": [
+            "Substrate source text extraction primitives for Cygnus.",
+            "source file/url text extraction and content-type guessing for ingestion live here",
+            "these are source-compilation primitives, not runtime service ownership",
+            "callers provide runtime wiring such as storage or worker orchestration outside this module",
+            "def _guess_content_type(",
+            "async def _extract_text_from_file(",
+            "async def _extract_text_from_url(",
         ],
         "cygnus/workflows/__init__.py": [
             "Workflow composition layer for Cygnus",
@@ -399,6 +409,26 @@ def test_source_image_primitives_live_under_substrate_tree() -> None:
 
     assert Path("cygnus/substrate/source_images.py").exists()
     assert not Path("cygnus/runtime/services/image_service.py").exists()
+
+
+def test_source_text_primitives_live_under_substrate_tree() -> None:
+    substrate_init = Path("cygnus/substrate/__init__.py").read_text(encoding="utf-8")
+    substrate_text = Path("cygnus/substrate/source_text.py").read_text(encoding="utf-8")
+    runtime_services_init = Path("cygnus/runtime/services/__init__.py").read_text(encoding="utf-8")
+    kb_service_text = Path("cygnus/runtime/services/kb_service.py").read_text(encoding="utf-8")
+    worker_text = Path("cygnus/runtime/worker.py").read_text(encoding="utf-8")
+    sources_router_text = Path("cygnus/runtime/routers/sources.py").read_text(encoding="utf-8")
+
+    assert "source text extraction and content-type primitives" in substrate_init
+    assert "Substrate source text extraction primitives for Cygnus." in substrate_text
+    assert "source text extraction and content-type primitives no longer live here" in runtime_services_init
+    assert "from cygnus.substrate.source_text import _extract_text_from_file, _extract_text_from_url, _guess_content_type" in kb_service_text
+    assert "from cygnus.substrate.source_text import _extract_text_from_file" in worker_text
+    assert "from cygnus.substrate.source_text import _extract_text_from_url" in worker_text
+    assert "from cygnus.substrate.source_text import _guess_content_type" in worker_text
+    assert "from cygnus.substrate.source_text import _guess_content_type" in sources_router_text
+
+    assert Path("cygnus/substrate/source_text.py").exists()
 
 
 def test_external_notification_dispatch_lives_under_integrations_tree() -> None:

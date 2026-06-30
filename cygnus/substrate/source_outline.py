@@ -1,4 +1,10 @@
 """
+Substrate source outline primitives for Cygnus.
+
+Ownership:
+- heading-based source structure extraction and page-range slicing live here
+- these are compilation/navigation primitives, not runtime service wiring
+
 Source Outline Builder — heading-based TOC tree (PageIndex-inspired).
 
 Parses markdown-style headings (`#`, `##`, ...) from extracted source text and

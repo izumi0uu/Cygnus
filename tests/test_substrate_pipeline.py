@@ -4,6 +4,13 @@ import unittest
 
 from cygnus.substrate.pipeline_checkpoint import PipelineCheckpoint
 from cygnus.substrate.pipeline_phases import PipelinePhase
+from cygnus.substrate.source_outline import (
+    PAGE_JOIN_SEPARATOR,
+    assemble_full_text,
+    build_outline,
+    parse_page_range,
+    slice_pages_by_range,
+)
 
 
 class PipelinePhaseTests(unittest.TestCase):
@@ -68,3 +75,20 @@ class PipelineCheckpointTests(unittest.TestCase):
         self.assertTrue(checkpoint.is_complete)
         self.assertIsNone(checkpoint.resume_phase)
         self.assertEqual(checkpoint.completed_phases, tuple(PipelinePhase))
+
+
+class SourceOutlinePrimitiveTests(unittest.TestCase):
+    def test_outline_primitives_round_trip_page_slices(self) -> None:
+        pages = [
+            {"page_number": 1, "content": "# Intro\nHello world"},
+            {"page_number": 2, "content": "## Details\nMore detail"},
+        ]
+
+        full_text, offsets = assemble_full_text(pages)
+        outline = build_outline(pages)
+        selected = slice_pages_by_range(full_text, offsets, parse_page_range("1-2"))
+
+        self.assertEqual(offsets, [0, len(pages[0]["content"]) + len(PAGE_JOIN_SEPARATOR)])
+        self.assertEqual([item["page"] for item in selected], [1, 2])
+        self.assertEqual(outline[0]["title"], "Intro")
+        self.assertEqual(outline[0]["children"][0]["title"], "Details")

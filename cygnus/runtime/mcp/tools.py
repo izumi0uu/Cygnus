@@ -681,7 +681,7 @@ def register_tools(mcp: FastMCP):
 
         from cygnus.runtime.database import async_session_factory
         from cygnus.runtime.database.models import Source
-        from cygnus.runtime.services.source_outline import parse_page_range, slice_pages_by_range
+        from cygnus.substrate.source_outline import parse_page_range, slice_pages_by_range
 
         identity, err = await _get_identity()
         if err:

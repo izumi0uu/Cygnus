@@ -188,7 +188,7 @@ async def ingest_file_task(ctx: dict, source_id: str):
         _extract_text_from_file,
         _inline_image_markers,
     )
-    from cygnus.runtime.services.source_outline import assemble_full_text, build_outline
+    from cygnus.substrate.source_outline import assemble_full_text, build_outline
     from cygnus.runtime.services.storage_service import storage_service
     from cygnus.runtime.utils.tokens import count_tokens
 
@@ -342,7 +342,7 @@ async def ingest_url_task(ctx: dict, source_id: str):
     from cygnus.runtime.database import async_session_factory
     from cygnus.runtime.database.models import Source
     from cygnus.runtime.services.kb_service import _extract_text_from_url
-    from cygnus.runtime.services.source_outline import assemble_full_text, build_outline
+    from cygnus.substrate.source_outline import assemble_full_text, build_outline
     from cygnus.runtime.utils.tokens import count_tokens
 
     sid = uuid.UUID(source_id)

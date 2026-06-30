@@ -377,7 +377,7 @@ def _sections_from_outline(
     outline_json: list,
 ) -> list[SectionRef]:
     """Build SectionRefs from outline leaf nodes (smallest level per range)."""
-    from cygnus.runtime.services.source_outline import flatten_outline_with_depth
+    from cygnus.substrate.source_outline import flatten_outline_with_depth
 
     flat = flatten_outline_with_depth(outline_json)
     # Build leaf set: a node is a "leaf" if it has no children

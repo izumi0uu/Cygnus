@@ -19,7 +19,7 @@ from cygnus.runtime.ai.registry import ProviderRegistry
 from cygnus.runtime.ai.wiki_compiler import compile_source_into_wiki
 from cygnus.runtime.database.models import KnowledgeType, Source, SourceImage
 from cygnus.runtime.services.image_service import ImageInfo, extract_images
-from cygnus.runtime.services.source_outline import assemble_full_text, build_outline
+from cygnus.substrate.source_outline import assemble_full_text, build_outline
 from cygnus.runtime.services.storage_service import storage_service
 
 # ---------------------------------------------------------------------------

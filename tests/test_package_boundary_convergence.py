@@ -177,8 +177,20 @@ def test_package_dunders_publish_single_owner_story() -> None:
         ],
         "cygnus/substrate/__init__.py": [
             "Cygnus-owned substrate contracts",
+            "source outline extraction and page-slice primitives",
             "not a second app shell or API entry layer",
             "not a LangGraph runtime host",
+        ],
+        "cygnus/substrate/source_outline.py": [
+            "Substrate source outline primitives for Cygnus.",
+            "heading-based source structure extraction and page-range slicing live here",
+            "these are compilation/navigation primitives, not runtime service wiring",
+            "def assemble_full_text(",
+            "def slice_pages_by_range(",
+            "def parse_page_range(",
+            "def build_outline(",
+            "def flatten_outline(",
+            "def flatten_outline_with_depth(",
         ],
         "cygnus/workflows/__init__.py": [
             "Workflow composition layer for Cygnus",
@@ -283,6 +295,7 @@ def test_ai_pre_review_surface_lives_under_review_tree() -> None:
     assert "Governance draft pre-review annotations for Cygnus" in pre_review_init
     assert "Contribution lifecycle governance for knowledge contributions." in contributions_text
     assert "contribution lifecycle and governance draft pre-review no longer live here" in runtime_services_init
+    assert "source outline extraction and page-slice primitives no longer live here" in runtime_services_init
     assert "from cygnus.review.pre_review import run_async_checks" in worker_text
     assert "cygnus/review/pre_review/runner.py" in db_models_text
 
@@ -291,6 +304,26 @@ def test_ai_pre_review_surface_lives_under_review_tree() -> None:
     assert not Path("cygnus/runtime/services/ai_review").exists()
     assert not Path("cygnus/runtime/services/contribution_service.py").exists()
 
+
+
+
+def test_source_outline_primitives_live_under_substrate_tree() -> None:
+    substrate_init = Path("cygnus/substrate/__init__.py").read_text(encoding="utf-8")
+    substrate_outline = Path("cygnus/substrate/source_outline.py").read_text(encoding="utf-8")
+    worker_text = Path("cygnus/runtime/worker.py").read_text(encoding="utf-8")
+    mcp_tools_text = Path("cygnus/runtime/mcp/tools.py").read_text(encoding="utf-8")
+    mrp_writer_text = Path("cygnus/runtime/ai/mrp/writer.py").read_text(encoding="utf-8")
+    verbatim_text = Path("cygnus/runtime/services/verbatim_service.py").read_text(encoding="utf-8")
+
+    assert "source outline extraction and page-slice primitives" in substrate_init
+    assert "Substrate source outline primitives for Cygnus." in substrate_outline
+    assert "from cygnus.substrate.source_outline import assemble_full_text, build_outline" in worker_text
+    assert "from cygnus.substrate.source_outline import parse_page_range, slice_pages_by_range" in mcp_tools_text
+    assert "from cygnus.substrate.source_outline import flatten_outline_with_depth" in mrp_writer_text
+    assert "from cygnus.substrate.source_outline import PAGE_JOIN_SEPARATOR" in verbatim_text
+
+    assert Path("cygnus/substrate/source_outline.py").exists()
+    assert not Path("cygnus/runtime/services/source_outline.py").exists()
 
 def test_sources_router_no_longer_owns_runtime_source_dispatch_names() -> None:
     sources_router = Path("cygnus/runtime/routers/sources.py").read_text(encoding="utf-8")

@@ -25,7 +25,7 @@ from cygnus.runtime.services.embedding_storage import (
     chunk_content_hash,
     upsert_chunk_embedding,
 )
-from cygnus.runtime.services.source_outline import PAGE_JOIN_SEPARATOR
+from cygnus.substrate.source_outline import PAGE_JOIN_SEPARATOR
 
 # Retrieval-sized chunks (much smaller than the MAP chunker's 20k) for precision.
 CHUNK_TARGET_CHARS = 2_000

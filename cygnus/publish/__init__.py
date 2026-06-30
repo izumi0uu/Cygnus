@@ -44,9 +44,12 @@ from cygnus.publish.surface import (
     get_pressure_intake_publish_preview_surface,
 )
 from cygnus.publish.session_projection import (
+    clear_publish_projections,
+    get_publish_projection,
     PublishProjectionSnapshot,
     PublishProjectionStore,
     projection_store,
+    remember_publish_projection,
 )
 
 __all__ = [
@@ -82,5 +85,8 @@ __all__ = [
     "get_pressure_intake_publish_propagation_surface",
     "get_pressure_intake_publish_preview_surface",
     "projection_store",
+    "remember_publish_projection",
+    "get_publish_projection",
+    "clear_publish_projections",
     "apply_pressure_intake_publish_action",
 ]

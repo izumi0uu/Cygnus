@@ -154,3 +154,18 @@ def get_governance_overview_surface(
         recovery_windows=filtered_windows,
         residual_risks=tuple(risk for risk in residuals if risk.command_id in query.command_ids),
     )
+
+
+def get_default_governance_overview_surface(
+    *,
+    command_refs: Iterable[GovernanceCommandRef] | None = None,
+    recovery_windows: Iterable[RecoveryWindowSurface] | None = None,
+    residual_risks: Iterable[ResidualRisk] | None = None,
+) -> GovernanceOverviewSurface:
+    refs = tuple(command_refs) if command_refs is not None else sample_recovery_command_refs()
+    return get_governance_overview_surface(
+        GovernanceOverviewQuery(command_ids=tuple(ref.command_id for ref in refs)),
+        command_refs=refs,
+        recovery_windows=recovery_windows,
+        residual_risks=residual_risks,
+    )

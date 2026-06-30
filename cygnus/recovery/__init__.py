@@ -26,6 +26,7 @@ from cygnus.recovery.query import (
     GovernanceOverviewQuery,
     RecoveryWindowQuery,
     get_downstream_reality_check_surface,
+    get_default_governance_overview_surface,
     get_governance_overview_surface,
     get_recovery_window_surface,
 )
@@ -84,6 +85,7 @@ __all__ = [
     "build_recovery_window",
     "build_recovery_window_surface",
     "get_downstream_reality_check_surface",
+    "get_default_governance_overview_surface",
     "get_governance_overview_surface",
     "get_recovery_window_surface",
     "GovernanceOverviewQuery",

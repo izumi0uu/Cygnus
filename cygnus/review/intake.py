@@ -141,13 +141,14 @@ def compile_pressure_proposal_bundles(records: Iterable[PressureIntakeRecord]) -
 
 
 def build_pressure_intake_surfaces(
-    records: Iterable[PressureIntakeRecord],
+    records: Iterable[PressureIntakeRecord] | None = None,
     *,
     review_query: ReviewHomeQuery | None = None,
 ) -> PressureIntakeSurfaces:
-    bundles = compile_pressure_proposal_bundles(records)
-    if not bundles:
+    source_records = tuple(records) if records is not None else sample_pressure_intake_records()
+    if not source_records:
         raise ValueError("pressure intake requires at least one record")
+    bundles = compile_pressure_proposal_bundles(source_records)
 
     review_home = get_review_home_surface(review_query, bundles=bundles)
     pressure_bundles = tuple(bundle for bundle in bundles if bundle.signal.risk_type is ReviewRiskType.TICKET_PRESSURE)

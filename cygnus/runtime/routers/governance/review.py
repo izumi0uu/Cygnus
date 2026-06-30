@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from cygnus.runtime.services.auth_service import get_current_user
-from cygnus.review import OwnerState, ReviewHomeQuery, get_pressure_intake_review_queue_drilldown, sample_pressure_intake_records
+from cygnus.review import OwnerState, ReviewHomeQuery, get_pressure_intake_review_queue_drilldown
 
 router = APIRouter()
 
@@ -22,6 +22,5 @@ def review_queue_item(
     )
     return get_pressure_intake_review_queue_drilldown(
         object_ref,
-        records=sample_pressure_intake_records(),
         review_query=review_query,
     ).to_dict()

@@ -8,12 +8,10 @@ from cygnus.recovery import (
     get_pressure_intake_recovery_proof_surface,
     RecoveryWindowQuery,
     get_downstream_reality_check_surface,
-    get_governance_overview_surface,
+    get_default_governance_overview_surface,
     get_recovery_window_surface,
-    sample_recovery_command_refs,
 )
 from cygnus.runtime.services.auth_service import get_current_user
-from cygnus.review import sample_pressure_intake_records
 
 router = APIRouter()
 
@@ -43,11 +41,7 @@ def recovery_window(
 @router.get("/api/recovery/overview")
 def governance_overview(_current_user=Depends(get_current_user)) -> dict[str, object]:
     """Compare open loops to choose the next highest-leverage command."""
-    return get_governance_overview_surface(
-        GovernanceOverviewQuery(
-            command_ids=tuple(ref.command_id for ref in sample_recovery_command_refs())
-        )
-    ).to_dict()
+    return get_default_governance_overview_surface().to_dict()
 
 
 @router.get("/api/recovery-proof")
@@ -59,6 +53,5 @@ def recovery_proof(
     """Frontline reality-check surface proving whether a governance command changed support behavior."""
     return get_pressure_intake_recovery_proof_surface(
         selected_object_ref=object_ref,
-        records=sample_pressure_intake_records(),
         action_key=action_key,
     ).to_dict()

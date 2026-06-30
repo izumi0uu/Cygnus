@@ -8,12 +8,12 @@ from fastapi.testclient import TestClient
 
 from cygnus.runtime.main import app
 from cygnus.runtime.services.auth_service import get_current_user, require_admin
-from cygnus.publish import projection_store
+from cygnus.publish import clear_publish_projections
 
 
 class CommandCenterApiTests(unittest.TestCase):
     def setUp(self) -> None:
-        projection_store.clear()
+        clear_publish_projections()
         self.fake_user = types.SimpleNamespace(id="test-admin", role="admin")
         self.patches = [
             patch("cygnus.runtime.main.seed_default_admin", AsyncMock(return_value=None)),
@@ -35,7 +35,7 @@ class CommandCenterApiTests(unittest.TestCase):
         app.dependency_overrides.clear()
         for patcher in reversed(self.patches):
             patcher.stop()
-        projection_store.clear()
+        clear_publish_projections()
 
     def enable_auth(self) -> None:
         app.dependency_overrides[get_current_user] = lambda: self.fake_user

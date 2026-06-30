@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from cygnus.domain.objects import TroubleshootingFlow
-from cygnus.publish import projection_store
+from cygnus.publish import get_publish_projection
 from cygnus.retrieval import SourceTraceResolver, sample_knowledge_objects, sample_support_evidence
 from cygnus.runtime.services.auth_service import get_current_user
 
@@ -143,7 +143,7 @@ def traceability(
                     "rehearsal": True,
                 }
             )
-            if (snapshot := projection_store.get(selected.object_id)) is not None
+            if (snapshot := get_publish_projection(selected.object_id)) is not None
             else None
         ),
     }

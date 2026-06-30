@@ -5,12 +5,11 @@ from pydantic import BaseModel
 
 from cygnus.publish import (
     apply_pressure_intake_publish_action,
+    remember_publish_projection,
     get_pressure_intake_publish_preview_surface,
     get_pressure_intake_publish_propagation_surface,
-    projection_store,
 )
 from cygnus.runtime.services.auth_service import get_current_user, require_admin
-from cygnus.review import sample_pressure_intake_records
 
 router = APIRouter()
 
@@ -30,7 +29,6 @@ def publish_preview(
     """Blast-radius-first publish surface compiled from the same pressure intake bundle set."""
     return get_pressure_intake_publish_preview_surface(
         selected_object_ref=object_ref,
-        records=sample_pressure_intake_records(),
         action_key=action_key,
     ).to_dict()
 
@@ -45,7 +43,6 @@ def publish_apply(
         result = apply_pressure_intake_publish_action(
             selected_object_ref=body.object_ref,
             action_key=body.action_key,
-            records=sample_pressure_intake_records(),
         )
     except ValueError as exc:
         raise HTTPException(
@@ -57,7 +54,7 @@ def publish_apply(
     payload["rehearsal"] = True
     payload["persisted"] = False
     payload["selected_action"] = body.action_key
-    projection_store.remember(
+    remember_publish_projection(
         payload["updated_candidate"]["object_id"],
         selected_action=body.action_key,
         result=result,
@@ -74,7 +71,5 @@ def publish_propagation(
     """Supporting-surface propagation theater compiled from the current publish command rehearsal."""
     return get_pressure_intake_publish_propagation_surface(
         selected_object_ref=object_ref,
-        records=sample_pressure_intake_records(),
         action_key=action_key,
     ).to_dict()
-

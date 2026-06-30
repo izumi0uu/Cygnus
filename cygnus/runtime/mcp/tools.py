@@ -34,8 +34,8 @@ async def _get_identity():
     """Resolve the bearer token to a ResolvedIdentity, or return an error string."""
     from fastmcp.server.dependencies import get_http_request
 
+    from cygnus.integrations.mcp_auth import MCPAuthService
     from cygnus.runtime.database import async_session_factory
-    from cygnus.runtime.services.mcp_auth_service import MCPAuthService
 
     try:
         request = get_http_request()
@@ -78,9 +78,9 @@ async def _get_allowed_source_ids(identity, session: Optional[AsyncSession] = No
 
     from sqlalchemy import select
 
+    from cygnus.integrations.mcp_auth import apply_scope_filter
     from cygnus.runtime.database import async_session_factory
     from cygnus.runtime.database.models import Source
-    from cygnus.runtime.services.mcp_auth_service import apply_scope_filter
 
     async def _query(s: AsyncSession) -> set[str]:
         stmt = select(Source.id).where(Source.status == "ready")

@@ -138,7 +138,7 @@ class OAuthAndNotificationWiringRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(app.state.redis_settings.host, get_redis_settings().host)
 
     async def test_mcp_token_hash_uses_runtime_settings_provider(self) -> None:
-        from cygnus.runtime.services.mcp_auth_service import hash_token
+        from cygnus.integrations.mcp_auth import hash_token
 
         runtime_settings = Settings(mcp_token_pepper="pepper-cyg-54")
         token = "ark-runtime-token"
@@ -148,7 +148,7 @@ class OAuthAndNotificationWiringRecoveryTests(unittest.IsolatedAsyncioTestCase):
             hashlib.sha256,
         ).hexdigest()
 
-        with patch("cygnus.runtime.services.mcp_auth_service.get_settings", return_value=runtime_settings):
+        with patch("cygnus.integrations.mcp_auth.get_settings", return_value=runtime_settings):
             self.assertEqual(hash_token(token), expected)
 
 

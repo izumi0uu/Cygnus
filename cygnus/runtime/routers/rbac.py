@@ -14,13 +14,13 @@ from sqlalchemy.orm import selectinload
 
 from cygnus.runtime.database import get_db
 from cygnus.runtime.database.models import Department, Employee, EmployeeDepartment
+from cygnus.integrations.mcp_auth import MCPAuthService
 from cygnus.runtime.services.audit_service import log_audit
 from cygnus.runtime.services.auth_service import (
     get_current_user,
     hash_password,
     require_permission,
 )
-from cygnus.runtime.services.mcp_auth_service import MCPAuthService
 
 router = APIRouter()
 

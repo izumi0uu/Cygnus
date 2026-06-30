@@ -2,6 +2,7 @@
 
 Ownership:
 - auth, config, storage, policy, notification, wiki, and outward runtime adapters live here
+- MCP auth/scope adapters no longer live here; they converged to ``cygnus.integrations``
 - outward notification fan-out no longer lives here; it converged to ``cygnus.integrations``
 - contribution lifecycle and governance draft pre-review no longer live here; they converged to ``cygnus.review``
 - embedding persistence helpers no longer live here; they converged to ``cygnus.retrieval``

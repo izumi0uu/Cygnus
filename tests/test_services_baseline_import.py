@@ -20,7 +20,6 @@ SERVICE_BASELINE_FILES = [
     "cygnus/review/source_plans.py",
     "cygnus/runtime/services/image_service.py",
     "cygnus/runtime/services/kb_service.py",
-    "cygnus/runtime/services/mcp_auth_service.py",
     "cygnus/runtime/services/notification_service.py",
     "cygnus/runtime/services/oauth_service.py",
     "cygnus/runtime/services/permission_engine.py",
@@ -76,7 +75,6 @@ SERVICE_BASELINE_MODULES = {
     ],
     "cygnus.runtime.services.image_service": ["ImageInfo", "extract_images_from_pdf", "extract_images_from_docx", "extract_images"],
     "cygnus.runtime.services.kb_service": ["ingest_source"],
-    "cygnus.runtime.services.mcp_auth_service": ["ResolvedIdentity", "MCPAuthService", "apply_scope_filter"],
     "cygnus.runtime.services.notification_service": [
         "NotificationType",
         "notify",

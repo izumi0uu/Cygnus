@@ -18,7 +18,7 @@ Predicates must be pure functions of `ResolvedIdentity` — no I/O — because
 from dataclasses import dataclass
 from typing import Callable
 
-from cygnus.runtime.services.mcp_auth_service import ResolvedIdentity
+from cygnus.integrations.mcp_auth import ResolvedIdentity
 
 # Marker attribute set by `kb_tool` on the decorated function.
 REQUIRES_ATTR = "__cygnus_requires__"

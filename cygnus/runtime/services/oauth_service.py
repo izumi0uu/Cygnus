@@ -16,8 +16,8 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cygnus.integrations.mcp_auth import MCPAuthService
 from cygnus.runtime.database.oauth_models import OAuthAuthCode, OAuthClient
-from cygnus.runtime.services.mcp_auth_service import MCPAuthService
 
 
 class OAuthService:

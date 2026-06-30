@@ -5,6 +5,7 @@ Ownership:
 - pipeline phase/checkpoint primitives
 - durable workflow primitives
 - not a second app shell or API entry layer
+- not a LangGraph runtime host; substrate contracts remain framework-neutral
 """
 
 from cygnus.substrate.compilation_plan import CompilationProposal, EvidenceSufficiency, PlanAction, UrgencyLevel

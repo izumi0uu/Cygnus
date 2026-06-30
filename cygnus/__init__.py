@@ -4,6 +4,7 @@ Ownership:
 - top-level exports surface Cygnus-owned support-domain and integration entrypoints
 - runtime shell ownership remains under ``cygnus.runtime``
 - this package is the product boundary, not an app-shell compatibility layer
+- LangGraph is not part of the current Cygnus mainline; any residue is dependency fallout, not an owner/runtime truth
 """
 
 from cygnus.domain import (

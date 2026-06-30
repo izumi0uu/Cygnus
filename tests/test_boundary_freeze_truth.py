@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import tomllib
 
 
 BOUNDARY_FILES = [
@@ -103,6 +104,7 @@ def test_completion_states_remain_explicit() -> None:
             "CYG-23 ~ CYG-25",
             "P2.5",
             "不要把 import parity、runability recovered、internalization completed、verticalization completed 混成一个完成态",
+            "LangGraph 不属于当前 Cygnus 主线",
             "deletion-readiness gate",
             "`scripts/upstream_cutover_gate.py` 通过之前",
             "不能把 cutover 叙事写成 shell parity 或 P3",
@@ -112,6 +114,7 @@ def test_completion_states_remain_explicit() -> None:
             "CYG-23 ~ CYG-25",
             "P2.5",
             "do not merge import parity, runability recovered, internalization completed, and verticalization completed into one fuzzy done-state",
+            "LangGraph is not part of the current Cygnus mainline",
             "deletion-readiness gate",
             "before `scripts/upstream_cutover_gate.py` passes",
             "must not describe cutover as shell parity or P3",
@@ -122,3 +125,51 @@ def test_completion_states_remain_explicit() -> None:
         text = Path(relative_path).read_text(encoding="utf-8")
         for snippet in expected_snippets:
             assert snippet in text, f"missing boundary snippet `{snippet}` in {relative_path}"
+
+
+def test_mainline_has_no_direct_langgraph_or_langchain_dependencies() -> None:
+    project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    dependencies = [dependency.lower() for dependency in project["project"]["dependencies"]]
+
+    assert not any(
+        dependency.startswith("langgraph") or dependency.startswith("langchain")
+        for dependency in dependencies
+    )
+
+
+def test_mainline_docs_code_and_skills_do_not_reintroduce_langgraph_or_langchain() -> None:
+    scan_roots = [Path("cygnus"), Path("docs"), Path("frontend"), Path("scripts"), Path(".codex/skills")]
+    allowed_suffixes = {".py", ".md", ".toml", ".tsx", ".ts", ".js", ".jsx", ".json"}
+    forbidden_hits: list[str] = []
+    allowed_boundary_mentions = {
+        "cygnus/__init__.py",
+        "cygnus/substrate/__init__.py",
+        "cygnus/workflows/__init__.py",
+        "docs/agent/zh/execution-context.md",
+        "docs/agent/en/execution-context.md",
+        ".codex/skills/cygnus-jira-execution/SKILL.md",
+    }
+
+    for root in scan_roots:
+        if not root.exists():
+            continue
+
+        for path in root.rglob("*"):
+            if not path.is_file() or path.suffix not in allowed_suffixes:
+                continue
+
+            text = path.read_text(encoding="utf-8")
+            lowered = text.lower()
+            relative_path = path.as_posix()
+            if "langgraph" in lowered or "langchain" in lowered:
+                if relative_path not in allowed_boundary_mentions:
+                    forbidden_hits.append(relative_path)
+
+    assert forbidden_hits == []
+
+
+def test_langgraph_lockfile_residue_stays_non_authoritative() -> None:
+    lock_text = Path("uv.lock").read_text(encoding="utf-8")
+
+    if 'name = "langgraph"' in lock_text or 'name = "langchain-core"' in lock_text:
+        assert 'name = "content-core"' in lock_text

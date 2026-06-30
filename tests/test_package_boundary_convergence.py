@@ -71,6 +71,7 @@ def test_package_dunders_publish_single_owner_story() -> None:
             "Cygnus support knowledge operating system package",
             "runtime shell ownership remains under ``cygnus.runtime``",
             "product boundary, not an app-shell compatibility layer",
+            "LangGraph is not part of the current Cygnus mainline",
         ],
         "cygnus/domain/__init__.py": [
             "Support-domain contracts and object vocabulary for Cygnus",
@@ -146,10 +147,12 @@ def test_package_dunders_publish_single_owner_story() -> None:
         "cygnus/substrate/__init__.py": [
             "Cygnus-owned substrate contracts",
             "not a second app shell or API entry layer",
+            "not a LangGraph runtime host",
         ],
         "cygnus/workflows/__init__.py": [
             "Workflow composition layer for Cygnus",
             "not a generic session runtime shell",
+            "do not justify reintroducing a LangGraph mainline",
         ],
     }
 

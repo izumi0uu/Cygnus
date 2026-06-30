@@ -3,6 +3,7 @@
 Ownership:
 - long-lived governance workflow composition belongs here
 - this package is not a generic session runtime shell
+- governance workflows stay explicit and bounded; they do not justify reintroducing a LangGraph mainline
 """
 
 from cygnus.workflows.golden_path import (

@@ -1,5 +1,8 @@
-"""
-Permission constants for Cygnus's support-domain RBAC system.
+"""Runtime permission catalog for Cygnus access-control surfaces.
+
+Ownership:
+- permission strings, role presets, and UI-facing permission labels for the imported shell/admin RBAC layer live here
+- this module is a runtime access-control contract, not support knowledge object truth
 
 Format: {resource}:{action}:{scope}
   - scope = "own_dept" → only own department + global resources

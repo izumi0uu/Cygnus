@@ -1,5 +1,8 @@
-"""
-Permission Engine — resolves access decisions for Global and Workspace realms.
+"""Permission Engine — runtime access decisions for Cygnus shell surfaces.
+
+Ownership:
+- this module resolves runtime-side access decisions for imported shell routes, MCP tools, and workspace membership checks
+- permission vocabulary may be reused elsewhere, but access resolution remains runtime wiring truth
 
 Global Realm:
   - Permissions are scoped: resource:action:own_dept or resource:action:all

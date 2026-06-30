@@ -1,3 +1,10 @@
+"""Skill materialization service for the Cygnus runtime shell.
+
+Ownership:
+- skill zip ingestion, version materialization, storage writes, and worker enqueueing live here
+- review lifecycle semantics live under ``cygnus.review``; this module owns runtime-side persistence and orchestration only
+"""
+
 import hashlib
 import io
 import os

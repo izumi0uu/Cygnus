@@ -680,16 +680,16 @@ async def reembed_all_pages_task(ctx: dict, job_id: str) -> None:
     from cygnus.runtime.ai.registry import ProviderRegistry
     from cygnus.runtime.database import async_session_factory
     from cygnus.runtime.database.models import EmbeddingJob, Source, WikiPage
-    from cygnus.runtime.services.config_service import (
-        ACTIVE_EMBEDDING_MODEL_KEY,
-        ConfigService,
-    )
-    from cygnus.runtime.services.embedding_storage import (
+    from cygnus.retrieval.embedding_storage import (
         cleanup_stale_embeddings,
         cleanup_stale_source_chunk_embeddings,
         compute_content_hash,
         embedding_input_text,
         upsert_page_embedding,
+    )
+    from cygnus.runtime.services.config_service import (
+        ACTIVE_EMBEDDING_MODEL_KEY,
+        ConfigService,
     )
 
     job_uuid = uuid.UUID(job_id)

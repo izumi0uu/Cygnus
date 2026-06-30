@@ -661,12 +661,12 @@ async def _reembed_pages(
     Vectors are written to the per-dimension `wiki_page_embeddings_<dim>` table
     matching the active embedding model's spec (looked up via ProviderRegistry).
     """
-    from cygnus.runtime.ai.registry import ProviderRegistry
-    from cygnus.runtime.services.embedding_storage import (
+    from cygnus.retrieval.embedding_storage import (
         compute_content_hash,
         embedding_input_text,
         upsert_page_embedding,
     )
+    from cygnus.runtime.ai.registry import ProviderRegistry
     from cygnus.runtime.services.wiki_service import _scope_filter
 
     unique = list(dict.fromkeys(slugs))

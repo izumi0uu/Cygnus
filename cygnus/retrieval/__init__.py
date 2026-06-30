@@ -2,6 +2,7 @@
 
 Ownership:
 - knowledge-object search, evidence lookup, and source-trace resolution live here
+- page/source embedding persistence backing semantic retrieval lives here
 - this package serves retrieval truth, not runtime entry wiring
 """
 

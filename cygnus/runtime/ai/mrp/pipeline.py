@@ -80,14 +80,14 @@ async def run_commit_phase(
     Uses apply_create / apply_update from wiki_service (idempotent via upsert
     fallback). All pages are flushed then committed in a single transaction.
     """
-    from cygnus.runtime.ai.mrp.merger import merge_page_content
-    from cygnus.runtime.database.models import Source
-    from cygnus.runtime.services import wiki_service
-    from cygnus.runtime.services.embedding_storage import (
+    from cygnus.retrieval.embedding_storage import (
         compute_content_hash,
         embedding_input_text,
         upsert_page_embedding,
     )
+    from cygnus.runtime.ai.mrp.merger import merge_page_content
+    from cygnus.runtime.database.models import Source
+    from cygnus.runtime.services import wiki_service
 
     wiki_scopes = await _resolve_wiki_scopes(session, source)
 

@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cygnus.runtime.ai.embedding_catalog import get_spec
 from cygnus.runtime.ai.registry import ProviderRegistry
 from cygnus.runtime.database.models import Source, get_source_chunk_embedding_model_for_dim
-from cygnus.runtime.services.embedding_storage import (
+from cygnus.retrieval.embedding_storage import (
     chunk_content_hash,
     upsert_chunk_embedding,
 )

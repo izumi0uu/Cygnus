@@ -1,9 +1,8 @@
-"""
-Helpers for writing/reading wiki page embeddings across the
-per-dimension `wiki_page_embeddings_<dim>` tables.
+"""Embedding persistence primitives for Cygnus semantic retrieval.
 
-Use these instead of touching the embedding tables directly so callers don't
-have to care which dimension corresponds to the active model.
+Ownership:
+- wiki-page and raw-source chunk embedding writes/cleanup live here
+- this module serves retrieval backing state for semantic search, not runtime service orchestration
 """
 
 import hashlib

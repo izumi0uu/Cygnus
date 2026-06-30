@@ -99,11 +99,20 @@ def test_package_dunders_publish_single_owner_story() -> None:
         ],
         "cygnus/retrieval/__init__.py": [
             "Object/evidence retrieval and source-trace query layer for Cygnus",
+            "page/source embedding persistence backing semantic retrieval lives here",
             "serves retrieval truth, not runtime entry wiring",
             "search_pages_semantic",
             "search_source_chunks_semantic",
             "VerbatimChunk",
             "index_verbatim_source",
+        ],
+        "cygnus/retrieval/embedding_storage.py": [
+            "Embedding persistence primitives for Cygnus semantic retrieval.",
+            "wiki-page and raw-source chunk embedding writes/cleanup live here",
+            "this module serves retrieval backing state for semantic search, not runtime service orchestration",
+            "def compute_content_hash(",
+            "async def upsert_page_embedding(",
+            "async def cleanup_stale_source_chunk_embeddings(",
         ],
         "cygnus/retrieval/semantic_search.py": [
             "Semantic retrieval queries for Cygnus knowledge and raw source search.",
@@ -384,6 +393,28 @@ def test_raw_source_retrieval_primitives_live_under_retrieval_tree() -> None:
     assert Path("cygnus/retrieval/semantic_search.py").exists()
     assert Path("cygnus/retrieval/source_chunks.py").exists()
     assert not Path("cygnus/runtime/services/verbatim_service.py").exists()
+
+
+def test_embedding_persistence_primitives_live_under_retrieval_tree() -> None:
+    retrieval_init = Path("cygnus/retrieval/__init__.py").read_text(encoding="utf-8")
+    embedding_storage = Path("cygnus/retrieval/embedding_storage.py").read_text(encoding="utf-8")
+    runtime_services_init = Path("cygnus/runtime/services/__init__.py").read_text(encoding="utf-8")
+    source_chunks_text = Path("cygnus/retrieval/source_chunks.py").read_text(encoding="utf-8")
+    mrp_pipeline_text = Path("cygnus/runtime/ai/mrp/pipeline.py").read_text(encoding="utf-8")
+    wiki_compiler_text = Path("cygnus/runtime/ai/wiki_compiler.py").read_text(encoding="utf-8")
+    worker_text = Path("cygnus/runtime/worker.py").read_text(encoding="utf-8")
+
+    assert "page/source embedding persistence backing semantic retrieval lives here" in retrieval_init
+    assert "Embedding persistence primitives for Cygnus semantic retrieval." in embedding_storage
+    assert "wiki-page and raw-source chunk embedding writes/cleanup live here" in embedding_storage
+    assert "embedding persistence helpers no longer live here" in runtime_services_init
+    assert "from cygnus.retrieval.embedding_storage import (" in source_chunks_text
+    assert "from cygnus.retrieval.embedding_storage import (" in mrp_pipeline_text
+    assert "from cygnus.retrieval.embedding_storage import (" in wiki_compiler_text
+    assert "from cygnus.retrieval.embedding_storage import (" in worker_text
+
+    assert Path("cygnus/retrieval/embedding_storage.py").exists()
+    assert not Path("cygnus/runtime/services/embedding_storage.py").exists()
 
 def test_sources_router_no_longer_owns_runtime_source_dispatch_names() -> None:
     sources_router = Path("cygnus/runtime/routers/sources.py").read_text(encoding="utf-8")

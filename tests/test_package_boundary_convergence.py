@@ -101,8 +101,12 @@ def test_package_dunders_publish_single_owner_story() -> None:
         ],
         "cygnus/review/__init__.py": [
             "Governance control-plane review modules for Cygnus",
-            "automated draft pre-review annotations live under ``cygnus.review.pre_review``",
+            "contribution lifecycle and automated draft pre-review annotations live under ``cygnus.review``",
             "owns governance semantics, not runtime app-shell wiring",
+        ],
+        "cygnus/review/contributions.py": [
+            "Contribution lifecycle governance for knowledge contributions.",
+            "governance lifecycle wrapper, not a table merge",
         ],
         "cygnus/review/pre_review/__init__.py": [
             "Governance draft pre-review annotations for Cygnus",
@@ -213,11 +217,16 @@ def test_ai_pre_review_surface_lives_under_review_tree() -> None:
     worker_text = Path("cygnus/runtime/worker.py").read_text(encoding="utf-8")
     db_models_text = Path("cygnus/runtime/database/models.py").read_text(encoding="utf-8")
 
-    assert "cygnus.review.pre_review" in review_init
+    contributions_text = Path("cygnus/review/contributions.py").read_text(encoding="utf-8")
+
+    assert "contribution lifecycle and automated draft pre-review annotations live under ``cygnus.review``" in review_init
     assert "Governance draft pre-review annotations for Cygnus" in pre_review_init
-    assert "governance draft pre-review no longer lives here" in runtime_services_init
+    assert "Contribution lifecycle governance for knowledge contributions." in contributions_text
+    assert "contribution lifecycle and governance draft pre-review no longer live here" in runtime_services_init
     assert "from cygnus.review.pre_review import run_async_checks" in worker_text
     assert "cygnus/review/pre_review/runner.py" in db_models_text
 
     assert Path("cygnus/review/pre_review/runner.py").exists()
+    assert Path("cygnus/review/contributions.py").exists()
     assert not Path("cygnus/runtime/services/ai_review").exists()
+    assert not Path("cygnus/runtime/services/contribution_service.py").exists()

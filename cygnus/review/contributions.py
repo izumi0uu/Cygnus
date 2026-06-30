@@ -1,9 +1,9 @@
 """
-Contribution Service — unified lifecycle for knowledge contributions.
+Contribution lifecycle governance for knowledge contributions.
 
 Wraps the two existing artifact types (wiki drafts, skill contributions) behind
 a single state machine so transitions emit audit + notifications consistently.
-Schema stays separate; this is a service-layer wrapper, not a table merge.
+Schema stays separate; this is a governance lifecycle wrapper, not a table merge.
 
 State machine (both artifact types):
 

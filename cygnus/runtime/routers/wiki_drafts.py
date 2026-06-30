@@ -22,10 +22,11 @@ from cygnus.runtime.database.models import (
     WikiPage,
     WikiPageDraft,
 )
-from cygnus.runtime.services import contribution_service, wiki_service
+from cygnus.review import contributions as contribution_service
+from cygnus.runtime.services import wiki_service
 from cygnus.runtime.services.audit_service import log_audit
 from cygnus.runtime.services.auth_service import get_current_user, require_permission
-from cygnus.runtime.services.contribution_service import (
+from cygnus.review.contributions import (
     InvalidTransition,
     wiki_draft_adapter,
 )

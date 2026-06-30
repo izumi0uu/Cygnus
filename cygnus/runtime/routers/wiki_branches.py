@@ -266,7 +266,7 @@ async def submit_branch(
     drafts = (await db.execute(stmt)).scalars().all()
 
     # Enqueue AI review for all drafts & trigger notifications
-    from cygnus.runtime.services.contribution_service import notify_submitted, wiki_draft_adapter
+    from cygnus.review.contributions import notify_submitted, wiki_draft_adapter
     for d in drafts:
         if d.status != "pending":
             d.status = "pending"
@@ -305,7 +305,7 @@ async def close_branch(
     stmt = select(WikiPageDraft).where(WikiPageDraft.branch_id == branch_id)
     drafts = (await db.execute(stmt)).scalars().all()
 
-    from cygnus.runtime.services.contribution_service import withdraw, wiki_draft_adapter
+    from cygnus.review.contributions import withdraw, wiki_draft_adapter
     for d in drafts:
         if d.status in ("pending", "needs_revision"):
             await withdraw(db, wiki_draft_adapter, d, user)
@@ -366,7 +366,7 @@ async def merge_branch(
                     reviewer_note=body.reviewer_note,
                 )
                 # Fire approved notifications
-                from cygnus.runtime.services.contribution_service import notify_approved, wiki_draft_adapter
+                from cygnus.review.contributions import notify_approved, wiki_draft_adapter
                 await notify_approved(db, wiki_draft_adapter, d, user)
 
             branch.status = "merged"
@@ -418,7 +418,7 @@ async def rebase_draft(
     draft.status = "pending"
 
     # Enqueue new AI review round
-    from cygnus.runtime.services.contribution_service import _enqueue_ai_review
+    from cygnus.review.contributions import _enqueue_ai_review
     await _enqueue_ai_review(db, draft)
 
     # Re-calculate branch conflict state

@@ -24,12 +24,12 @@ from cygnus.runtime.database.models import (
     SkillVersion,
 )
 from cygnus.runtime.routers.skills import is_text_file
-from cygnus.runtime.services import contribution_service
+from cygnus.review import contributions as contribution_service
 from cygnus.runtime.services.auth_service import (
     get_current_user,
     require_permission,
 )
-from cygnus.runtime.services.contribution_service import (
+from cygnus.review.contributions import (
     InvalidTransition,
     skill_contribution_adapter,
 )

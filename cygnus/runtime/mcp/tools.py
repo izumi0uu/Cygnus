@@ -1108,8 +1108,8 @@ def register_tools(mcp: FastMCP):
                 base_version=effective_base,
             )
             draft.page = page
-            from cygnus.runtime.services import contribution_service
-            from cygnus.runtime.services.contribution_service import wiki_draft_adapter
+            from cygnus.review import contributions as contribution_service
+            from cygnus.review.contributions import wiki_draft_adapter
             await contribution_service.notify_submitted(
                 session, wiki_draft_adapter, draft, employee,
             )
@@ -1472,8 +1472,8 @@ def register_tools(mcp: FastMCP):
                 scope_type=approved_scope_type,
                 scope_id=approved_scope_id,
             )
-            from cygnus.runtime.services import contribution_service
-            from cygnus.runtime.services.contribution_service import wiki_draft_adapter
+            from cygnus.review import contributions as contribution_service
+            from cygnus.review.contributions import wiki_draft_adapter
             await contribution_service.notify_approved(
                 session, wiki_draft_adapter, draft, employee,
                 version_label=f"v{page.version}",
@@ -1538,8 +1538,8 @@ def register_tools(mcp: FastMCP):
                 return "Error: insufficient permission to reject drafts for this page."
 
             await wiki_service.reject_draft(session, draft, employee.id, reviewer_note.strip())
-            from cygnus.runtime.services import contribution_service
-            from cygnus.runtime.services.contribution_service import wiki_draft_adapter
+            from cygnus.review import contributions as contribution_service
+            from cygnus.review.contributions import wiki_draft_adapter
             await contribution_service.notify_rejected(
                 session, wiki_draft_adapter, draft, employee, reason=reviewer_note.strip(),
             )
@@ -1572,8 +1572,8 @@ def register_tools(mcp: FastMCP):
 
         from cygnus.runtime.database import async_session_factory
         from cygnus.runtime.database.models import Employee, WikiPageDraft
-        from cygnus.runtime.services import contribution_service
-        from cygnus.runtime.services.contribution_service import (
+        from cygnus.review import contributions as contribution_service
+        from cygnus.review.contributions import (
             InvalidTransition,
             wiki_draft_adapter,
         )
@@ -1647,8 +1647,8 @@ def register_tools(mcp: FastMCP):
 
         from cygnus.runtime.database import async_session_factory
         from cygnus.runtime.database.models import Employee, WikiPageDraft
-        from cygnus.runtime.services import contribution_service
-        from cygnus.runtime.services.contribution_service import InvalidTransition
+        from cygnus.review import contributions as contribution_service
+        from cygnus.review.contributions import InvalidTransition
 
         identity, err = await _get_identity()
         if err:
@@ -1708,8 +1708,8 @@ def register_tools(mcp: FastMCP):
 
         from cygnus.runtime.database import async_session_factory
         from cygnus.runtime.database.models import Employee, WikiPageDraft
-        from cygnus.runtime.services import contribution_service
-        from cygnus.runtime.services.contribution_service import (
+        from cygnus.review import contributions as contribution_service
+        from cygnus.review.contributions import (
             InvalidTransition,
             wiki_draft_adapter,
         )
@@ -1784,8 +1784,9 @@ def register_tools(mcp: FastMCP):
 
         from cygnus.runtime.database import async_session_factory
         from cygnus.runtime.database.models import Employee
-        from cygnus.runtime.services import contribution_service, wiki_service
-        from cygnus.runtime.services.contribution_service import wiki_draft_adapter
+        from cygnus.review import contributions as contribution_service
+        from cygnus.runtime.services import wiki_service
+        from cygnus.review.contributions import wiki_draft_adapter
 
         identity, err = await _get_identity()
         if err:

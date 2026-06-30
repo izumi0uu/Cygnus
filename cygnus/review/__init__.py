@@ -2,11 +2,26 @@
 
 Ownership:
 - review queue, pressure intake, drilldown, and source-blindness governance live here
-- automated draft pre-review annotations live under ``cygnus.review.pre_review``
+- contribution lifecycle and automated draft pre-review annotations live under ``cygnus.review``
 - this package owns governance semantics, not runtime app-shell wiring
 """
 
 from cygnus.review.briefing import OwnerState, ReviewCommandBrief, ReviewRiskItem, ReviewRiskType, WhyNowFrame, risk_item_from_proposal
+from cygnus.review.contributions import (
+    ContributionAdapter,
+    InvalidTransition,
+    SkillContributionAdapter,
+    WikiDraftAdapter,
+    notify_approved,
+    notify_rejected,
+    notify_submitted,
+    request_changes,
+    resubmit_skill_contribution,
+    resubmit_wiki_draft,
+    skill_contribution_adapter,
+    wiki_draft_adapter,
+    withdraw,
+)
 from cygnus.review.detail import ReviewItemQuery, get_review_item_detail
 from cygnus.review.drift import (
     DriftContext,
@@ -74,7 +89,20 @@ from cygnus.review.service import ProposalBundle, ReviewSignal, assemble_review_
 from cygnus.review.surface import PriorityStackCard, ReviewCommandSurface, SituationFrame
 
 __all__ = [
+    "ContributionAdapter",
+    "InvalidTransition",
+    "SkillContributionAdapter",
+    "WikiDraftAdapter",
     "AudienceImpact",
+    "withdraw",
+    "wiki_draft_adapter",
+    "skill_contribution_adapter",
+    "resubmit_wiki_draft",
+    "resubmit_skill_contribution",
+    "request_changes",
+    "notify_submitted",
+    "notify_rejected",
+    "notify_approved",
     "DriftContext",
     "DriftGovernanceCommand",
     "DriftGovernanceCommandType",

@@ -16,7 +16,7 @@ SERVICE_BASELINE_FILES = [
     "cygnus/runtime/services/audit_service.py",
     "cygnus/runtime/services/auth_service.py",
     "cygnus/runtime/services/config_service.py",
-    "cygnus/runtime/services/contribution_service.py",
+    "cygnus/review/contributions.py",
     "cygnus/runtime/services/embedding_storage.py",
     "cygnus/runtime/services/image_service.py",
     "cygnus/runtime/services/kb_service.py",
@@ -48,7 +48,7 @@ SERVICE_BASELINE_MODULES = {
         "require_permission",
     ],
     "cygnus.runtime.services.config_service": ["ConfigService", "get_effective_config"],
-    "cygnus.runtime.services.contribution_service": [
+    "cygnus.review.contributions": [
         "ContributionAdapter",
         "WikiDraftAdapter",
         "SkillContributionAdapter",
@@ -148,7 +148,7 @@ class ServicesBaselineImportTests(unittest.TestCase):
         expected = {Path(path).relative_to("cygnus") for path in SERVICE_BASELINE_FILES}
         actual = {
             path.relative_to("cygnus")
-            for path in list(Path("cygnus/runtime/services").rglob("*.py")) + list(Path("cygnus/review/pre_review").rglob("*.py"))
+            for path in list(Path("cygnus/runtime/services").rglob("*.py")) + list(Path("cygnus/review/pre_review").rglob("*.py")) + list(Path("cygnus/review").glob("contributions.py"))
             if "__pycache__" not in path.parts
         }
 
@@ -181,6 +181,7 @@ class ServicesBaselineImportTests(unittest.TestCase):
             "cygnus/runtime/services/audit_service.py",
             "cygnus/runtime/services/auth_service.py",
             "cygnus/runtime/services/config_service.py",
+            "cygnus/review/contributions.py",
             "cygnus/runtime/services/kb_service.py",
             "cygnus/runtime/services/permission_engine.py",
             "cygnus/runtime/services/permissions.py",

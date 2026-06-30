@@ -102,6 +102,10 @@ def test_package_dunders_publish_single_owner_story() -> None:
         "cygnus/review/__init__.py": [
             "Governance control-plane review modules for Cygnus",
             "contribution lifecycle and automated draft pre-review annotations live under ``cygnus.review``",
+            "submit_wiki_branch",
+            "close_wiki_branch",
+            "merge_wiki_branch",
+            "rebase_wiki_branch_draft",
             "create_wiki_draft",
             "approve_wiki_draft",
             "reject_wiki_draft",
@@ -109,6 +113,15 @@ def test_package_dunders_publish_single_owner_story() -> None:
             "approve_skill_contribution",
             "reject_skill_contribution",
             "owns governance semantics, not runtime app-shell wiring",
+        ],
+        "cygnus/review/branches.py": [
+            "Wiki branch lifecycle governance for review-owned contribution branches.",
+            "submit / close / merge / rebase semantics for governed branch changes",
+            "class BranchMergeConflict(Exception):",
+            "async def submit_wiki_branch(",
+            "async def close_wiki_branch(",
+            "async def merge_wiki_branch(",
+            "async def rebase_wiki_branch_draft(",
         ],
         "cygnus/review/contributions.py": [
             "Contribution lifecycle governance for knowledge contributions.",

@@ -3,9 +3,17 @@
 Ownership:
 - review queue, pressure intake, drilldown, and source-blindness governance live here
 - contribution lifecycle and automated draft pre-review annotations live under ``cygnus.review``
+- contribution lifecycle, wiki branch lifecycle, and automated draft pre-review annotations live under ``cygnus.review``
 - this package owns governance semantics, not runtime app-shell wiring
 """
 
+from cygnus.review.branches import (
+    BranchMergeConflict,
+    close_wiki_branch,
+    merge_wiki_branch,
+    rebase_wiki_branch_draft,
+    submit_wiki_branch,
+)
 from cygnus.review.briefing import OwnerState, ReviewCommandBrief, ReviewRiskItem, ReviewRiskType, WhyNowFrame, risk_item_from_proposal
 from cygnus.review.contributions import (
     ContributionAdapter,
@@ -97,6 +105,7 @@ from cygnus.review.service import ProposalBundle, ReviewSignal, assemble_review_
 from cygnus.review.surface import PriorityStackCard, ReviewCommandSurface, SituationFrame
 
 __all__ = [
+    "BranchMergeConflict",
     "ContributionAdapter",
     "CreateDraftSlugConflict",
     "DraftConflictError",
@@ -105,9 +114,13 @@ __all__ = [
     "WikiDraftAdapter",
     "approve_skill_contribution",
     "approve_wiki_draft",
+    "close_wiki_branch",
     "create_wiki_draft",
     "AudienceImpact",
+    "merge_wiki_branch",
+    "rebase_wiki_branch_draft",
     "submit_skill_contribution",
+    "submit_wiki_branch",
     "withdraw",
     "wiki_draft_adapter",
     "skill_contribution_adapter",

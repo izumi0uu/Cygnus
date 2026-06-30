@@ -3,24 +3,21 @@ Wiki Branch router — named contribution branches, batch reviews, and atomic me
 """
 
 import uuid
-from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, field_validator
 from sqlalchemy import and_, func, select
-from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cygnus.review import branches as branch_service
 from cygnus.runtime.database import get_db
 from cygnus.runtime.database.models import (
     Employee,
     WikiBranch,
     WikiPageDraft,
     WikiPage,
-    Department,
 )
-from cygnus.runtime.services import wiki_service
 from cygnus.runtime.services.audit_service import log_audit
 from cygnus.runtime.services.auth_service import get_current_user
 from cygnus.runtime.services.permission_engine import (
@@ -249,35 +246,15 @@ async def submit_branch(
     if not branch:
         raise HTTPException(404, "Contribution branch not found")
 
-    if branch.author_id != user.id and user.role != "admin":
-        raise HTTPException(403, "Only the branch author may submit this request")
+    try:
+        await branch_service.submit_wiki_branch(db, branch, user)
+    except branch_service.InvalidTransition as e:
+        message = str(e)
+        status = 403 if "Only the branch author" in message else 400
+        raise HTTPException(status, message)
 
-    if branch.status != "draft":
-        raise HTTPException(400, f"Cannot submit for merge while the branch is in '{branch.status}' state")
-
-    # Verify branch is not empty
-    stmt = select(func.count(WikiPageDraft.id)).where(WikiPageDraft.branch_id == branch.id)
-    count = (await db.execute(stmt)).scalar_one()
-    if count == 0:
-        raise HTTPException(400, "Your contribution branch is empty. Add a page draft before submitting.")
-
-    # Get associated drafts
-    stmt = select(WikiPageDraft).where(WikiPageDraft.branch_id == branch_id)
-    drafts = (await db.execute(stmt)).scalars().all()
-
-    # Enqueue AI review for all drafts & trigger notifications
-    from cygnus.review.contributions import notify_submitted, wiki_draft_adapter
-    for d in drafts:
-        if d.status != "pending":
-            d.status = "pending"
-        # Trigger AI check & notify reviewers
-        await notify_submitted(db, wiki_draft_adapter, d, user)
-
-    branch.status = "pending_merge"
     await db.commit()
     await db.refresh(branch)
-
-    await log_audit(db, user, "submit_branch", "wiki_branch", str(branch.id))
     return await _to_branch_response(db, branch)
 
 
@@ -298,23 +275,20 @@ async def close_branch(
     if not is_author and not is_reviewer:
         raise HTTPException(403, "You do not have permission to close or cancel this branch")
 
-    if branch.status in ("merged", "closed"):
-        raise HTTPException(400, "The branch is already closed or merged")
+    try:
+        await branch_service.close_wiki_branch(
+            db,
+            branch,
+            user,
+            reviewer_override=is_reviewer,
+        )
+    except branch_service.InvalidTransition as e:
+        message = str(e)
+        status = 403 if "permission" in message.lower() else 400
+        raise HTTPException(status, message)
 
-    # Withdraw all drafts
-    stmt = select(WikiPageDraft).where(WikiPageDraft.branch_id == branch_id)
-    drafts = (await db.execute(stmt)).scalars().all()
-
-    from cygnus.review.contributions import withdraw, wiki_draft_adapter
-    for d in drafts:
-        if d.status in ("pending", "needs_revision"):
-            await withdraw(db, wiki_draft_adapter, d, user)
-
-    branch.status = "closed"
     await db.commit()
     await db.refresh(branch)
-
-    await log_audit(db, user, "close_branch", "wiki_branch", str(branch.id))
     return await _to_branch_response(db, branch)
 
 
@@ -333,55 +307,24 @@ async def merge_branch(
     if not await _can_review_branch(db, user, branch.scope_type, branch.scope_id):
         raise HTTPException(403, "You do not have permission to merge documents in this scope")
 
-    if branch.status != "pending_merge":
-        raise HTTPException(400, "A branch can only be merged while it is in 'pending_merge' state")
-
-    # Fetch drafts in branch
-    stmt = select(WikiPageDraft).where(WikiPageDraft.branch_id == branch_id)
-    drafts = (await db.execute(stmt)).scalars().all()
-
-    # Step 1: Pre-merge concurrency check (Detect mid-air collisions before executing writing)
-    for d in drafts:
-        if d.draft_kind == "edit" and d.page_id:
-            page = await db.get(WikiPage, d.page_id)
-            if page and d.base_version is not None and d.base_version < page.version:
-                branch.has_conflict = True
-                await db.commit()
-                raise HTTPException(
-                    409,
-                    f"Conflict detected on page '{page.title}' ({page.slug}). "
-                    f"This page has newer updates (v{page.version}) since the author started editing (v{d.base_version}). "
-                    "The author must rebase the branch before merge approval."
-                )
-
-    # Step 2: Atomic approval of all drafts
     try:
-        async with db.begin_nested():
-            for d in drafts:
-                # Batch approve
-                await contribution_service.approve_wiki_draft(
-                    db,
-                    d,
-                    reviewer_id=user.id,
-                    reviewer_note=body.reviewer_note,
-                )
-                # Fire approved notifications
-                from cygnus.review.contributions import notify_approved, wiki_draft_adapter
-                await notify_approved(db, wiki_draft_adapter, d, user)
-
-            branch.status = "merged"
-            branch.reviewer_id = user.id
-            branch.reviewed_at = datetime.now(timezone.utc)
-            branch.reviewer_note = body.reviewer_note
-            branch.has_conflict = False
-
+        await branch_service.merge_wiki_branch(
+            db,
+            branch,
+            user,
+            reviewer_note=body.reviewer_note,
+        )
         await db.commit()
+    except branch_service.BranchMergeConflict as e:
+        await db.commit()
+        raise HTTPException(409, str(e))
+    except branch_service.InvalidTransition as e:
+        raise HTTPException(400, str(e))
     except Exception as e:
         await db.rollback()
         raise HTTPException(400, f"Branch merge failed: {str(e)}")
 
     await db.refresh(branch)
-    await log_audit(db, user, "merge_branch", "wiki_branch", str(branch.id))
     return await _to_branch_response(db, branch)
 
 
@@ -398,44 +341,26 @@ async def rebase_draft(
     if not branch:
         raise HTTPException(404, "Contribution branch not found")
 
-    if branch.author_id != user.id and user.role != "admin":
-        raise HTTPException(403, "Only the branch author may resolve conflicts")
-
     draft = await db.get(WikiPageDraft, draft_id)
     if not draft or draft.branch_id != branch_id:
         raise HTTPException(404, "Draft not found in this branch")
 
-    if not draft.page_id:
-        raise HTTPException(400, "New-page drafts do not need rebase")
+    try:
+        await branch_service.rebase_wiki_branch_draft(
+            db,
+            branch,
+            draft,
+            user,
+            body.resolved_content_md,
+        )
+    except branch_service.InvalidTransition as e:
+        message = str(e)
+        if "Only the branch author" in message:
+            raise HTTPException(403, message)
+        raise HTTPException(400, message)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
 
-    page = await db.get(WikiPage, draft.page_id)
-    if not page:
-        raise HTTPException(404, "Original wiki page not found")
-
-    # Apply conflict resolution
-    draft.content_md = body.resolved_content_md
-    draft.base_version = page.version  # Align to latest live version!
-    draft.status = "pending"
-
-    # Enqueue new AI review round
-    from cygnus.review.contributions import _enqueue_ai_review
-    await _enqueue_ai_review(db, draft)
-
-    # Re-calculate branch conflict state
-    stmt = select(WikiPageDraft).where(WikiPageDraft.branch_id == branch_id)
-    all_drafts = (await db.execute(stmt)).scalars().all()
-
-    still_conflict = False
-    for d in all_drafts:
-        if d.draft_kind == "edit" and d.page_id:
-            p = await db.get(WikiPage, d.page_id)
-            if p and d.base_version is not None and d.base_version < p.version:
-                still_conflict = True
-                break
-
-    branch.has_conflict = still_conflict
     await db.commit()
     await db.refresh(draft)
-
-    await log_audit(db, user, "rebase_draft", "wiki_page_draft", str(draft.id))
     return await _draft_response(db, draft)

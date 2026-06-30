@@ -787,30 +787,12 @@ class SkillService:
         return len(skill_ids)
 
     @staticmethod
-    async def submit_contribution(db: AsyncSession, contribution_id: uuid.UUID):
-        contribution = await db.get(SkillContribution, contribution_id)
-        if not contribution:
-            raise HTTPException(404, "Contribution not found")
-        contribution.status = SkillContributionStatus.PENDING.value
-        await db.commit()
-        return contribution
-
-    @staticmethod
-    async def approve_contribution(
-        db: AsyncSession, 
-        contribution_id: uuid.UUID, 
-        admin_id: uuid.UUID,
+    async def materialize_approved_contribution(
+        db: AsyncSession,
+        contribution: SkillContribution,
         final_scope_type: Optional[str] = None,
         final_scope_ids: Optional[List[uuid.UUID]] = None
     ):
-        from sqlalchemy.orm import selectinload
-        stmt = select(SkillContribution).where(SkillContribution.id == contribution_id).options(selectinload(SkillContribution.skill))
-        res = await db.execute(stmt)
-        contribution = res.scalars().first()
-        
-        if not contribution:
-            raise HTTPException(404, "Contribution not found")
-        
         # 1. Calculate contribution hash and check for duplicates
         contribution_hash = storage_service.calculate_prefix_hash(contribution.storage_path)
 
@@ -823,7 +805,6 @@ class SkillService:
             v_dup_res = await db.execute(stmt_v)
             if v_dup_res.scalars().first():
                 contribution.status = SkillContributionStatus.REJECTED.value
-                await db.commit()
                 raise HTTPException(400, "This contribution is identical to an existing version of the skill.")
 
         # 2. Determine final scope and departments
@@ -897,23 +878,8 @@ class SkillService:
         skill.storage_path = v_path 
         skill.version_hash = contribution_hash
         skill.status = "active"
-        
-        # 9. Mark contribution as approved
-        contribution.status = SkillContributionStatus.APPROVED.value
-        contribution.skill_id = skill.id # Link if it was new
-        
-        await db.commit()
-        return skill
 
-    @staticmethod
-    async def reject_contribution(db: AsyncSession, contribution_id: uuid.UUID):
-        contribution = await db.get(SkillContribution, contribution_id)
-        if not contribution:
-            raise HTTPException(404, "Contribution not found")
-        
-        contribution.status = SkillContributionStatus.DRAFT.value
-        await db.commit()
-        return contribution
+        return skill
 
     @staticmethod
     async def create_contribution_from_zip(

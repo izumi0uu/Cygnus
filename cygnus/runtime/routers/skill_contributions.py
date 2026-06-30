@@ -491,7 +491,10 @@ async def submit_skill_contribution(
     ):
         raise HTTPException(400, f"Cannot submit contribution in status: {contribution.status}")
 
-    contribution = await SkillService.submit_contribution(db, contribution_id)
+    try:
+        await contribution_service.submit_skill_contribution(db, contribution, user)
+    except InvalidTransition as e:
+        raise HTTPException(400, str(e))
     await contribution_service.notify_submitted(
         db, skill_contribution_adapter, contribution, user,
     )
@@ -510,9 +513,6 @@ async def approve_skill_contribution(
     Enforces department-level review for non-admin users if scope is 'department'.
     """
     contribution = await db.get(SkillContribution, contribution_id)
-    if contribution.status in [SkillContributionStatus.APPROVED.value,SkillContributionStatus.REJECTED.value,]:
-        raise HTTPException(400, "Contribution already approved")
-    
     if not contribution:
         raise HTTPException(404, "Contribution not found")
 
@@ -534,21 +534,22 @@ async def approve_skill_contribution(
     final_scope_type = req.final_scope_type if req else None
     final_scope_ids = req.final_scope_ids if req else None
 
-    skill = await SkillService.approve_contribution(
-        db,
-        contribution_id,
-        admin.id,
-        final_scope_type=final_scope_type,
-        final_scope_ids=final_scope_ids
-    )
-    # Refresh and notify the contributor of the good news.
-    contribution = await db.get(SkillContribution, contribution_id)
-    if contribution:
-        await contribution_service.notify_approved(
-            db, skill_contribution_adapter, contribution, admin,
-            version_label=f"v{skill.current_version}",
+    try:
+        skill = await contribution_service.approve_skill_contribution(
+            db,
+            contribution,
+            admin,
+            final_scope_type=final_scope_type,
+            final_scope_ids=final_scope_ids,
         )
-        await db.commit()
+    except InvalidTransition as e:
+        raise HTTPException(400, str(e))
+    # Refresh and notify the contributor of the good news.
+    await contribution_service.notify_approved(
+        db, skill_contribution_adapter, contribution, admin,
+        version_label=f"v{skill.current_version}",
+    )
+    await db.commit()
     return {
         "status": "approved",
         "skill_id": skill.id,
@@ -562,10 +563,14 @@ async def reject_skill_contribution(
     db: AsyncSession = Depends(get_db),
     admin: Employee = require_permission("skill:contribution:review"),
 ):
-    """Reject a skill contribution request (moves back to draft)."""
-    contribution = await SkillService.reject_contribution(db, contribution_id)
-    if contribution.status in [SkillContributionStatus.APPROVED.value, SkillContributionStatus.REJECTED.value]:
-        raise HTTPException(400, "Contribution already approved")
+    """Reject a pending skill contribution request."""
+    contribution = await db.get(SkillContribution, contribution_id)
+    if not contribution:
+        raise HTTPException(404, "Contribution not found")
+    try:
+        await contribution_service.reject_skill_contribution(db, contribution, admin)
+    except InvalidTransition as e:
+        raise HTTPException(400, str(e))
     await contribution_service.notify_rejected(
         db, skill_contribution_adapter, contribution, admin,
     )

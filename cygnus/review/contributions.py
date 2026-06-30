@@ -20,10 +20,10 @@ State machine (both artifact types):
         │
         └─withdraw─────> [withdrawn] (terminal)
 
-Wiki draft create / approve / reject workflow now lives here as review-owned
-governance behavior. Skill contribution approval still stays with its domain
-service, but this module keeps the shared review-state machine plus uniform
-notification hooks so routers fire approval/rejection signals consistently.
+Wiki draft lifecycle plus skill contribution submit / approve / reject
+transitions now live here as review-owned governance behavior. Runtime services
+still own wiki page CRUD / search and skill package materialization, but the
+state-machine ownership for governed knowledge changes belongs here.
 """
 
 import uuid
@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.runtime.database.models import (
     Employee,
+    Skill,
     SkillContribution,
     SkillContributionStatus,
     WikiDraftRound,
@@ -594,6 +595,76 @@ async def resubmit_skill_contribution(
         target_type=adapter.artifact_type,
         target_id=str(contribution.id),
         actor_id=author.id,
+    )
+
+
+async def submit_skill_contribution(
+    db: AsyncSession,
+    contribution: SkillContribution,
+    author: Employee,
+) -> None:
+    """draft|needs_revision → pending for a skill contribution."""
+    adapter = skill_contribution_adapter
+    _assert_status(
+        adapter,
+        contribution,
+        (
+            SkillContributionStatus.DRAFT.value,
+            SkillContributionStatus.NEEDS_REVISION.value,
+        ),
+    )
+    if contribution.contributor_id != author.id:
+        raise InvalidTransition("Only the original contributor can submit this contribution.")
+
+    adapter.set_status(contribution, SkillContributionStatus.PENDING.value)
+    await log_audit(
+        db, author, "submit", adapter.artifact_type, str(contribution.id),
+    )
+
+
+async def approve_skill_contribution(
+    db: AsyncSession,
+    contribution: SkillContribution,
+    reviewer: Employee,
+    final_scope_type: Optional[str] = None,
+    final_scope_ids: Optional[list[uuid.UUID]] = None,
+) -> Skill:
+    """pending → approved for a skill contribution.
+
+    Runtime skill-version materialization stays in ``SkillService``; this
+    function owns the governance transition and its audit trail.
+    """
+    adapter = skill_contribution_adapter
+    _assert_status(adapter, contribution, (SkillContributionStatus.PENDING.value,))
+
+    from cygnus.runtime.services.skill_service import SkillService
+
+    skill = await SkillService.materialize_approved_contribution(
+        db,
+        contribution,
+        final_scope_type=final_scope_type,
+        final_scope_ids=final_scope_ids,
+    )
+    adapter.set_status(contribution, SkillContributionStatus.APPROVED.value)
+    contribution.skill_id = skill.id
+    await log_audit(
+        db, reviewer, "approve", adapter.artifact_type, str(contribution.id),
+        reason=f"skill:{skill.id}:v{skill.current_version}",
+    )
+    return skill
+
+
+async def reject_skill_contribution(
+    db: AsyncSession,
+    contribution: SkillContribution,
+    reviewer: Employee,
+) -> None:
+    """pending → rejected for a skill contribution."""
+    adapter = skill_contribution_adapter
+    _assert_status(adapter, contribution, (SkillContributionStatus.PENDING.value,))
+    adapter.set_status(contribution, SkillContributionStatus.REJECTED.value)
+    await log_audit(
+        db, reviewer, "reject", adapter.artifact_type, str(contribution.id),
     )
 
 

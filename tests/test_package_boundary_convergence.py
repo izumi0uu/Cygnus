@@ -105,6 +105,9 @@ def test_package_dunders_publish_single_owner_story() -> None:
             "create_wiki_draft",
             "approve_wiki_draft",
             "reject_wiki_draft",
+            "submit_skill_contribution",
+            "approve_skill_contribution",
+            "reject_skill_contribution",
             "owns governance semantics, not runtime app-shell wiring",
         ],
         "cygnus/review/contributions.py": [
@@ -114,6 +117,9 @@ def test_package_dunders_publish_single_owner_story() -> None:
             "async def create_wiki_draft(",
             "async def approve_wiki_draft(",
             "async def reject_wiki_draft(",
+            "async def submit_skill_contribution(",
+            "async def approve_skill_contribution(",
+            "async def reject_skill_contribution(",
         ],
         "cygnus/review/pre_review/__init__.py": [
             "Governance draft pre-review annotations for Cygnus",

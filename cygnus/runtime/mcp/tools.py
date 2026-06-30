@@ -745,9 +745,9 @@ def register_tools(mcp: FastMCP):
         import re
         from sqlalchemy import select
 
+        from cygnus.integrations.mcp_auth import apply_scope_filter
         from cygnus.runtime.database import async_session_factory
         from cygnus.runtime.database.models import Source
-        from cygnus.runtime.services.mcp_auth_service import apply_scope_filter
 
         identity, err = await _get_identity()
         if err:
@@ -848,9 +848,9 @@ def register_tools(mcp: FastMCP):
         from sqlalchemy import select
         from sqlalchemy.orm import selectinload
 
+        from cygnus.integrations.mcp_auth import apply_scope_filter
         from cygnus.runtime.database import async_session_factory
         from cygnus.runtime.database.models import KnowledgeType, Source
-        from cygnus.runtime.services.mcp_auth_service import apply_scope_filter
 
         identity, err = await _get_identity()
         if err:
@@ -960,9 +960,9 @@ def register_tools(mcp: FastMCP):
         """
         from sqlalchemy import select
 
+        from cygnus.integrations.mcp_auth import apply_scope_filter
         from cygnus.runtime.database import async_session_factory
         from cygnus.runtime.database.models import KnowledgeType, Source
-        from cygnus.runtime.services.mcp_auth_service import apply_scope_filter
 
         identity, err = await _get_identity()
         if err:

@@ -6,6 +6,7 @@ RUNTIME_SPINE_FILES = [
     "cygnus/runtime/__init__.py",
     "cygnus/runtime/main.py",
     "cygnus/runtime/config.py",
+    "cygnus/runtime/source_state.py",
     "cygnus/runtime/worker.py",
     "cygnus/runtime/utils/__init__.py",
     "cygnus/runtime/utils/progress.py",

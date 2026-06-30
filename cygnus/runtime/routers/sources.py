@@ -22,6 +22,12 @@ from cygnus.runtime.config import settings
 from cygnus.runtime.database import get_db
 from cygnus.runtime.database.models import Employee, ScopeType, Source, SourceDepartment, WikiPage
 from cygnus.runtime.database.repository import Repository
+from cygnus.runtime.source_state import (
+    mark_source_plan_refine_queued,
+    mark_source_post_extraction_resume,
+    mark_source_requeued_after_department_change,
+    mark_source_retry_queued,
+)
 from cygnus.review import (
     SourcePlanInvalidTransition,
     approve_source_compilation_plan,
@@ -540,16 +546,15 @@ async def update_source(
     await db.flush()
 
     if dept_changed:
-        source.status = "processing"
-        source.progress = 0
-        source.progress_message = "Re-queued after department change..."
-        source.error_message = None
+        mark_source_requeued_after_department_change(source)
         await db.flush()
 
         pool = await get_arq_pool()
         job = await pool.enqueue_job("ingest_map_reduce_task", str(source_id))
-        if job:
-            source.job_id = job.job_id
+        mark_source_requeued_after_department_change(
+            source,
+            job_id=job.job_id if job else None,
+        )
 
     await db.commit()
 
@@ -605,10 +610,7 @@ async def retry_source(
         raise HTTPException(status_code=400, detail="Source file not found in storage")
 
     retry_from_status = source.status
-    source.status = "pending"
-    source.progress = 0
-    source.progress_message = "Queued for retry..."
-    source.error_message = None
+    mark_source_retry_queued(source)
     await db.flush()
 
     pool = await get_arq_pool()
@@ -619,8 +621,7 @@ async def retry_source(
     )
     job = await pool.enqueue_job(task_name, str(source_id))
 
-    if job:
-        source.job_id = job.job_id
+    mark_source_retry_queued(source, job_id=job.job_id if job else None)
     await db.commit()
     await db.refresh(source)
 
@@ -707,14 +708,11 @@ async def approve_extraction(
     has_images = (await _image_count(db, source_id)) > 0
     job_id = await enqueue_post_extraction_pipeline(str(source_id), has_images=has_images)
 
-    source.status = "processing"
-    source.progress = 56
-    source.progress_message = (
-        "Captioning images before extraction..." if has_images
-        else "Extraction queued..."
+    mark_source_post_extraction_resume(
+        source,
+        has_images=has_images,
+        job_id=job_id,
     )
-    if job_id:
-        source.job_id = job_id
 
     await log_audit(db, user, "approve", "source_extraction", str(source.id))
     await db.commit()
@@ -759,8 +757,8 @@ async def approve_compilation_plan(
     pool = await get_arq_pool()
     job = await pool.enqueue_job("ingest_refine_task", str(source_id))
 
-    if job and source:
-        source.job_id = job.job_id
+    if source:
+        mark_source_plan_refine_queued(source, job_id=job.job_id if job else None)
     await db.commit()
 
     logger.info(f"Plan approved for source {source_id} by user {user.id}, refine job: {job.job_id if job else 'N/A'}")

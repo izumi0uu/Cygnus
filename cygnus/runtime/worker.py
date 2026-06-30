@@ -20,6 +20,7 @@ from loguru import logger
 from sqlalchemy import select
 
 from cygnus.runtime.config import get_settings
+from cygnus.runtime.source_state import mark_source_post_extraction_resume
 
 settings = get_settings()
 
@@ -254,14 +255,12 @@ async def ingest_file_task(ctx: dict, source_id: str):
 
             await tracker.update(55, "Queuing compilation pipeline...")
             job_id = await enqueue_post_extraction_pipeline(source_id, has_images=bool(images))
-            source.status = "processing"
-            source.progress = 55
-            source.progress_message = (
-                f"Captioning {len(images)} images before extraction..." if images
-                else "Extraction queued..."
+            mark_source_post_extraction_resume(
+                source,
+                has_images=bool(images),
+                job_id=job_id,
+                progress=55,
             )
-            if job_id:
-                source.job_id = job_id
             await session.commit()
 
             logger.info(f"Source {source_id} pre-processing done; next: {'caption→MRP' if images else 'MRP'}")
@@ -353,11 +352,12 @@ async def ingest_url_task(ctx: dict, source_id: str):
 
             await tracker.update(55, "Queuing compilation pipeline...")
             job_id = await enqueue_post_extraction_pipeline(source_id, has_images=False)
-            source.status = "processing"
-            source.progress = 55
-            source.progress_message = "Extraction queued..."
-            if job_id:
-                source.job_id = job_id
+            mark_source_post_extraction_resume(
+                source,
+                has_images=False,
+                job_id=job_id,
+                progress=55,
+            )
             await session.commit()
 
             logger.info(f"URL source {source_id} pre-processing done, MRP task enqueued: {job_id or 'n/a'}")

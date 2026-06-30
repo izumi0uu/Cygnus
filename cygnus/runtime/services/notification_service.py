@@ -1,6 +1,11 @@
 """
 Notification Service — in-app notification inbox.
 
+Ownership:
+- in-app notification persistence, listing, and runtime fan-out triggers live here
+- external notification delivery adapters live under ``cygnus.integrations``
+- this module owns runtime inbox behavior, not the upstream governance lifecycle semantics themselves
+
 Sync DB writes (no enqueue) following the audit_service pattern: callers add
 notifications and commit themselves. ContributionService is the primary
 producer; the routers and frontend consume via /notifications.

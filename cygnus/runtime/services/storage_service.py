@@ -1,5 +1,9 @@
 """
 MinIO storage service — file upload, download, presigned URLs.
+
+Ownership:
+- object storage client wiring, uploads/downloads, and presigned URL generation live here
+- substrate and other modules may depend on this runtime adapter, but storage ownership remains in the runtime shell
 """
 
 import io

@@ -1,3 +1,10 @@
+"""Runtime audit-log writer for Cygnus shell mutations.
+
+Ownership:
+- audit-log persistence for runtime-side mutations and policy decisions lives here
+- this module records runtime actions; it does not own higher-level governance workflow semantics
+"""
+
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession

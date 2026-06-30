@@ -1,6 +1,11 @@
 """
 Wiki Service — CRUD and wikilink graph for WikiPage.
 
+Ownership:
+- wiki-page materialization, revision persistence, and wikilink graph maintenance live here
+- semantic retrieval and raw-source search live under ``cygnus.retrieval``
+- this module owns runtime wiki state, not retrieval ranking truth
+
 The wiki is the LLM-compiled knowledge layer. It replaces chunk-based RAG.
 Each page is markdown that may contain `[[slug]]` wikilinks; after every
 upsert, refresh_links() re-parses the content and rewrites the wiki_links

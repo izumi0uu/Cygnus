@@ -1,6 +1,10 @@
 """
 Auth Service — JWT-based authentication for Admin Portal and Employee Portal.
 
+Ownership:
+- employee authentication, JWT session issuance, and request-scoped auth dependencies live here
+- permission resolution may call into ``permission_engine``, but auth/session ownership remains in the runtime shell
+
 Handles:
   - Password hashing (bcrypt)
   - JWT token generation and verification

@@ -1,5 +1,10 @@
 """
 Dynamic Config Service — DB > .env > default.
+
+Ownership:
+- runtime configuration resolution, encrypted secret persistence, and provider setting lookup live here
+- this module is runtime infrastructure wiring, not support-domain or retrieval truth
+
 Reads settings from app_config table first, falls back to env/defaults.
 Sensitive values (API keys, tokens) are encrypted at rest with Fernet.
 """

@@ -10,6 +10,7 @@ import { useVocab } from '@/lib/vocab'
 import { CmdButton } from '@/components/CmdButton'
 import { PageSkeleton } from '@/components/Skeleton'
 import { useFocusTrap } from '@/lib/useFocusTrap'
+import { PlotterPanel } from '@/components/PlotterPanel'
 
 const HEAT: Record<string, string> = { urgent: 'bp-tol-urgent', high: 'bp-tol-high', medium: 'bp-tol-high', low: 'bp-tol-flat' }
 const DOT: Record<string, string> = { urgent: 'var(--urgent)', high: 'var(--high)', medium: 'var(--medium)', low: 'var(--faint)' }
@@ -148,13 +149,16 @@ function Drawer({ item, bundle, onClose }: { item: PriorityItem; bundle: ReviewI
   return (
     <>
       <div className="fixed inset-0 z-40 bg-foreground/25" onClick={onClose} />
-      <aside
+      <PlotterPanel
+        as="aside"
         ref={ref}
         role="dialog"
         aria-modal="true"
         aria-labelledby="rq-drawer-title"
         tabIndex={-1}
-        className="bp-panel fixed right-0 top-0 z-50 flex h-full w-full max-w-[440px] flex-col overflow-y-auto border-l-0 p-5 outline-none"
+        replayKey={item.risk_id}
+        lapDuration={0.4}
+        className="fixed right-0 top-0 z-50 flex h-full w-full max-w-[440px] flex-col overflow-hidden border-l-0 p-5 outline-none"
       >
         <div className="flex items-center gap-2">
           <span className={`bp-tol ${HEAT[item.urgency]}`}>{t(`urgency.${item.urgency}`)}</span>
@@ -212,7 +216,7 @@ function Drawer({ item, bundle, onClose }: { item: PriorityItem; bundle: ReviewI
           <div className="flex flex-wrap gap-2">{item.command_actions.map((c) => <CmdButton key={c} command={c} objectRef={item.object_ref} />)}</div>
           <p className="mt-2 font-mono text-[10px] leading-relaxed text-faint">{t('detail.commandNote')}</p>
         </Section>
-      </aside>
+      </PlotterPanel>
     </>
   )
 }

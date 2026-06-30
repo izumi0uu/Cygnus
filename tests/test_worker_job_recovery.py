@@ -114,6 +114,25 @@ class WorkerJobExecutionRecoveryTests(unittest.IsolatedAsyncioTestCase):
         fake_pool.enqueue_job.assert_awaited_once_with("caption_images_task", "src-55")
         self.assertEqual(job_id, "job-55-caption")
 
+    async def test_enqueue_source_retry_uses_runtime_retry_resolution(self) -> None:
+        import cygnus.runtime.worker as worker_module
+
+        fake_pool = types.SimpleNamespace(
+            enqueue_job=AsyncMock(return_value=types.SimpleNamespace(job_id="job-88-retry"))
+        )
+
+        with patch.object(worker_module, "get_arq_pool", AsyncMock(return_value=fake_pool)):
+            job_id, task_name = await worker_module.enqueue_source_retry(
+                "src-88",
+                source_type="url",
+                pipeline_phase=None,
+                current_status="error",
+            )
+
+        fake_pool.enqueue_job.assert_awaited_once_with("ingest_url_task", "src-88")
+        self.assertEqual(job_id, "job-88-retry")
+        self.assertEqual(task_name, "ingest_url_task")
+
     async def test_auto_trigger_refine_promotes_plan_and_enqueues_resume_job(self) -> None:
         import cygnus.runtime.ai.mrp.pipeline as pipeline_module
         from cygnus.runtime.database.models import Source, SourceCompilationPlan

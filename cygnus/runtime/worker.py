@@ -144,6 +144,24 @@ async def enqueue_source_refine(source_id: str) -> Optional[str]:
     return job.job_id if job else None
 
 
+async def enqueue_source_retry(
+    source_id: str,
+    *,
+    source_type: str,
+    pipeline_phase: str | None,
+    current_status: str | None,
+) -> tuple[Optional[str], str]:
+    """Resolve and enqueue the correct retry worker path for a source."""
+    pool = await get_arq_pool()
+    task_name = resolve_retry_task(
+        source_type=source_type,
+        pipeline_phase=pipeline_phase,
+        current_status=current_status,
+    )
+    job = await pool.enqueue_job(task_name, source_id)
+    return (job.job_id if job else None, task_name)
+
+
 async def enqueue_source_plan_regeneration(source_id: str, reviewer_note: str) -> Optional[str]:
     """Enqueue the source plan-regeneration worker path."""
     pool = await get_arq_pool()

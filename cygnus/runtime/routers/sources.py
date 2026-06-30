@@ -51,8 +51,8 @@ from cygnus.runtime.worker import (
     enqueue_source_map_reduce,
     enqueue_source_plan_regeneration,
     enqueue_source_refine,
+    enqueue_source_retry,
 )
-from cygnus.runtime.worker import resolve_retry_task
 
 router = APIRouter()
 
@@ -610,15 +610,13 @@ async def retry_source(
     mark_source_retry_queued(source)
     await db.flush()
 
-    task_name = resolve_retry_task(
+    job_id, task_name = await enqueue_source_retry(
+        str(source_id),
         source_type=source.source_type,
         pipeline_phase=source.pipeline_phase,
         current_status=retry_from_status,
     )
-    pool = await get_arq_pool()
-    job = await pool.enqueue_job(task_name, str(source_id))
-
-    mark_source_retry_queued(source, job_id=job.job_id if job else None)
+    mark_source_retry_queued(source, job_id=job_id)
     await db.commit()
     await db.refresh(source)
 
@@ -627,7 +625,7 @@ async def retry_source(
         .options(*_source_load_options())
         .where(Source.id == source_id)
     )).scalar_one()
-    logger.info(f"Queued retry job {job.job_id if job else 'N/A'} for source {source_id}")
+    logger.info(f"Queued retry job {job_id or 'N/A'} ({task_name}) for source {source_id}")
     return _to_response(source)
 
 
@@ -688,8 +686,8 @@ async def approve_extraction(
     """Resume the pipeline for a source paused at status='awaiting_approval'.
 
     Triggered after a human reviews the extracted token count + image count and
-    decides to spend AI tokens on it. Enqueues caption_images_task (if images
-    exist) or ingest_map_reduce_task directly.
+    decides to spend AI tokens on it. Enqueues the runtime-owned post-extraction
+    pipeline path based on whether the source has extracted images.
     """
     from cygnus.runtime.worker import enqueue_post_extraction_pipeline
 

@@ -395,4 +395,5 @@ def test_sources_router_no_longer_owns_runtime_source_dispatch_names() -> None:
     assert 'async def enqueue_source_ingest_url(' in worker_text
     assert 'async def enqueue_source_map_reduce(' in worker_text
     assert 'async def enqueue_source_refine(' in worker_text
+    assert 'async def enqueue_source_retry(' in worker_text
     assert 'async def enqueue_source_plan_regeneration(' in worker_text

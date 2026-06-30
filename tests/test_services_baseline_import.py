@@ -21,7 +21,6 @@ SERVICE_BASELINE_FILES = [
     "cygnus/runtime/services/image_service.py",
     "cygnus/runtime/services/kb_service.py",
     "cygnus/runtime/services/notification_service.py",
-    "cygnus/runtime/services/oauth_service.py",
     "cygnus/runtime/services/permission_engine.py",
     "cygnus/runtime/services/permissions.py",
     "cygnus/runtime/services/policy_engine.py",
@@ -83,7 +82,6 @@ SERVICE_BASELINE_MODULES = {
         "dispatch_pending",
         "get_reviewers_for_scope",
     ],
-    "cygnus.runtime.services.oauth_service": ["OAuthService"],
     "cygnus.runtime.services.permission_engine": [
         "parse_permission",
         "has_permission",

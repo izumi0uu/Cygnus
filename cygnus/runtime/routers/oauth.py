@@ -15,9 +15,9 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cygnus.integrations.oauth_service import OAuthService
 from cygnus.runtime.database import get_db
 from cygnus.runtime.services.auth_service import authenticate_employee
-from cygnus.runtime.services.oauth_service import OAuthService
 
 # Two routers: one mounts at root (for .well-known), one at /oauth
 wellknown_router = APIRouter()

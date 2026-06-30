@@ -84,6 +84,7 @@ def test_package_dunders_publish_single_owner_story() -> None:
         "cygnus/integrations/__init__.py": [
             "External and session-facing integration adapters for Cygnus",
             "MCP auth/scope adapters live here",
+            "OAuth session adapters live here",
             "external notification fan-out adapters live here",
             "adapter boundary, not the core governance domain itself",
         ],
@@ -94,6 +95,12 @@ def test_package_dunders_publish_single_owner_story() -> None:
             "class ResolvedIdentity:",
             "class MCPAuthService:",
             "def apply_scope_filter(",
+        ],
+        "cygnus/integrations/oauth_service.py": [
+            "OAuth session adapter for Cygnus MCP clients.",
+            "Claude/MCP-facing OAuth client registration, auth-code lifecycle, and token exchange live here",
+            "this module is a session-facing integration adapter, not generic runtime service truth",
+            "class OAuthService:",
         ],
         "cygnus/publish/__init__.py": [
             "Governance control-plane publish modules for Cygnus",
@@ -381,7 +388,7 @@ def test_mcp_auth_scope_adapter_lives_under_integrations_tree() -> None:
     integrations_init = Path("cygnus/integrations/__init__.py").read_text(encoding="utf-8")
     mcp_auth_text = Path("cygnus/integrations/mcp_auth.py").read_text(encoding="utf-8")
     runtime_services_init = Path("cygnus/runtime/services/__init__.py").read_text(encoding="utf-8")
-    oauth_service_text = Path("cygnus/runtime/services/oauth_service.py").read_text(encoding="utf-8")
+    oauth_service_text = Path("cygnus/integrations/oauth_service.py").read_text(encoding="utf-8")
     rbac_router_text = Path("cygnus/runtime/routers/rbac.py").read_text(encoding="utf-8")
     mcp_permissions_text = Path("cygnus/runtime/mcp/permissions.py").read_text(encoding="utf-8")
     mcp_tools_text = Path("cygnus/runtime/mcp/tools.py").read_text(encoding="utf-8")
@@ -398,6 +405,22 @@ def test_mcp_auth_scope_adapter_lives_under_integrations_tree() -> None:
 
     assert Path("cygnus/integrations/mcp_auth.py").exists()
     assert not Path("cygnus/runtime/services/mcp_auth_service.py").exists()
+
+
+def test_oauth_session_adapter_lives_under_integrations_tree() -> None:
+    integrations_init = Path("cygnus/integrations/__init__.py").read_text(encoding="utf-8")
+    oauth_service_text = Path("cygnus/integrations/oauth_service.py").read_text(encoding="utf-8")
+    runtime_services_init = Path("cygnus/runtime/services/__init__.py").read_text(encoding="utf-8")
+    oauth_router_text = Path("cygnus/runtime/routers/oauth.py").read_text(encoding="utf-8")
+
+    assert "OAuth session adapters live here" in integrations_init
+    assert "OAuth session adapter for Cygnus MCP clients." in oauth_service_text
+    assert "Claude/MCP-facing OAuth client registration, auth-code lifecycle, and token exchange live here" in oauth_service_text
+    assert "OAuth session adapters no longer live here" in runtime_services_init
+    assert "from cygnus.integrations.oauth_service import OAuthService" in oauth_router_text
+
+    assert Path("cygnus/integrations/oauth_service.py").exists()
+    assert not Path("cygnus/runtime/services/oauth_service.py").exists()
 
 
 def test_raw_source_retrieval_primitives_live_under_retrieval_tree() -> None:

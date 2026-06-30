@@ -1,8 +1,8 @@
-"""
-OAuth 2.1 Service — client registration, auth code lifecycle, token exchange.
+"""OAuth session adapter for Cygnus MCP clients.
 
-Implements Authorization Code + PKCE (RFC 7636) flow for Claude Desktop MCP.
-Access tokens issued are the existing ark_... MCP tokens — no new token format.
+Ownership:
+- Claude/MCP-facing OAuth client registration, auth-code lifecycle, and token exchange live here
+- this module is a session-facing integration adapter, not generic runtime service truth
 """
 
 import hashlib

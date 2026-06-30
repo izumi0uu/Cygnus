@@ -15,7 +15,6 @@ SURFACE_BASELINE_FILES = [
     "cygnus/runtime/routers/notifications.py",
     "cygnus/runtime/routers/oauth.py",
     "cygnus/runtime/routers/rbac.py",
-    "cygnus/runtime/routers/scopes.py",
     "cygnus/runtime/routers/skill_contributions.py",
     "cygnus/runtime/routers/skills.py",
     "cygnus/runtime/routers/sources.py",

@@ -23,7 +23,6 @@ ROUTER_BASELINE_FILES = [
     "cygnus/runtime/routers/notifications.py",
     "cygnus/runtime/routers/oauth.py",
     "cygnus/runtime/routers/rbac.py",
-    "cygnus/runtime/routers/scopes.py",
     "cygnus/runtime/routers/skill_contributions.py",
     "cygnus/runtime/routers/skills.py",
     "cygnus/runtime/routers/sources.py",
@@ -35,9 +34,8 @@ ROUTER_BASELINE_FILES = [
 
 # Mirrors the current runtime router family. Governance seam adapters are
 # intentional additions in this branch and must stay in the baseline.
-# `scopes.py` is intentionally present in the source-parity baseline but is not
-# mounted by upstream main.py either; keep it as dormant baseline until a P2/P2.5
-# wiring ticket decides whether to repair or remove that legacy surface.
+# `scopes.py` was removed after internalization because the dormant legacy scope seam
+# had no mounted mainline owner and no surviving current API assembly dependency.
 MAIN_ASSEMBLED_ROUTER_MODULES = {
     "cygnus.runtime.routers.admin_embeddings": ["router"],
     "cygnus.runtime.routers.admin_models": ["router"],
@@ -76,7 +74,6 @@ REQUIRED_ROUTER_SURFACE_TOKENS = {
     "cygnus/runtime/routers/audit.py": ['prefix="/audit"', '"/log"'],
     "cygnus/runtime/routers/notifications.py": ["/notifications", "/notifications/unread-count"],
     "cygnus/runtime/routers/knowledge_types.py": ["/knowledge-types"],
-    "cygnus/runtime/routers/scopes.py": ["/scopes/{scope_type}/{scope_id}/members", "/my/scopes"],
 }
 
 
@@ -128,13 +125,11 @@ class RouterBaselineImportTests(unittest.TestCase):
             for route_token in route_tokens:
                 self.assertIn(route_token, source, f"{relative_path} lost upstream route surface: {route_token}")
 
-    def test_dormant_scopes_router_is_source_baseline_not_current_api_assembly(self) -> None:
+    def test_legacy_scopes_router_was_removed_from_current_runtime_tree(self) -> None:
         main_source = Path("cygnus/runtime/main.py").read_text(encoding="utf-8")
-        scopes_source = Path("cygnus/runtime/routers/scopes.py").read_text(encoding="utf-8")
 
-        self.assertIn("cygnus/runtime/routers/scopes.py", ROUTER_BASELINE_FILES)
-        self.assertIn("router = APIRouter", scopes_source)
-        self.assertIn("/scopes/{scope_type}/{scope_id}/members", scopes_source)
+        self.assertNotIn("cygnus/runtime/routers/scopes.py", ROUTER_BASELINE_FILES)
+        self.assertFalse(Path("cygnus/runtime/routers/scopes.py").exists())
         self.assertNotIn("scopes.router", main_source)
 
 

@@ -101,7 +101,13 @@ def test_package_dunders_publish_single_owner_story() -> None:
         ],
         "cygnus/review/__init__.py": [
             "Governance control-plane review modules for Cygnus",
+            "automated draft pre-review annotations live under ``cygnus.review.pre_review``",
             "owns governance semantics, not runtime app-shell wiring",
+        ],
+        "cygnus/review/pre_review/__init__.py": [
+            "Governance draft pre-review annotations for Cygnus",
+            "Ownership lives under ``cygnus.review``",
+            "these verdicts shape the review workflow, not the runtime service tree",
         ],
         "cygnus/runtime/__init__.py": [
             "runtime shell preserving imported Arkon topology",
@@ -198,3 +204,20 @@ def test_internal_import_policy_forbids_removed_api_facades_and_legacy_app_names
                     if module == "cygnus":
                         for alias in node.names:
                             assert alias.name != "api", f"{path} reintroduced removed `cygnus.api` package"
+
+
+def test_ai_pre_review_surface_lives_under_review_tree() -> None:
+    review_init = Path("cygnus/review/__init__.py").read_text(encoding="utf-8")
+    pre_review_init = Path("cygnus/review/pre_review/__init__.py").read_text(encoding="utf-8")
+    runtime_services_init = Path("cygnus/runtime/services/__init__.py").read_text(encoding="utf-8")
+    worker_text = Path("cygnus/runtime/worker.py").read_text(encoding="utf-8")
+    db_models_text = Path("cygnus/runtime/database/models.py").read_text(encoding="utf-8")
+
+    assert "cygnus.review.pre_review" in review_init
+    assert "Governance draft pre-review annotations for Cygnus" in pre_review_init
+    assert "governance draft pre-review no longer lives here" in runtime_services_init
+    assert "from cygnus.review.pre_review import run_async_checks" in worker_text
+    assert "cygnus/review/pre_review/runner.py" in db_models_text
+
+    assert Path("cygnus/review/pre_review/runner.py").exists()
+    assert not Path("cygnus/runtime/services/ai_review").exists()

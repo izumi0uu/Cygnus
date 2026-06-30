@@ -7,12 +7,12 @@ from pathlib import Path
 
 SERVICE_BASELINE_FILES = [
     "cygnus/runtime/services/__init__.py",
-    "cygnus/runtime/services/ai_review/__init__.py",
-    "cygnus/runtime/services/ai_review/llm_checks.py",
-    "cygnus/runtime/services/ai_review/regex_checks.py",
-    "cygnus/runtime/services/ai_review/runner.py",
-    "cygnus/runtime/services/ai_review/semantic_checks.py",
-    "cygnus/runtime/services/ai_review/structural_checks.py",
+    "cygnus/review/pre_review/__init__.py",
+    "cygnus/review/pre_review/llm_checks.py",
+    "cygnus/review/pre_review/regex_checks.py",
+    "cygnus/review/pre_review/runner.py",
+    "cygnus/review/pre_review/semantic_checks.py",
+    "cygnus/review/pre_review/structural_checks.py",
     "cygnus/runtime/services/audit_service.py",
     "cygnus/runtime/services/auth_service.py",
     "cygnus/runtime/services/config_service.py",
@@ -121,16 +121,16 @@ SERVICE_BASELINE_MODULES = {
         "append_log",
         "delete_page_cascade",
     ],
-    "cygnus.runtime.services.ai_review.llm_checks": ["run"],
-    "cygnus.runtime.services.ai_review.regex_checks": ["run"],
-    "cygnus.runtime.services.ai_review.runner": [
+    "cygnus.review.pre_review.llm_checks": ["run"],
+    "cygnus.review.pre_review.regex_checks": ["run"],
+    "cygnus.review.pre_review.runner": [
         "CheckResult",
         "run_sync_checks",
         "run_async_checks",
         "merge_results",
     ],
-    "cygnus.runtime.services.ai_review.semantic_checks": ["run"],
-    "cygnus.runtime.services.ai_review.structural_checks": ["run"],
+    "cygnus.review.pre_review.semantic_checks": ["run"],
+    "cygnus.review.pre_review.structural_checks": ["run"],
 }
 
 
@@ -145,10 +145,10 @@ class ServicesBaselineImportTests(unittest.TestCase):
             compile(source, relative_path, "exec")
 
     def test_services_baseline_topology_is_exactly_the_upstream_module_family(self) -> None:
-        expected = {Path(path).relative_to("cygnus/runtime/services") for path in SERVICE_BASELINE_FILES}
+        expected = {Path(path).relative_to("cygnus") for path in SERVICE_BASELINE_FILES}
         actual = {
-            path.relative_to("cygnus/runtime/services")
-            for path in Path("cygnus/runtime/services").rglob("*.py")
+            path.relative_to("cygnus")
+            for path in list(Path("cygnus/runtime/services").rglob("*.py")) + list(Path("cygnus/review/pre_review").rglob("*.py"))
             if "__pycache__" not in path.parts
         }
 
@@ -174,21 +174,23 @@ class ServicesBaselineImportTests(unittest.TestCase):
             self.assertNotIn("import app.", source)
             self.assertNotIn(" app.", source)
 
-    def test_service_baseline_keeps_runtime_substrate_not_support_only_facade(self) -> None:
-        services = {Path(path).name for path in SERVICE_BASELINE_FILES}
+    def test_service_baseline_keeps_runtime_substrate_and_review_pre_review_split(self) -> None:
+        baselines = {Path(path).as_posix() for path in SERVICE_BASELINE_FILES}
 
-        for filename in [
-            "audit_service.py",
-            "auth_service.py",
-            "config_service.py",
-            "kb_service.py",
-            "permission_engine.py",
-            "permissions.py",
-            "policy_engine.py",
-            "storage_service.py",
-            "wiki_service.py",
+        for relative_path in [
+            "cygnus/runtime/services/audit_service.py",
+            "cygnus/runtime/services/auth_service.py",
+            "cygnus/runtime/services/config_service.py",
+            "cygnus/runtime/services/kb_service.py",
+            "cygnus/runtime/services/permission_engine.py",
+            "cygnus/runtime/services/permissions.py",
+            "cygnus/runtime/services/policy_engine.py",
+            "cygnus/runtime/services/storage_service.py",
+            "cygnus/runtime/services/wiki_service.py",
+            "cygnus/review/pre_review/runner.py",
+            "cygnus/review/pre_review/structural_checks.py",
         ]:
-            self.assertIn(filename, services)
+            self.assertIn(relative_path, baselines)
 
 
 if __name__ == "__main__":

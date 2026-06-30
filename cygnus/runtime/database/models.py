@@ -442,7 +442,7 @@ class WikiPageDraft(Base):
     last_returned_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # pending | running | passed | warned | failed — set by AI pre-review worker.
     ai_check_status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
-    # See cygnus/runtime/services/ai_review/runner.py for the JSON shape.
+    # See cygnus/review/pre_review/runner.py for the JSON shape.
     ai_check_results: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     ai_checked_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True,

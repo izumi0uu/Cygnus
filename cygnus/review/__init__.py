@@ -2,6 +2,7 @@
 
 Ownership:
 - review queue, pressure intake, drilldown, and source-blindness governance live here
+- automated draft pre-review annotations live under ``cygnus.review.pre_review``
 - this package owns governance semantics, not runtime app-shell wiring
 """
 

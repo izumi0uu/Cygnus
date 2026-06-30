@@ -33,7 +33,7 @@ from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.runtime.database.models import WikiPage, WikiPageDraft
-from cygnus.runtime.services.ai_review import regex_checks, structural_checks
+from cygnus.review.pre_review import regex_checks, structural_checks
 
 
 @dataclass
@@ -119,7 +119,7 @@ async def run_async_checks(draft_id: str, expected_round: Optional[int] = None) 
     our stale verdict — a newer job is already queued for the new content.
     """
     from cygnus.runtime.database import async_session_factory
-    from cygnus.runtime.services.ai_review import llm_checks, regex_checks, semantic_checks, structural_checks
+    from cygnus.review.pre_review import llm_checks, regex_checks, semantic_checks, structural_checks
 
     try:
         did = uuid.UUID(draft_id)

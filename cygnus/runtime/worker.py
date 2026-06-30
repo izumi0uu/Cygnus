@@ -1349,7 +1349,7 @@ async def ai_pre_review_draft_task(
     Optional for backward-compat with jobs enqueued by older code.
     Permissive: never blocks the draft regardless of verdict.
     """
-    from cygnus.runtime.services.ai_review import run_async_checks
+    from cygnus.review.pre_review import run_async_checks
     _ = ctx
     await run_async_checks(draft_id, expected_round=expected_round)
 

@@ -29,8 +29,8 @@ def test_pyproject_carries_imported_backend_dependency_surface() -> None:
 
 
 def test_seed_skills_wiring_module_exists() -> None:
-    script = Path("cygnus/runtime/scripts/seed_skills.py")
-    assert script.is_file(), "expected cygnus/runtime/scripts/seed_skills.py to exist for app.main startup wiring"
+    script = Path("cygnus/runtime/bootstrap/seed_builtin_skills.py")
+    assert script.is_file(), "expected cygnus/runtime/bootstrap/seed_builtin_skills.py to exist for app.main startup wiring"
 
     text = script.read_text(encoding="utf-8")
     assert "async def seed_builtin_skills" in text
@@ -39,8 +39,9 @@ def test_seed_skills_wiring_module_exists() -> None:
 
 def test_main_references_existing_seed_skills_module() -> None:
     main_text = Path("cygnus/runtime/main.py").read_text(encoding="utf-8")
-    assert "from cygnus.runtime.scripts.seed_skills import seed_builtin_skills" in main_text
-    assert Path("cygnus/runtime/scripts/__init__.py").is_file()
+    assert "from cygnus.runtime.bootstrap.seed_builtin_skills import seed_builtin_skills" in main_text
+    assert Path("cygnus/runtime/bootstrap/__init__.py").is_file()
+    assert not Path("cygnus/runtime/scripts/seed_skills.py").exists()
 
 
 def test_all_local_app_imports_have_structural_targets() -> None:

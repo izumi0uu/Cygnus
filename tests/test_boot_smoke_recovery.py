@@ -47,7 +47,7 @@ class ApiBootSmokeTests(unittest.TestCase):
         with (
             patch.object(app_main, "seed_default_admin", AsyncMock(return_value=None)) as seed_admin,
             patch("cygnus.runtime.services.storage_service.storage_service.ensure_bucket", AsyncMock(return_value=None)) as ensure_bucket,
-            patch("cygnus.runtime.scripts.seed_skills.seed_builtin_skills", AsyncMock(return_value=None)) as seed_skills,
+            patch("cygnus.runtime.bootstrap.seed_builtin_skills.seed_builtin_skills", AsyncMock(return_value=None)) as seed_skills,
         ):
             with TestClient(app_main.app) as client:
                 response = client.get("/")
@@ -64,7 +64,7 @@ class ApiBootSmokeTests(unittest.TestCase):
         with (
             patch.object(app_main, "seed_default_admin", AsyncMock(return_value=None)),
             patch("cygnus.runtime.services.storage_service.storage_service.ensure_bucket", AsyncMock(return_value=None)),
-            patch("cygnus.runtime.scripts.seed_skills.seed_builtin_skills", AsyncMock(return_value=None)),
+            patch("cygnus.runtime.bootstrap.seed_builtin_skills.seed_builtin_skills", AsyncMock(return_value=None)),
             patch("cygnus.runtime.database.async_session_factory", new=_HealthySessionFactory()),
             patch("cygnus.runtime.routers.sources.get_arq_pool", new=AsyncMock(return_value=_HealthyArqPool())),
             patch("redis.asyncio.Redis", new=_HealthyRedis),

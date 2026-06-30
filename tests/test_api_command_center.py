@@ -22,7 +22,7 @@ class CommandCenterApiTests(unittest.TestCase):
                 AsyncMock(return_value=None),
             ),
             patch(
-                "cygnus.runtime.scripts.seed_skills.seed_builtin_skills",
+                "cygnus.runtime.bootstrap.seed_builtin_skills.seed_builtin_skills",
                 AsyncMock(return_value=None),
             ),
         ]

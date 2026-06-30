@@ -83,7 +83,7 @@ def create_app(*, app_settings: Settings | None = None) -> FastAPI:
 
             # Seed built-in skills (idempotent — no-op if already up to date)
             try:
-                from cygnus.runtime.scripts.seed_skills import seed_builtin_skills
+                from cygnus.runtime.bootstrap.seed_builtin_skills import seed_builtin_skills
                 await seed_builtin_skills()
             except Exception as e:
                 logger.warning(f"Could not seed built-in skills: {e}")

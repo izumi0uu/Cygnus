@@ -11,7 +11,7 @@ from typing import Optional
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cygnus.runtime.services import wiki_service
+from cygnus.retrieval import semantic_search as wiki_search
 
 # Pages above this cosine similarity are flagged as potential duplicates.
 _DUP_THRESHOLD = 0.85
@@ -71,7 +71,7 @@ async def run(
             "matches": [],
         }]
 
-    pairs = await wiki_service.search_pages_semantic(
+    pairs = await wiki_search.search_pages_semantic(
         db, query_embedding=embedding, top_k=_DUP_LIMIT + 1,
         scope_type=scope_type, scope_id=scope_id,
     )

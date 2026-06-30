@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.runtime.ai.registry import ProviderRegistry
 from cygnus.runtime.database.models import Source, SourceImage, WikiPage
-from cygnus.runtime.services import wiki_service
+from cygnus.retrieval import semantic_search as wiki_search
 
 # Match `image://<uuid>` references inside markdown image markers.
 _IMAGE_MARKER_RE = re.compile(r"!\[[^\]]*\]\(image://([0-9a-fA-F-]{36})\)")
@@ -596,7 +596,7 @@ async def _render_relevant_pages(
         return ""
 
     allowed = [knowledge_type_slug] if knowledge_type_slug else None
-    hits = await wiki_service.search_pages_semantic(
+    hits = await wiki_search.search_pages_semantic(
         session, query_emb, top_k=TOP_K_RELEVANT, allowed_kt_slugs=allowed,
         scope_type=scope_type, scope_id=scope_id,
     )

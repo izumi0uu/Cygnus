@@ -31,7 +31,6 @@ SERVICE_BASELINE_FILES = [
     "cygnus/runtime/services/skill_service.py",
     "cygnus/runtime/services/stats_aggregator.py",
     "cygnus/runtime/services/storage_service.py",
-    "cygnus/runtime/services/verbatim_service.py",
     "cygnus/runtime/services/wiki_service.py",
 ]
 
@@ -113,7 +112,6 @@ SERVICE_BASELINE_MODULES = {
     "cygnus.runtime.services.skill_service": ["SkillService"],
     "cygnus.runtime.services.stats_aggregator": ["run_daily_rollup"],
     "cygnus.runtime.services.storage_service": ["StorageService"],
-    "cygnus.runtime.services.verbatim_service": ["VerbatimChunk", "build_verbatim_chunks", "index_verbatim_source"],
     "cygnus.runtime.services.wiki_service": [
         "extract_wikilinks",
         "refresh_links",
@@ -122,8 +120,6 @@ SERVICE_BASELINE_MODULES = {
         "get_neighborhood",
         "get_page_by_slug",
         "list_pages",
-        "search_pages_semantic",
-        "search_source_chunks_semantic",
         "apply_create",
         "apply_update",
         "upsert_page",

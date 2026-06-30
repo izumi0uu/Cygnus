@@ -1,5 +1,5 @@
 """
-Wiki Service — CRUD, semantic search, and wikilink graph for WikiPage.
+Wiki Service — CRUD and wikilink graph for WikiPage.
 
 The wiki is the LLM-compiled knowledge layer. It replaces chunk-based RAG.
 Each page is markdown that may contain `[[slug]]` wikilinks; after every
@@ -9,6 +9,9 @@ PostgreSQL — no separate graph DB needed.
 
 Scope support: every page belongs to a scope (global or workspace). Query
 functions accept scope_type/scope_id to isolate results. Default is global.
+
+Semantic retrieval lives under `cygnus.retrieval`; this module owns wiki
+materialization, CRUD, and wikilink graph maintenance.
 """
 
 import re
@@ -363,156 +366,6 @@ async def list_pages(
         )
     result = await session.execute(stmt)
     return list(result.scalars().all())
-
-
-async def search_pages_semantic(
-    session: AsyncSession,
-    query_embedding: list[float],
-    top_k: int = 10,
-    allowed_kt_slugs: Optional[list[str]] = None,
-    scope_type: str = "global",
-    scope_id: Optional[uuid.UUID] = None,
-    spec_id: Optional[str] = None,
-    department_ids: Optional[list[uuid.UUID]] = None,
-    project_ids: Optional[list[uuid.UUID]] = None,
-    inverse_scope: bool = False,
-    all_scopes: bool = False,
-) -> list[tuple[WikiPage, float]]:
-    """
-    Cosine-similarity search over wiki page embeddings within a scope.
-
-    Embeddings live in per-dimension tables (`wiki_page_embeddings_<dim>`).
-    The active embedding model spec determines which table to query and which
-    `model_spec_id` rows to filter to. Pass `spec_id` explicitly to override —
-    only used by tests and internal tooling.
-
-    Scope behaviour:
-      - If `department_ids` or `project_ids` is given: returns pages from
-        global + user's departments + user's workspaces (MCP read path).
-      - If `inverse_scope=True`: returns pages OUTSIDE that scope (other
-        departments, workspaces the user isn't a member of). Used to surface
-        "you don't have access" hints.
-      - Otherwise uses exact scope_type/scope_id matching (pipeline write path).
-
-    Returns (page, similarity) pairs sorted by similarity descending. Returns
-    an empty list if no active embedding model is configured.
-    """
-    from cygnus.runtime.ai.embedding_catalog import get_spec
-    from cygnus.runtime.ai.registry import ProviderRegistry
-    from cygnus.runtime.database.models import get_embedding_model_for_dim
-
-    if spec_id is None:
-        registry = ProviderRegistry(session)
-        spec_id = await registry.get_active_embedding_spec_id()
-    if not spec_id:
-        return []
-
-    spec = get_spec(spec_id)
-    Emb = get_embedding_model_for_dim(spec.dimension)
-
-    if all_scopes and not inverse_scope:
-        scope_clause = None
-    elif inverse_scope:
-        scope_clause = _inverse_scope_filter_for_identity(department_ids, project_ids)
-    elif department_ids or project_ids:
-        scope_clause = _scope_filter_for_identity(department_ids, project_ids)
-    else:
-        scope_clause = _scope_filter(scope_type, scope_id)
-
-    where_clauses = [
-        Emb.model_spec_id == spec.id,
-        WikiPage.slug.notin_([INDEX_SLUG, LOG_SLUG, HOT_SLUG]),
-    ]
-    if scope_clause is not None:
-        where_clauses.append(scope_clause)
-
-    stmt = (
-        select(
-            WikiPage,
-            (1 - Emb.embedding.cosine_distance(query_embedding)).label("similarity"),
-        )
-        .join(Emb, Emb.page_id == WikiPage.id)
-        .where(and_(*where_clauses))
-        .order_by(Emb.embedding.cosine_distance(query_embedding))
-        .limit(top_k)
-    )
-    if allowed_kt_slugs:
-        stmt = stmt.where(
-            or_(
-                WikiPage.knowledge_type_slugs.overlap(allowed_kt_slugs),
-                func.cardinality(WikiPage.knowledge_type_slugs) == 0,
-            )
-        )
-    result = await session.execute(stmt)
-    return [(row[0], float(row[1])) for row in result.all()]
-
-
-async def search_source_chunks_semantic(
-    session: AsyncSession,
-    query_embedding: list[float],
-    top_k: int = 10,
-    allowed_source_ids: Optional[set[str]] = None,
-    spec_id: Optional[str] = None,
-):
-    """
-    Cosine-similarity search over verbatim source chunk embeddings.
-
-    Mirrors `search_pages_semantic` but over `source_chunk_embeddings_<dim>`
-    (raw, never-rewritten slices of preserve_verbatim sources). Lets high-fidelity
-    docs (decrees, gazettes) be retrieved in the same semantic pool as wiki pages.
-
-    RBAC: pass `allowed_source_ids` (the set returned by the MCP layer's
-    `_get_allowed_source_ids`). None means open access; an empty set means no
-    access (returns nothing).
-
-    Returns (Source, chunk_row, similarity) tuples sorted by similarity desc.
-    Returns [] if no active embedding model is configured.
-    """
-    import uuid as _uuid
-
-    from cygnus.runtime.ai.embedding_catalog import get_spec
-    from cygnus.runtime.ai.registry import ProviderRegistry
-    from cygnus.runtime.database.models import (
-        Source,
-        get_source_chunk_embedding_model_for_dim,
-    )
-
-    if allowed_source_ids is not None and len(allowed_source_ids) == 0:
-        return []
-
-    if spec_id is None:
-        registry = ProviderRegistry(session)
-        spec_id = await registry.get_active_embedding_spec_id()
-    if not spec_id:
-        return []
-
-    spec = get_spec(spec_id)
-    Emb = get_source_chunk_embedding_model_for_dim(spec.dimension)
-
-    where_clauses = [
-        Emb.model_spec_id == spec.id,
-        Source.preserve_verbatim.is_(True),
-        Source.status == "ready",
-    ]
-    if allowed_source_ids is not None:
-        where_clauses.append(
-            Source.id.in_([_uuid.UUID(s) for s in allowed_source_ids])
-        )
-
-    stmt = (
-        select(
-            Source,
-            Emb,
-            (1 - Emb.embedding.cosine_distance(query_embedding)).label("similarity"),
-        )
-        .join(Source, Source.id == Emb.source_id)
-        .where(and_(*where_clauses))
-        .order_by(Emb.embedding.cosine_distance(query_embedding))
-        .limit(top_k)
-    )
-    result = await session.execute(stmt)
-    return [(row[0], row[1], float(row[2])) for row in result.all()]
-
 
 # ---------------------------------------------------------------------------
 # Compiler ops application

@@ -85,7 +85,7 @@ async def check_conflicts(
     If a contradiction is detected, prepends a standardized Obsidian Callout to pr.content_md.
     Non-blocking: conflicts are logged and returned but don't fail the pipeline.
     """
-    from cygnus.runtime.services import wiki_service
+    from cygnus.retrieval import semantic_search as wiki_search
 
     scope_type = source.scope_type or "global"
     scope_id = source.scope_id
@@ -100,7 +100,7 @@ async def check_conflicts(
             vec = await embedding_provider.embed(
                 f"{pr.title}\n\n{pr.summary}\n\n{pr.content_md[:3000]}"
             )
-            hits = await wiki_service.search_pages_semantic(
+            hits = await wiki_search.search_pages_semantic(
                 session, vec, top_k=3, scope_type=scope_type, scope_id=scope_id,
             )
         except Exception:

@@ -99,6 +99,23 @@ def test_package_dunders_publish_single_owner_story() -> None:
         "cygnus/retrieval/__init__.py": [
             "Object/evidence retrieval and source-trace query layer for Cygnus",
             "serves retrieval truth, not runtime entry wiring",
+            "search_pages_semantic",
+            "search_source_chunks_semantic",
+            "VerbatimChunk",
+            "index_verbatim_source",
+        ],
+        "cygnus/retrieval/semantic_search.py": [
+            "Semantic retrieval queries for Cygnus knowledge and raw source search.",
+            "wiki-page semantic search and raw-source chunk semantic search live here",
+            "this module serves retrieval truth",
+            "async def search_pages_semantic(",
+        ],
+        "cygnus/retrieval/source_chunks.py": [
+            "Raw source chunk retrieval and verbatim indexing for Cygnus.",
+            "verbatim raw-source chunking, semantic indexing, and chunk retrieval live here",
+            "async def index_verbatim_source(",
+            "class VerbatimChunk:",
+            "def build_verbatim_chunks(",
         ],
         "cygnus/review/__init__.py": [
             "Governance control-plane review modules for Cygnus",
@@ -313,17 +330,45 @@ def test_source_outline_primitives_live_under_substrate_tree() -> None:
     worker_text = Path("cygnus/runtime/worker.py").read_text(encoding="utf-8")
     mcp_tools_text = Path("cygnus/runtime/mcp/tools.py").read_text(encoding="utf-8")
     mrp_writer_text = Path("cygnus/runtime/ai/mrp/writer.py").read_text(encoding="utf-8")
-    verbatim_text = Path("cygnus/runtime/services/verbatim_service.py").read_text(encoding="utf-8")
+    runtime_services_init = Path("cygnus/runtime/services/__init__.py").read_text(encoding="utf-8")
 
     assert "source outline extraction and page-slice primitives" in substrate_init
     assert "Substrate source outline primitives for Cygnus." in substrate_outline
     assert "from cygnus.substrate.source_outline import assemble_full_text, build_outline" in worker_text
     assert "from cygnus.substrate.source_outline import parse_page_range, slice_pages_by_range" in mcp_tools_text
     assert "from cygnus.substrate.source_outline import flatten_outline_with_depth" in mrp_writer_text
-    assert "from cygnus.substrate.source_outline import PAGE_JOIN_SEPARATOR" in verbatim_text
+    assert "source outline extraction and page-slice primitives no longer live here" in runtime_services_init
 
     assert Path("cygnus/substrate/source_outline.py").exists()
     assert not Path("cygnus/runtime/services/source_outline.py").exists()
+
+
+
+def test_raw_source_retrieval_primitives_live_under_retrieval_tree() -> None:
+    retrieval_init = Path("cygnus/retrieval/__init__.py").read_text(encoding="utf-8")
+    semantic_search = Path("cygnus/retrieval/semantic_search.py").read_text(encoding="utf-8")
+    source_chunks = Path("cygnus/retrieval/source_chunks.py").read_text(encoding="utf-8")
+    runtime_services_init = Path("cygnus/runtime/services/__init__.py").read_text(encoding="utf-8")
+    worker_text = Path("cygnus/runtime/worker.py").read_text(encoding="utf-8")
+    mcp_tools_text = Path("cygnus/runtime/mcp/tools.py").read_text(encoding="utf-8")
+    wiki_service_text = Path("cygnus/runtime/services/wiki_service.py").read_text(encoding="utf-8")
+
+    assert "search_pages_semantic" in retrieval_init
+    assert "search_source_chunks_semantic" in retrieval_init
+    assert "VerbatimChunk" in retrieval_init
+    assert "index_verbatim_source" in retrieval_init
+    assert "Semantic retrieval queries for Cygnus knowledge and raw source search." in semantic_search
+    assert "Raw source chunk retrieval and verbatim indexing for Cygnus." in source_chunks
+    assert "raw-source verbatim indexing and chunk retrieval no longer live here" in runtime_services_init
+    assert "from cygnus.retrieval import semantic_search as wiki_search" in mcp_tools_text
+    assert "from cygnus.retrieval.source_chunks import index_verbatim_source" in worker_text
+    assert "from cygnus.retrieval.source_chunks import search_source_chunks_semantic" in mcp_tools_text
+    assert "async def search_pages_semantic(" not in wiki_service_text
+    assert "search_source_chunks_semantic(" not in wiki_service_text
+
+    assert Path("cygnus/retrieval/semantic_search.py").exists()
+    assert Path("cygnus/retrieval/source_chunks.py").exists()
+    assert not Path("cygnus/runtime/services/verbatim_service.py").exists()
 
 def test_sources_router_no_longer_owns_runtime_source_dispatch_names() -> None:
     sources_router = Path("cygnus/runtime/routers/sources.py").read_text(encoding="utf-8")

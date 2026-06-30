@@ -16,6 +16,8 @@ from cygnus.retrieval.contracts import (
 from cygnus.retrieval.evidence_index import EvidenceIndex
 from cygnus.retrieval.object_index import KnowledgeObjectIndex
 from cygnus.retrieval.sample_data import sample_knowledge_objects, sample_support_evidence
+from cygnus.retrieval.semantic_search import search_pages_semantic, search_source_chunks_semantic
+from cygnus.retrieval.source_chunks import VerbatimChunk, build_verbatim_chunks, index_verbatim_source
 from cygnus.retrieval.source_trace import SourceTraceResolver, collect_evidence_links
 
 __all__ = [
@@ -31,4 +33,9 @@ __all__ = [
     "sample_knowledge_objects",
     "sample_support_evidence",
     "slugify",
+    "search_pages_semantic",
+    "search_source_chunks_semantic",
+    "VerbatimChunk",
+    "build_verbatim_chunks",
+    "index_verbatim_source",
 ]

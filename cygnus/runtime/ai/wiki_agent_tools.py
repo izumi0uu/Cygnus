@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.runtime.database.models import Source, SourceImage
-from cygnus.runtime.services import wiki_service
+from cygnus.retrieval import semantic_search as wiki_search
 
 _IMAGE_MARKER_RE = re.compile(r"!\[[^\]]*\]\(image://([0-9a-fA-F-]{36})\)")
 
@@ -350,7 +350,7 @@ def build_tool_handlers(
             query_emb = await embedding_provider.embed(query[:4000])
         except Exception as e:
             return {"error": f"Embedding failed: {e}"}
-        hits = await wiki_service.search_pages_semantic(
+        hits = await wiki_search.search_pages_semantic(
             session, query_emb, top_k=top_k,
             scope_type=_scope_type, scope_id=_scope_id,
         )

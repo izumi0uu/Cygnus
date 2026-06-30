@@ -1,21 +1,15 @@
-"""
-Verbatim source indexing.
+"""Raw source chunk retrieval and verbatim indexing for Cygnus.
 
-A preserve_verbatim Source skips the LLM wiki pipeline (MRP). Instead its raw
-full_text is split into page-aligned chunks and embedded as-is into the
-source_chunk_embeddings_<dim> tables, so it is discoverable in the same semantic
-search pool as wiki pages — but never rewritten.
-
-Chunking is page-based: every chunk carries the exact 1-based page_number it came
-from (clean "trang N" citations) and char offsets into full_text so a clean
-preview can be sliced back out. Long pages are sub-split into overlapping windows.
+Ownership:
+- verbatim raw-source chunking, semantic indexing, and chunk retrieval live here
+- this module serves retrieval truth for preserve_verbatim sources, not runtime service wiring
 """
 
 from dataclasses import dataclass
 from typing import Optional
 
 from loguru import logger
-from sqlalchemy import delete
+from sqlalchemy import and_, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.runtime.ai.embedding_catalog import get_spec
@@ -156,3 +150,70 @@ async def index_verbatim_source(
     await session.commit()
     logger.info(f"index_verbatim_source: indexed {len(chunks)} chunks for source {source.id}")
     return len(chunks)
+
+
+async def search_source_chunks_semantic(
+    session: AsyncSession,
+    query_embedding: list[float],
+    top_k: int = 10,
+    allowed_source_ids: Optional[set[str]] = None,
+    spec_id: Optional[str] = None,
+):
+    """
+    Cosine-similarity search over verbatim source chunk embeddings.
+
+    Mirrors `search_pages_semantic` but over `source_chunk_embeddings_<dim>`
+    (raw, never-rewritten slices of preserve_verbatim sources). Lets high-fidelity
+    docs (decrees, gazettes) be retrieved in the same semantic pool as wiki pages.
+
+    RBAC: pass `allowed_source_ids` (the set returned by the MCP layer's
+    `_get_allowed_source_ids`). None means open access; an empty set means no
+    access (returns nothing).
+
+    Returns (Source, chunk_row, similarity) tuples sorted by similarity desc.
+    Returns [] if no active embedding model is configured.
+    """
+    import uuid as _uuid
+
+    from cygnus.runtime.ai.embedding_catalog import get_spec
+    from cygnus.runtime.ai.registry import ProviderRegistry
+    from cygnus.runtime.database.models import (
+        Source,
+        get_source_chunk_embedding_model_for_dim,
+    )
+
+    if allowed_source_ids is not None and len(allowed_source_ids) == 0:
+        return []
+
+    if spec_id is None:
+        registry = ProviderRegistry(session)
+        spec_id = await registry.get_active_embedding_spec_id()
+    if not spec_id:
+        return []
+
+    spec = get_spec(spec_id)
+    Emb = get_source_chunk_embedding_model_for_dim(spec.dimension)
+
+    where_clauses = [
+        Emb.model_spec_id == spec.id,
+        Source.preserve_verbatim.is_(True),
+        Source.status == "ready",
+    ]
+    if allowed_source_ids is not None:
+        where_clauses.append(
+            Source.id.in_([_uuid.UUID(s) for s in allowed_source_ids])
+        )
+
+    stmt = (
+        select(
+            Source,
+            Emb,
+            (1 - Emb.embedding.cosine_distance(query_embedding)).label("similarity"),
+        )
+        .join(Source, Source.id == Emb.source_id)
+        .where(and_(*where_clauses))
+        .order_by(Emb.embedding.cosine_distance(query_embedding))
+        .limit(top_k)
+    )
+    result = await session.execute(stmt)
+    return [(row[0], row[1], float(row[2])) for row in result.all()]

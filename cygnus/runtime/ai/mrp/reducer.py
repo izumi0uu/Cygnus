@@ -308,7 +308,7 @@ async def reconcile_with_kb(
     Returns {item_name: {"action": "CREATE"|"UPDATE"|"MAYBE", "page_slug": str|None, "similarity": float}}
     """
     from cygnus.runtime.ai.mrp.pipeline import _resolve_wiki_scopes
-    from cygnus.runtime.services import wiki_service
+    from cygnus.retrieval import semantic_search as wiki_search
     wiki_scopes = await _resolve_wiki_scopes(session, source)
 
     all_items = [("entity", e["name"], e) for e in entities] + \
@@ -338,7 +338,7 @@ async def reconcile_with_kb(
         best_hit: Optional[tuple] = None
         for scope_type, scope_id in wiki_scopes:
             try:
-                hits = await wiki_service.search_pages_semantic(
+                hits = await wiki_search.search_pages_semantic(
                     session, vec, top_k=3, scope_type=scope_type, scope_id=scope_id,
                 )
             except Exception as exc:

@@ -158,7 +158,7 @@ async def finalize_verbatim_source(session, source, tracker) -> dict:
     verbatim indexing burns no LLM tokens, so even very long legal documents go
     straight to ready.
     """
-    from cygnus.runtime.services.verbatim_service import index_verbatim_source
+    from cygnus.retrieval.source_chunks import index_verbatim_source
 
     await tracker.update(60, "Indexing verbatim document (no wiki)...")
     n_chunks = await index_verbatim_source(session, source)
@@ -773,7 +773,7 @@ async def reembed_all_pages_task(ctx: dict, job_id: str) -> None:
     # search pool stays consistent after the flip. Each source re-indexes against
     # spec.id explicitly (active spec is still the OLD one until the flip below).
     async with async_session_factory() as session:
-        from cygnus.runtime.services.verbatim_service import index_verbatim_source
+        from cygnus.retrieval.source_chunks import index_verbatim_source
 
         verbatim_sources = (
             await session.execute(

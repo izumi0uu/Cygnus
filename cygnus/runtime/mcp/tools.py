@@ -257,6 +257,8 @@ def register_tools(mcp: FastMCP):
         from cygnus.runtime.ai.registry import ProviderRegistry
         from cygnus.runtime.database import async_session_factory
         from cygnus.runtime.services import wiki_service
+        from cygnus.retrieval import semantic_search as wiki_search
+        from cygnus.retrieval.source_chunks import search_source_chunks_semantic
 
         proj_uuids = [uuid_mod.UUID(p) for p in identity.project_ids] or None
 
@@ -265,7 +267,7 @@ def register_tools(mcp: FastMCP):
             embedding_provider = await registry.get_embedding(task="search_query")
             query_embedding = await embedding_provider.embed(query)
 
-            hits = await wiki_service.search_pages_semantic(
+            hits = await wiki_search.search_pages_semantic(
                 session,
                 query_embedding=query_embedding,
                 top_k=top_k,
@@ -278,7 +280,7 @@ def register_tools(mcp: FastMCP):
             # Verbatim source chunks — same semantic pool, RBAC-scoped to the
             # caller's allowed source set (mirrors the source drill-down tools).
             allowed_source_ids = await _get_allowed_source_ids(identity, session)
-            chunk_hits = await wiki_service.search_source_chunks_semantic(
+            chunk_hits = await search_source_chunks_semantic(
                 session,
                 query_embedding=query_embedding,
                 top_k=top_k,
@@ -290,7 +292,7 @@ def register_tools(mcp: FastMCP):
             # adversary can't enumerate the entire org's page list via search.
             oos_hint = ""
             if not identity.is_admin:
-                oos_hits = await wiki_service.search_pages_semantic(
+                oos_hits = await wiki_search.search_pages_semantic(
                     session,
                     query_embedding=query_embedding,
                     top_k=5,

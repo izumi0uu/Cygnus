@@ -1,11 +1,14 @@
 """
-Policy Engine — legacy compatibility wrapper.
+Policy Engine — dormant legacy compatibility wrapper.
 
 The old PolicyEngine (based on ScopeMembership/ScopeRole/Action enums) has been
 replaced by the new dual-realm permission engine in permission_engine.py.
 
-This module is kept for backward compatibility with any code that still references it.
-New code should use cygnus.runtime.services.permission_engine directly.
+Current boundary:
+- this module is preserved only for source-parity baseline and dormant legacy references
+- it is not part of the current mounted Cygnus API assembly
+- new code should use cygnus.runtime.services.permission_engine directly
+- any attempt to revive workspace/scope compatibility here should happen in a dedicated repair-or-removal lane
 """
 
 import uuid

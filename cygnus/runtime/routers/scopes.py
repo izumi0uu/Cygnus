@@ -1,5 +1,10 @@
 """
-Scope membership router — manage who has access to what scope.
+Scope membership router — dormant source-parity baseline for legacy scope membership flows.
+
+Current boundary:
+- preserved to mirror upstream router topology during migration
+- not mounted by the current Cygnus API assembly
+- depends on legacy scope/policy seams that require a dedicated repair-or-removal decision before reactivation
 
 Endpoints:
   GET    /scopes/{scope_type}/{scope_id}/members  — list members

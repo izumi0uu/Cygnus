@@ -119,6 +119,18 @@ def test_completion_states_remain_explicit() -> None:
             "before `scripts/upstream_cutover_gate.py` passes",
             "must not describe cutover as shell parity or P3",
         ],
+        "cygnus/runtime/services/policy_engine.py": [
+            "Policy Engine — dormant legacy compatibility wrapper.",
+            "preserved only for source-parity baseline and dormant legacy references",
+            "it is not part of the current mounted Cygnus API assembly",
+            "dedicated repair-or-removal lane",
+        ],
+        "cygnus/runtime/routers/scopes.py": [
+            "Scope membership router — dormant source-parity baseline for legacy scope membership flows.",
+            "preserved to mirror upstream router topology during migration",
+            "not mounted by the current Cygnus API assembly",
+            "dedicated repair-or-removal decision before reactivation",
+        ],
     }
 
     for relative_path, expected_snippets in checks.items():

@@ -2,6 +2,7 @@
 
 Ownership:
 - auth, config, storage, policy, notification, wiki, and outward runtime adapters live here
+- outward notification fan-out no longer lives here; it converged to ``cygnus.integrations``
 - contribution lifecycle and governance draft pre-review no longer live here; they converged to ``cygnus.review``
 - source outline extraction and page-slice primitives no longer live here; they converged to ``cygnus.substrate``
 - raw-source verbatim indexing and chunk retrieval no longer live here; they converged to ``cygnus.retrieval``

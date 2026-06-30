@@ -120,7 +120,7 @@ class OAuthAndNotificationWiringRecoveryTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(notification_service, "take_pending_dispatch", return_value=staged),
             patch("cygnus.runtime.database.get_async_session_factory", return_value=_SessionFactory()),
-            patch("cygnus.runtime.services.notification_dispatch.dispatch_external", AsyncMock()) as dispatch_external,
+            patch("cygnus.integrations.notification_dispatch.dispatch_external", AsyncMock()) as dispatch_external,
         ):
             await notification_service.dispatch_pending()
 

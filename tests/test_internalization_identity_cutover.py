@@ -13,13 +13,13 @@ def test_runtime_identity_residue_is_removed_from_target_files() -> None:
     checks = {
         "cygnus/runtime/mcp/permissions.py": ["__cygnus_requires__"],
         "cygnus/runtime/routers/rbac.py": ['"mcpServers": {{"cygnus"'],
-        "cygnus/runtime/services/notification_dispatch.py": ["cygnus@localhost"],
+        "cygnus/integrations/notification_dispatch.py": ["cygnus@localhost"],
     }
 
     forbidden = {
         "cygnus/runtime/mcp/permissions.py": ["__arkon_requires__"],
         "cygnus/runtime/routers/rbac.py": ['"mcpServers": {{"arkon"'],
-        "cygnus/runtime/services/notification_dispatch.py": ["arkon@localhost"],
+        "cygnus/integrations/notification_dispatch.py": ["arkon@localhost"],
     }
 
     for relative_path, expected_snippets in checks.items():

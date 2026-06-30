@@ -83,6 +83,7 @@ def test_package_dunders_publish_single_owner_story() -> None:
         ],
         "cygnus/integrations/__init__.py": [
             "External and session-facing integration adapters for Cygnus",
+            "external notification fan-out adapters live here",
             "adapter boundary, not the core governance domain itself",
         ],
         "cygnus/publish/__init__.py": [
@@ -342,6 +343,20 @@ def test_source_outline_primitives_live_under_substrate_tree() -> None:
     assert Path("cygnus/substrate/source_outline.py").exists()
     assert not Path("cygnus/runtime/services/source_outline.py").exists()
 
+
+def test_external_notification_dispatch_lives_under_integrations_tree() -> None:
+    integrations_init = Path("cygnus/integrations/__init__.py").read_text(encoding="utf-8")
+    integration_dispatch = Path("cygnus/integrations/notification_dispatch.py").read_text(encoding="utf-8")
+    runtime_services_init = Path("cygnus/runtime/services/__init__.py").read_text(encoding="utf-8")
+    notification_service_text = Path("cygnus/runtime/services/notification_service.py").read_text(encoding="utf-8")
+
+    assert "external notification fan-out adapters live here" in integrations_init
+    assert "External notification fan-out adapters for Cygnus." in integration_dispatch
+    assert "outward notification fan-out no longer lives here" in runtime_services_init
+    assert "from cygnus.integrations.notification_dispatch import dispatch_external" in notification_service_text
+
+    assert Path("cygnus/integrations/notification_dispatch.py").exists()
+    assert not Path("cygnus/runtime/services/notification_dispatch.py").exists()
 
 
 def test_raw_source_retrieval_primitives_live_under_retrieval_tree() -> None:

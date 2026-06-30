@@ -194,8 +194,8 @@ async def dispatch_pending(db: Optional[AsyncSession] = None) -> None:
     staged = take_pending_dispatch(db)
     if not staged:
         return
+    from cygnus.integrations.notification_dispatch import dispatch_external
     from cygnus.runtime.database import get_async_session_factory
-    from cygnus.runtime.services.notification_dispatch import dispatch_external
     async_session_factory = get_async_session_factory()
     async with async_session_factory() as fresh:
         await dispatch_external(fresh, staged)

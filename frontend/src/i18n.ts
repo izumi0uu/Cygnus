@@ -11,7 +11,7 @@ const zh = {
     commands: { label: '可用命令' },
     state: {
       loading: '正在加载指挥简报…',
-      error: '无法连接 Cygnus API。请确认后端已启动：uvicorn cygnus.api.app:app --port 8077',
+      error: '无法连接 Cygnus API。请确认后端已启动：uvicorn cygnus.backend.main:app --port 8077',
       retry: '重试',
       empty: '当前没有待处理的治理风险',
       awaitBackend: '待后端端点',
@@ -232,7 +232,7 @@ const en = {
     commands: { label: 'Available commands' },
     state: {
       loading: 'Loading command brief…',
-      error: 'Cannot reach the Cygnus API. Start the backend: uvicorn cygnus.api.app:app --port 8077',
+      error: 'Cannot reach the Cygnus API. Start the backend: uvicorn cygnus.backend.main:app --port 8077',
       retry: 'Retry',
       empty: 'No governance risks pending right now',
       awaitBackend: 'Awaiting backend endpoint',

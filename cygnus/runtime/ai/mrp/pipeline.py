@@ -24,6 +24,7 @@ from cygnus.runtime.ai.mrp.mapper import run_map_phase
 from cygnus.runtime.ai.mrp.reducer import run_reduce_phase
 from cygnus.runtime.ai.mrp.verifier import run_verify_phase
 from cygnus.runtime.ai.mrp.writer import PageWriteResult, run_refine_phase
+from cygnus.runtime.source_state import mark_source_ready
 from cygnus.runtime.utils.progress import ProgressTracker
 
 
@@ -226,11 +227,7 @@ async def run_commit_phase(
     src = await session.get(Source, source.id)
     if src:
         src.pipeline_phase = "commit"
-        src.status = "ready"
-        src.progress = 100
-        src.progress_message = "Done"
-        src.error_message = None
-        src.auto_recover_count = 0
+        mark_source_ready(src)
 
     await session.commit()
 

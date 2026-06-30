@@ -20,7 +20,15 @@ from loguru import logger
 from sqlalchemy import select
 
 from cygnus.runtime.config import get_settings
-from cygnus.runtime.source_state import mark_source_post_extraction_resume
+from cygnus.runtime.source_state import (
+    attach_source_runtime_job,
+    mark_source_awaiting_approval,
+    mark_source_plan_ready_for_review,
+    mark_source_post_extraction_resume,
+    mark_source_processing,
+    mark_source_ready,
+    mark_source_runtime_error,
+)
 
 settings = get_settings()
 
@@ -119,13 +127,13 @@ async def finalize_verbatim_source(session, source, tracker) -> dict:
 
     await tracker.update(60, "Indexing verbatim document (no wiki)...")
     n_chunks = await index_verbatim_source(session, source)
-    source.status = "ready"
-    source.progress = 100
-    source.progress_message = (
-        f"Verbatim: indexed {n_chunks} chunks, no wiki" if n_chunks
-        else "Verbatim: stored, no embedding model (keyword search only)"
+    mark_source_ready(
+        source,
+        progress_message=(
+            f"Verbatim: indexed {n_chunks} chunks, no wiki" if n_chunks
+            else "Verbatim: stored, no embedding model (keyword search only)"
+        ),
     )
-    source.auto_recover_count = 0
     await session.commit()
     logger.info(f"Source {source.id} finalized as verbatim ({n_chunks} chunks indexed)")
     return {"status": "ready", "verbatim_chunks": n_chunks}
@@ -163,9 +171,11 @@ async def ingest_file_task(ctx: dict, source_id: str):
         file_name = source.file_name or source.minio_key.split("/")[-1]
 
         try:
-            source.status = "processing"
-            source.progress = 0
-            source.progress_message = "Starting processing..."
+            mark_source_processing(
+                source,
+                progress=0,
+                progress_message="Starting processing...",
+            )
             await session.commit()
 
             # --- Step 1: Download from MinIO (10%) ---
@@ -186,9 +196,10 @@ async def ingest_file_task(ctx: dict, source_id: str):
             pages_data = await _extract_text_from_file(file_data, file_name, vision_provider=vision_provider)
 
             if not pages_data or not any((p.get("content") or "").strip() for p in pages_data):
-                source.status = "error"
-                source.error_message = "Unable to extract text content"
-                source.progress = 0
+                mark_source_runtime_error(
+                    source,
+                    error_message="Unable to extract text content",
+                )
                 await session.commit()
                 return {"status": "error", "message": "No text content"}
 
@@ -241,10 +252,10 @@ async def ingest_file_task(ctx: dict, source_id: str):
             # --- Step 6: Gate or auto-proceed ---
             threshold = settings.auto_approve_extraction_threshold_tokens
             if token_count > threshold:
-                source.status = "awaiting_approval"
-                source.progress = 55
-                source.progress_message = (
-                    f"Awaiting human approval: {token_count:,} tokens > {threshold:,} threshold"
+                mark_source_awaiting_approval(
+                    source,
+                    token_count=token_count,
+                    threshold=threshold,
                 )
                 await session.commit()
                 logger.info(
@@ -277,10 +288,11 @@ async def ingest_file_task(ctx: dict, source_id: str):
                 async with _sf() as err_session:
                     src = await err_session.get(_Source, sid)
                     if src:
-                        src.status = "error"
-                        src.error_message = error_msg
-                        src.progress = 0
-                        src.progress_message = progress_msg
+                        mark_source_runtime_error(
+                            src,
+                            error_message=error_msg,
+                            progress_message=progress_msg,
+                        )
                         await err_session.commit()
 
             try:
@@ -308,21 +320,24 @@ async def ingest_url_task(ctx: dict, source_id: str):
             return
 
         try:
-            source.status = "processing"
-            source.progress = 0
+            mark_source_processing(source, progress=0)
             await session.commit()
 
             await tracker.update(15, "Fetching content from URL...")
             if not source.url:
-                source.status = "error"
-                source.error_message = "Source has no URL"
+                mark_source_runtime_error(
+                    source,
+                    error_message="Source has no URL",
+                )
                 await session.commit()
                 return {"status": "error"}
             pages_data = await _extract_text_from_url(source.url)
 
             if not pages_data or not any((p.get("content") or "").strip() for p in pages_data):
-                source.status = "error"
-                source.error_message = "Unable to fetch content from URL"
+                mark_source_runtime_error(
+                    source,
+                    error_message="Unable to fetch content from URL",
+                )
                 await session.commit()
                 return {"status": "error"}
 
@@ -341,10 +356,10 @@ async def ingest_url_task(ctx: dict, source_id: str):
 
             threshold = settings.auto_approve_extraction_threshold_tokens
             if token_count > threshold:
-                source.status = "awaiting_approval"
-                source.progress = 55
-                source.progress_message = (
-                    f"Awaiting human approval: {token_count:,} tokens > {threshold:,} threshold"
+                mark_source_awaiting_approval(
+                    source,
+                    token_count=token_count,
+                    threshold=threshold,
                 )
                 await session.commit()
                 logger.info(f"URL source {source_id} gated at awaiting_approval: {token_count} tokens")
@@ -373,9 +388,10 @@ async def ingest_url_task(ctx: dict, source_id: str):
                 async with _sf() as err_session:
                     src = await err_session.get(_Source, sid)
                     if src:
-                        src.status = "error"
-                        src.error_message = error_msg
-                        src.progress = 0
+                        mark_source_runtime_error(
+                            src,
+                            error_message=error_msg,
+                        )
                         await err_session.commit()
 
             try:
@@ -796,15 +812,19 @@ async def ingest_map_reduce_task(ctx: dict, source_id: str):
                 return await finalize_verbatim_source(session, source, tracker)
             except BaseException as e:
                 logger.error(f"Verbatim indexing failed for {source_id}: {e}")
-                source.status = "error"
-                source.error_message = str(e)[:500]
+                mark_source_runtime_error(
+                    source,
+                    error_message=str(e)[:500],
+                )
                 await session.commit()
                 raise
 
         try:
-            source.status = "processing"
-            source.progress = 56
-            source.progress_message = "Extracting knowledge from document..."
+            mark_source_processing(
+                source,
+                progress=56,
+                progress_message="Extracting knowledge from document...",
+            )
             await session.commit()
 
             registry = ProviderRegistry(session)
@@ -829,18 +849,14 @@ async def ingest_map_reduce_task(ctx: dict, source_id: str):
             if result.get("status") == "plan_ready":
                 src = await session.get(Source, sid)
                 if src:
-                    src.status = "plan_ready"
-                    src.progress = 80
-                    src.progress_message = "Compilation plan ready — awaiting review"
-                    src.auto_recover_count = 0
+                    mark_source_plan_ready_for_review(src)
                     await session.commit()
                 logger.info(f"Source {source_id} plan ready: {result.get('plan_id')}")
             elif result.get("status") == "plan_auto_approved":
                 src = await session.get(Source, sid)
                 if src:
                     job_id = result.get("job_id")
-                    if job_id:
-                        src.job_id = job_id
+                    attach_source_runtime_job(src, job_id=job_id)
                     src.auto_recover_count = 0
                     await session.commit()
                 logger.info(f"Source {source_id} plan auto-approved, refine task enqueued")
@@ -860,10 +876,11 @@ async def ingest_map_reduce_task(ctx: dict, source_id: str):
                 async with _sf() as err_session:
                     src = await err_session.get(_Source, sid)
                     if src:
-                        src.status = "error"
-                        src.error_message = error_msg
-                        src.progress = 0
-                        src.progress_message = progress_msg
+                        mark_source_runtime_error(
+                            src,
+                            error_message=error_msg,
+                            progress_message=progress_msg,
+                        )
                         await err_session.commit()
 
             try:
@@ -898,9 +915,11 @@ async def ingest_refine_task(ctx: dict, source_id: str):
             raise ValueError(f"Source {source_id} has no full_text")
 
         try:
-            source.status = "processing"
-            source.progress = 78
-            source.progress_message = "Writing wiki pages..."
+            mark_source_processing(
+                source,
+                progress=78,
+                progress_message="Writing wiki pages...",
+            )
             await session.commit()
 
             registry = ProviderRegistry(session)
@@ -940,10 +959,11 @@ async def ingest_refine_task(ctx: dict, source_id: str):
                 async with _sf() as err_session:
                     src = await err_session.get(_Source, sid)
                     if src:
-                        src.status = "error"
-                        src.error_message = error_msg
-                        src.progress = 0
-                        src.progress_message = progress_msg
+                        mark_source_runtime_error(
+                            src,
+                            error_message=error_msg,
+                            progress_message=progress_msg,
+                        )
                         await err_session.commit()
 
             try:
@@ -1133,18 +1153,19 @@ async def sweep_stuck_processing_cron(ctx: dict):
             attempts = src.auto_recover_count
             cap = settings.max_auto_recover_attempts
             if attempts >= cap:
-                src.error_message = (
+                error_message = (
                     f"Worker died with no progress for >{timeout_sec // 60} min "
                     f"on {attempts} consecutive attempts (cap={cap}). Retry is "
                     f"blocked — check LLM provider config and source file, then "
                     f"ask an admin to reset auto_recover_count."
                 )
             else:
-                src.error_message = (
+                error_message = (
                     f"Worker died with no progress for >{timeout_sec // 60} min. "
                     f"Press Retry to try again ({attempts}/{cap} auto-recoveries used)."
                 )
-            src.progress_message = src.error_message
+            mark_source_runtime_error(src, error_message=error_message)
+            src.auto_recover_count = attempts
 
         await session.commit()
         logger.warning(
@@ -1329,8 +1350,12 @@ async def caption_images_task(ctx: dict, source_id: str):
         async with async_session_factory() as session:
             source = await session.get(Source, sid)
             if source:
-                source.job_id = job.job_id
-                source.progress_message = "Extraction queued..."
+                mark_source_post_extraction_resume(
+                    source,
+                    has_images=False,
+                    job_id=job.job_id,
+                    progress=55,
+                )
                 await session.commit()
     logger.info(f"caption_images_task: enqueued ingest_map_reduce_task for {source_id}")
 

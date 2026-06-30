@@ -17,7 +17,7 @@ else
 fi
 
 echo "[repo-check] Python syntax"
-"$PYTHON_BIN" -m py_compile scripts/repo_guard.py scripts/diff_coverage_gate.py scripts/upstream_cutover_gate.py scripts/arkon_replacement_inventory.py scripts/governance_golden_path_gate.py
+"$PYTHON_BIN" -m py_compile scripts/repo_guard.py scripts/diff_coverage_gate.py scripts/upstream_cutover_gate.py scripts/arkon_replacement_inventory.py scripts/governance_golden_path_gate.py scripts/external_checkout_audit.py scripts/external_checkout_preserve.py
 
 echo "[repo-check] Upstream cutover gate"
 "$PYTHON_BIN" scripts/upstream_cutover_gate.py --quiet

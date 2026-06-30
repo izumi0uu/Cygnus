@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { ArrowLeft } from 'lucide-react'
@@ -17,6 +17,7 @@ import { Stat } from '@/components/Stat'
 import { useVocab } from '@/lib/vocab'
 import { CmdButton } from '@/components/CmdButton'
 import { PageSkeleton } from '@/components/Skeleton'
+import { DimensionLines, type DimensionLinesConfig } from '@/components/DimensionLines'
 
 // recovery_status → heat color + tol class
 const ASSESSMENT_CHIP: Record<string, string> = {
@@ -50,6 +51,33 @@ const SIGNAL_CHIP: Record<string, string> = {
   unresolved_conversation: 'bp-tol-urgent',
 }
 
+/**
+ * Dimension-lines config for the alignment planes. Planes render in fixed
+ * canonical order (object/audience/publish/coverage), NOT sorted by strength,
+ * so "adjacent" is meaningless — the reading is rank-extrema: how far the
+ * hovered plane sits from the strongest (max after_score) and weakest (min).
+ * after_score is a 0-1 float; tolerance floor 0.05 / cap 0.1 = 5%/10%, a
+ * defensible noise floor for these coarse backend estimates.
+ *
+ * Geometry: lane on the LEFT edge. The planes are cards whose right edge
+ * holds the bold after_score text and whose body is a progress bar running
+ * edge-to-edge — so neither a right-edge lane (would hit after_score) nor a
+ * horizontal label chip (would sit on the bar) has room. The card's empty
+ * left padding (px-3, ~13px before the bar) is the only clear strip, so:
+ * - extReach clamps every extension stub to the card's left border (x=0),
+ *   ahead of the bar.
+ * - stride is 0: all dimension lines share one lane x. Two pairs (a middle
+ *   row measures to strongest above and weakest below) occupy disjoint y
+ *   ranges, so their vertical lines co-locate without colliding — and the
+ *   narrow 13px strip can't fit stacked lanes anyway.
+ * - the label is rotated along the dimension line (read bottom-to-top) so it
+ *   rides the line instead of needing a horizontal gutter. It stays compact
+ *   (Δ ± tol, no direction suffix) — strongest/weakest direction is conveyed
+ *   by which row the line connects to.
+ */
+const PLANES_DIM_GEOMETRY = { side: 'left' as const, inset: 9, extReach: 20, stride: 0 }
+const PLANES_DIM_TOLERANCE = { floor: 0.05, cap: 0.1 }
+
 export default function RecoveryDetail() {
   const { commandId } = useParams<{ commandId: string }>()
   const { t } = useTranslation()
@@ -58,6 +86,28 @@ export default function RecoveryDetail() {
   const [reality, setReality] = useState<DownstreamRealityCheckSurface | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Index of the hovered/focused alignment-plane row, for DimensionLines. Null
+  // when idle. The caliper measures the after_score delta to the
+  // strongest/weakest plane (rank-extrema) — surfacing the bottleneck plane.
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null)
+  const planesRef = useRef<HTMLDivElement>(null)
+
+  // Planes dimension-lines config. formatLabel is bound to t here (module-level
+  // consts can't close over the component's t). useMemo keeps the ref stable so
+  // the DimensionLines effect doesn't re-run on every render. The label is
+  // compact (Δ ± tol) — direction (strongest/weakest) is shown by which row the
+  // line connects to, surfaced via the rotated label riding the line.
+  const planesDimConfig = useMemo<DimensionLinesConfig<AlignmentPlaneChange>>(
+    () => ({
+      getValue: (p) => p.after_score,
+      strategy: 'rank-extrema',
+      tolerance: PLANES_DIM_TOLERANCE,
+      formatLabel: (delta, tol) => `Δ${delta.toFixed(2)} ±${tol.toFixed(2)}`,
+      geometry: PLANES_DIM_GEOMETRY,
+      labelOrientation: 'rotated',
+    }),
+    [],
+  )
 
   useEffect(() => {
     if (!commandId) return
@@ -143,8 +193,21 @@ export default function RecoveryDetail() {
                   {align.delta >= 0 ? '+' : ''}{align.delta.toFixed(3)}
                 </span>
               </div>
-              <div className="flex flex-col gap-2">
-                {align.plane_changes.map((p) => <PlaneRow key={p.plane_key} plane={p} />)}
+              <div ref={planesRef} className="relative flex flex-col gap-2">
+                {/* DimensionLines overlay: hover/focus a plane → caliper measures
+                    its after_score delta to the strongest/weakest plane
+                    (rank-extrema). See DimensionLines JSDoc for the honesty
+                    model. Lane on the left edge — the cards' right edge holds
+                    the bold after_score text a right-edge lane would overlap. */}
+                <DimensionLines items={align.plane_changes} hoverIndex={hoverIndex} containerRef={planesRef} config={planesDimConfig} />
+                {align.plane_changes.map((p, i) => (
+                  <PlaneRow
+                    key={p.plane_key}
+                    plane={p}
+                    index={i}
+                    setHoverIndex={setHoverIndex}
+                  />
+                ))}
               </div>
               {align.residual_truth_planes.length > 0 && (
                 <div className="mt-3 flex flex-wrap items-center gap-1.5">
@@ -253,12 +316,29 @@ function MetricRow({ delta }: { delta: RecoveryMetricDelta }) {
   )
 }
 
-function PlaneRow({ plane }: { plane: AlignmentPlaneChange }) {
+function PlaneRow({
+  plane,
+  index,
+  setHoverIndex,
+}: {
+  plane: AlignmentPlaneChange
+  index: number
+  setHoverIndex: Dispatch<SetStateAction<number | null>>
+}) {
   const v = useVocab()
   const beforeColor = PLANE_COLOR[plane.before_state] ?? 'var(--faint)'
   const afterColor = PLANE_COLOR[plane.after_state] ?? 'var(--faint)'
   return (
-    <div className="rounded-lg border border-border px-3 py-2">
+    <div
+      className="rounded-lg border border-border px-3 py-2"
+      data-rank-index={index}
+      role="button"
+      tabIndex={0}
+      onMouseEnter={() => setHoverIndex(index)}
+      onMouseLeave={() => setHoverIndex((cur) => (cur === index ? null : cur))}
+      onFocus={() => setHoverIndex(index)}
+      onBlur={() => setHoverIndex((cur) => (cur === index ? null : cur))}
+    >
       <div className="flex items-center gap-2">
         <span className="text-[12.5px] font-medium">{plane.label}</span>
         <span className="ml-auto flex items-center gap-1.5 font-mono text-[10px]">

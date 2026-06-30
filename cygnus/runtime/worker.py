@@ -116,6 +116,41 @@ async def enqueue_post_extraction_pipeline(source_id: str, has_images: bool) -> 
     return job.job_id if job else None
 
 
+async def enqueue_source_ingest_file(source_id: str) -> Optional[str]:
+    """Enqueue the initial file-ingest worker path for a source."""
+    pool = await get_arq_pool()
+    job = await pool.enqueue_job("ingest_file_task", source_id)
+    return job.job_id if job else None
+
+
+async def enqueue_source_ingest_url(source_id: str) -> Optional[str]:
+    """Enqueue the initial URL-ingest worker path for a source."""
+    pool = await get_arq_pool()
+    job = await pool.enqueue_job("ingest_url_task", source_id)
+    return job.job_id if job else None
+
+
+async def enqueue_source_map_reduce(source_id: str) -> Optional[str]:
+    """Enqueue the source map-reduce worker path."""
+    pool = await get_arq_pool()
+    job = await pool.enqueue_job("ingest_map_reduce_task", source_id)
+    return job.job_id if job else None
+
+
+async def enqueue_source_refine(source_id: str) -> Optional[str]:
+    """Enqueue the source refine worker path after plan approval."""
+    pool = await get_arq_pool()
+    job = await pool.enqueue_job("ingest_refine_task", source_id)
+    return job.job_id if job else None
+
+
+async def enqueue_source_plan_regeneration(source_id: str, reviewer_note: str) -> Optional[str]:
+    """Enqueue the source plan-regeneration worker path."""
+    pool = await get_arq_pool()
+    job = await pool.enqueue_job("regenerate_plan_task", source_id, reviewer_note)
+    return job.job_id if job else None
+
+
 async def finalize_verbatim_source(session, source, tracker) -> dict:
     """Verbatim path: index raw chunks (no LLM) and mark the source ready.
 

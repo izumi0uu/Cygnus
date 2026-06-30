@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import types
 import unittest
+from unittest.mock import call
 import uuid
 from unittest.mock import AsyncMock, patch
 
@@ -61,6 +62,42 @@ class WorkerJobRoutingRecoveryTests(unittest.TestCase):
 
 
 class WorkerJobExecutionRecoveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_source_dispatch_helpers_use_runtime_owned_worker_names(self) -> None:
+        import cygnus.runtime.worker as worker_module
+
+        fake_pool = types.SimpleNamespace(
+            enqueue_job=AsyncMock(side_effect=[
+                types.SimpleNamespace(job_id="job-file"),
+                types.SimpleNamespace(job_id="job-url"),
+                types.SimpleNamespace(job_id="job-map"),
+                types.SimpleNamespace(job_id="job-refine"),
+                types.SimpleNamespace(job_id="job-regen"),
+            ])
+        )
+
+        with patch.object(worker_module, "get_arq_pool", AsyncMock(return_value=fake_pool)):
+            file_job = await worker_module.enqueue_source_ingest_file("src-1")
+            url_job = await worker_module.enqueue_source_ingest_url("src-2")
+            map_job = await worker_module.enqueue_source_map_reduce("src-3")
+            refine_job = await worker_module.enqueue_source_refine("src-4")
+            regen_job = await worker_module.enqueue_source_plan_regeneration("src-5", "note")
+
+        self.assertEqual(file_job, "job-file")
+        self.assertEqual(url_job, "job-url")
+        self.assertEqual(map_job, "job-map")
+        self.assertEqual(refine_job, "job-refine")
+        self.assertEqual(regen_job, "job-regen")
+        self.assertEqual(
+            fake_pool.enqueue_job.await_args_list,
+            [
+                call("ingest_file_task", "src-1"),
+                call("ingest_url_task", "src-2"),
+                call("ingest_map_reduce_task", "src-3"),
+                call("ingest_refine_task", "src-4"),
+                call("regenerate_plan_task", "src-5", "note"),
+            ],
+        )
+
     async def test_enqueue_post_extraction_pipeline_uses_worker_job_topology(self) -> None:
         import cygnus.runtime.worker as worker_module
 

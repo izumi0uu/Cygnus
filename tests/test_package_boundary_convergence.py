@@ -290,3 +290,31 @@ def test_ai_pre_review_surface_lives_under_review_tree() -> None:
     assert Path("cygnus/review/contributions.py").exists()
     assert not Path("cygnus/runtime/services/ai_review").exists()
     assert not Path("cygnus/runtime/services/contribution_service.py").exists()
+
+
+def test_sources_router_no_longer_owns_runtime_source_dispatch_names() -> None:
+    sources_router = Path("cygnus/runtime/routers/sources.py").read_text(encoding="utf-8")
+    worker_text = Path("cygnus/runtime/worker.py").read_text(encoding="utf-8")
+
+    assert "enqueue_source_ingest_file" in sources_router
+    assert "enqueue_source_ingest_url" in sources_router
+    assert "enqueue_source_map_reduce" in sources_router
+    assert "enqueue_source_refine" in sources_router
+    assert "enqueue_source_plan_regeneration" in sources_router
+
+    forbidden_dispatch_literals = [
+        'enqueue_job("ingest_file_task"',
+        'enqueue_job("ingest_url_task"',
+        'enqueue_job("ingest_map_reduce_task"',
+        'enqueue_job("ingest_refine_task"',
+        'enqueue_job("regenerate_plan_task"',
+    ]
+
+    for snippet in forbidden_dispatch_literals:
+        assert snippet not in sources_router
+
+    assert 'async def enqueue_source_ingest_file(' in worker_text
+    assert 'async def enqueue_source_ingest_url(' in worker_text
+    assert 'async def enqueue_source_map_reduce(' in worker_text
+    assert 'async def enqueue_source_refine(' in worker_text
+    assert 'async def enqueue_source_plan_regeneration(' in worker_text

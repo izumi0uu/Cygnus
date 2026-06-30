@@ -45,6 +45,13 @@ from cygnus.runtime.services.permission_engine import (
     get_scope_level,
 )
 from cygnus.runtime.worker import get_arq_pool as get_worker_arq_pool
+from cygnus.runtime.worker import (
+    enqueue_source_ingest_file,
+    enqueue_source_ingest_url,
+    enqueue_source_map_reduce,
+    enqueue_source_plan_regeneration,
+    enqueue_source_refine,
+)
 from cygnus.runtime.worker import resolve_retry_task
 
 router = APIRouter()
@@ -397,11 +404,8 @@ async def upload_source(
     source.file_name = file_name
     await db.commit()
 
-    pool = await get_arq_pool()
-    job = await pool.enqueue_job(
-        "ingest_file_task", str(source.id),
-    )
-    mark_source_ingest_queued(source, job_id=job.job_id if job else None)
+    job_id = await enqueue_source_ingest_file(str(source.id))
+    mark_source_ingest_queued(source, job_id=job_id)
     await db.commit()
 
     source = (await db.execute(
@@ -410,7 +414,7 @@ async def upload_source(
         .where(Source.id == source.id)
     )).scalar_one()
 
-    logger.info(f"Enqueued ingestion job {job.job_id if job else 'N/A'} for source {source.id}")
+    logger.info(f"Enqueued ingestion job {job_id or 'N/A'} for source {source.id}")
     return _to_response(source)
 
 
@@ -443,9 +447,8 @@ async def add_url_source(
     await db.commit()
     await db.refresh(source)
 
-    pool = await get_arq_pool()
-    job = await pool.enqueue_job("ingest_url_task", str(source.id))
-    mark_source_ingest_queued(source, job_id=job.job_id if job else None)
+    job_id = await enqueue_source_ingest_url(str(source.id))
+    mark_source_ingest_queued(source, job_id=job_id)
     await db.commit()
 
     source = (await db.execute(
@@ -454,7 +457,7 @@ async def add_url_source(
         .where(Source.id == source.id)
     )).scalar_one()
 
-    logger.info(f"Enqueued URL ingestion job {job.job_id if job else 'N/A'} for source {source.id}")
+    logger.info(f"Enqueued URL ingestion job {job_id or 'N/A'} for source {source.id}")
     return _to_response(source)
 
 
@@ -544,11 +547,10 @@ async def update_source(
         mark_source_requeued_after_department_change(source)
         await db.flush()
 
-        pool = await get_arq_pool()
-        job = await pool.enqueue_job("ingest_map_reduce_task", str(source_id))
+        job_id = await enqueue_source_map_reduce(str(source_id))
         mark_source_requeued_after_department_change(
             source,
-            job_id=job.job_id if job else None,
+            job_id=job_id,
         )
 
     await db.commit()
@@ -608,12 +610,12 @@ async def retry_source(
     mark_source_retry_queued(source)
     await db.flush()
 
-    pool = await get_arq_pool()
     task_name = resolve_retry_task(
         source_type=source.source_type,
         pipeline_phase=source.pipeline_phase,
         current_status=retry_from_status,
     )
+    pool = await get_arq_pool()
     job = await pool.enqueue_job(task_name, str(source_id))
 
     mark_source_retry_queued(source, job_id=job.job_id if job else None)
@@ -749,15 +751,15 @@ async def approve_compilation_plan(
 
     await db.flush()
 
-    pool = await get_arq_pool()
-    job = await pool.enqueue_job("ingest_refine_task", str(source_id))
-
     if source:
-        mark_source_plan_refine_queued(source, job_id=job.job_id if job else None)
+        job_id = await enqueue_source_refine(str(source_id))
+        mark_source_plan_refine_queued(source, job_id=job_id)
+    else:
+        job_id = await enqueue_source_refine(str(source_id))
     await db.commit()
 
-    logger.info(f"Plan approved for source {source_id} by user {user.id}, refine job: {job.job_id if job else 'N/A'}")
-    return {"approved": True, "job_id": job.job_id if job else None}
+    logger.info(f"Plan approved for source {source_id} by user {user.id}, refine job: {job_id or 'N/A'}")
+    return {"approved": True, "job_id": job_id}
 
 
 @router.post("/sources/{source_id}/plan/regenerate")
@@ -793,14 +795,13 @@ async def regenerate_compilation_plan(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     await db.commit()
 
-    pool = await get_arq_pool()
-    job = await pool.enqueue_job("regenerate_plan_task", str(source_id), body.note)
+    job_id = await enqueue_source_plan_regeneration(str(source_id), body.note)
 
-    logger.info(f"Plan regenerate queued for source {source_id} by user {user.id}, job: {job.job_id if job else 'N/A'}")
+    logger.info(f"Plan regenerate queued for source {source_id} by user {user.id}, job: {job_id or 'N/A'}")
     return {
         "queued": True,
         "status": plan.status,
-        "job_id": job.job_id if job else None,
+        "job_id": job_id,
     }
 
 

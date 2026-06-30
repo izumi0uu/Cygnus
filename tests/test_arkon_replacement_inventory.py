@@ -49,7 +49,7 @@ class ArkonReplacementInventoryTests(unittest.TestCase):
 
             self.assertEqual(
                 inventory["summary"],
-                {"kept_surfaces": 5, "removed_surfaces": 5, "guardrail_files": 5},
+                {"kept_surfaces": 5, "removed_surfaces": 5, "guardrail_files": 6},
             )
             self.assertEqual(
                 [item["path"] for item in inventory["kept_surfaces"]],

@@ -90,6 +90,12 @@ SURFACE_MANIFEST = [
         lane="deletion-readiness-gate",
         note="executable stop-line before deleting standalone Arkon",
     ),
+    InventoryItem(
+        path="scripts/external_checkout_preserve.py",
+        state="kept",
+        lane="preserve-before-delete-workflow",
+        note="repo-native preservation and restore verification before deleting an external checkout",
+    ),
 ]
 
 GUARDRAIL_MANIFEST = [
@@ -98,6 +104,7 @@ GUARDRAIL_MANIFEST = [
     "tests/test_internalization_identity_cutover.py",
     "tests/test_package_boundary_convergence.py",
     "tests/test_upstream_cutover_gate.py",
+    "tests/test_external_checkout_preserve.py",
 ]
 
 

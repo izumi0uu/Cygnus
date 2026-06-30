@@ -508,7 +508,7 @@ class WikiPageRevision(Base):
         # Unique constraint, not just an index — guards against the
         # historical race where two concurrent approves could both INSERT a
         # revision row at the same version. The advisory lock in
-        # wiki_service.approve_draft prevents this in normal operation; this
+        # review.contributions.approve_wiki_draft prevents this in normal operation; this
         # constraint is the DB-level backstop.
         Index("uq_wiki_revisions_page_version", "page_id", "version", unique=True),
     )

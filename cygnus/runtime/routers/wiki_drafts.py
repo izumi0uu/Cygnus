@@ -564,7 +564,7 @@ async def propose_draft(
     if base_version is not None and page.version is not None and base_version > page.version:
         raise HTTPException(400, f"base_version {base_version} is ahead of current page v{page.version}")
 
-    draft = await wiki_service.create_draft(
+    draft = await contribution_service.create_wiki_draft(
         db,
         page_id=page.id,
         author_id=user.id,
@@ -729,14 +729,14 @@ async def approve_draft(
         }
 
     try:
-        page = await wiki_service.approve_draft(
+        page = await contribution_service.approve_wiki_draft(
             db, draft, user.id,
             reviewer_note=body.reviewer_note,
             edited_content_md=body.edited_content_md,
             allow_conflict=body.allow_conflict,
             metadata_overrides=metadata_overrides,
         )
-    except wiki_service.DraftConflictError as e:
+    except contribution_service.DraftConflictError as e:
         raise HTTPException(
             status_code=409,
             detail={
@@ -747,7 +747,7 @@ async def approve_draft(
                 "hint": "Re-submit with allow_conflict=true to overwrite, or supply edited_content_md.",
             },
         )
-    except wiki_service.CreateDraftSlugConflict as e:
+    except contribution_service.CreateDraftSlugConflict as e:
         raise HTTPException(
             status_code=409,
             detail={
@@ -810,7 +810,7 @@ async def reject_draft(
     else:
         slug_label = (draft.suggested_metadata or {}).get("slug", "(new page)")
 
-    await wiki_service.reject_draft(db, draft, user.id, body.reviewer_note)
+    await contribution_service.reject_wiki_draft(db, draft, user.id, body.reviewer_note)
     await log_audit(db, user, "update", "wiki_draft", str(draft.id), reason=f"rejected draft for: {slug_label}")
     await contribution_service.notify_rejected(
         db, wiki_draft_adapter, draft, user, reason=body.reviewer_note,
@@ -997,7 +997,7 @@ async def propose_create_page(
         "scope_id": str(body.scope_id) if body.scope_id else None,
     }
 
-    draft = await wiki_service.create_draft(
+    draft = await contribution_service.create_wiki_draft(
         db,
         page_id=None,
         author_id=user.id,
@@ -1087,7 +1087,7 @@ async def bulk_approve_drafts(
         page = None
         try:
             async with db.begin_nested():
-                page = await wiki_service.approve_draft(
+                page = await contribution_service.approve_wiki_draft(
                     db, draft, user.id,
                     reviewer_note=body.reviewer_note,
                     allow_conflict=body.allow_conflict,
@@ -1109,7 +1109,7 @@ async def bulk_approve_drafts(
                     db, wiki_draft_adapter, draft, user,
                     version_label=f"v{page.version}",
                 )
-        except (wiki_service.DraftConflictError, wiki_service.CreateDraftSlugConflict) as e:
+        except (contribution_service.DraftConflictError, contribution_service.CreateDraftSlugConflict) as e:
             _expire_after_failed_approve(db, draft, page)
             results.append(BulkApproveItemResult(
                 draft_id=did, status="error", message=str(e),

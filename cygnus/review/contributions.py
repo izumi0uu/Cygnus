@@ -20,17 +20,17 @@ State machine (both artifact types):
         │
         └─withdraw─────> [withdrawn] (terminal)
 
-`approve` / `reject` are NOT done through this service yet — they keep calling
-the existing domain helpers (`wiki_service.approve_draft`,
-`SkillService.approve_contribution`) because of inline regen/index work — but
-this module exposes `notify_approved` / `notify_rejected` so routers fire the
-right notifications uniformly after those calls succeed.
+Wiki draft create / approve / reject workflow now lives here as review-owned
+governance behavior. Skill contribution approval still stays with its domain
+service, but this module keeps the shared review-state machine plus uniform
+notification hooks so routers fire approval/rejection signals consistently.
 """
 
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, Protocol
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.runtime.database.models import (
@@ -40,8 +40,9 @@ from cygnus.runtime.database.models import (
     WikiDraftRound,
     WikiPage,
     WikiPageDraft,
+    WikiPageRevision,
 )
-from cygnus.runtime.services import notification_service
+from cygnus.runtime.services import notification_service, wiki_service
 from cygnus.runtime.services.audit_service import log_audit
 from cygnus.runtime.services.notification_service import NotificationType
 
@@ -86,6 +87,222 @@ async def _enqueue_ai_review(db, draft: WikiPageDraft) -> None:
     except Exception as e:
         logger.warning(f"AI review enqueue failed for draft {draft.id}: {e}")
         draft.ai_check_status = "skipped"
+
+
+# ---------------------------------------------------------------------------
+# Wiki draft workflow owned by review governance
+# ---------------------------------------------------------------------------
+
+class DraftConflictError(Exception):
+    """Raised when a draft's base_version is older than the current page version."""
+    def __init__(self, current_version: int, base_version: int):
+        self.current_version = current_version
+        self.base_version = base_version
+        super().__init__(
+            f"Draft is based on v{base_version} but the page has advanced to "
+            f"v{current_version}. Re-base the draft against the latest content."
+        )
+
+
+async def create_wiki_draft(
+    session: AsyncSession,
+    page_id: Optional[uuid.UUID],
+    author_id: uuid.UUID,
+    content_md: str,
+    note: Optional[str] = None,
+    source: str = "web_ui",
+    source_metadata: Optional[dict] = None,
+    base_version: Optional[int] = None,
+    draft_kind: str = "edit",
+    suggested_metadata: Optional[dict] = None,
+) -> WikiPageDraft:
+    """Create a pending draft for editor review.
+
+    For draft_kind='edit', page_id is required. For 'create', page_id stays
+    None and suggested_metadata holds the contributor's proposed slug/title/
+    page_type/knowledge_type_slugs/scope. The reviewer can override the
+    metadata at approve time before the page is materialised.
+    """
+    draft = WikiPageDraft(
+        page_id=page_id,
+        author_id=author_id,
+        content_md=content_md,
+        note=note,
+        status="pending",
+        source=source,
+        source_metadata=source_metadata,
+        base_version=base_version,
+        draft_kind=draft_kind,
+        suggested_metadata=suggested_metadata,
+    )
+    session.add(draft)
+    await session.flush()
+    return draft
+
+
+class CreateDraftSlugConflict(Exception):
+    """Raised when approving a create-draft whose slug already exists in scope."""
+    def __init__(self, slug: str, scope_type: str, scope_id: Optional[uuid.UUID]):
+        self.slug = slug
+        self.scope_type = scope_type
+        self.scope_id = scope_id
+        scope_label = scope_type if scope_id is None else f"{scope_type}:{scope_id}"
+        super().__init__(
+            f"Slug '{slug}' already exists in {scope_label}. "
+            "Override final_slug, or have the contributor edit the existing page instead."
+        )
+
+
+async def approve_wiki_draft(
+    session: AsyncSession,
+    draft: WikiPageDraft,
+    reviewer_id: uuid.UUID,
+    reviewer_note: Optional[str] = None,
+    edited_content_md: Optional[str] = None,
+    allow_conflict: bool = False,
+    metadata_overrides: Optional[dict] = None,
+) -> WikiPage:
+    """
+    Approve a pending draft. Writes the final content to wiki_pages.content_md,
+    creates a revision, and marks the draft approved.
+    If edited_content_md is provided, that is used instead of the original draft content.
+
+    For draft_kind='create' the page is materialised from
+    `draft.suggested_metadata` (or the reviewer-supplied `metadata_overrides`)
+    using `apply_create`. The reviewer may override slug / title / page_type /
+    knowledge_type_slugs before commit.
+
+    Raises DraftConflictError when an edit draft was authored against an older
+    page version than the current one, unless `allow_conflict=True` or
+    `edited_content_md` is supplied. Raises CreateDraftSlugConflict when a
+    create draft's chosen slug already exists in the target scope.
+    """
+    final_content = edited_content_md.strip() if edited_content_md else draft.content_md
+
+    # Serialise concurrent approves on the same page. Without this, two
+    # reviewers clicking Approve on different pending drafts of the same
+    # page within the same second can both read page.version=N, both set
+    # N+1, and both INSERT a WikiPageRevision(version=N+1) — leaving a
+    # duplicate revision row and a non-deterministic last-writer-wins for
+    # the page content. Lock by slug (when known) so we don't block the
+    # entire page table.
+    target_slug: Optional[str] = None
+    existing_page: Optional[WikiPage] = None
+    if draft.draft_kind == "create":
+        target_slug = (draft.suggested_metadata or {}).get("slug")
+    else:
+        existing_page = await session.get(WikiPage, draft.page_id) if draft.page_id else None
+        target_slug = existing_page.slug if existing_page else None
+    if target_slug:
+        await session.execute(
+            select(func.pg_advisory_xact_lock(func.hashtext(target_slug)))
+        )
+        # The page row was loaded BEFORE the lock; another reviewer may have
+        # bumped its version while we waited. Refresh from DB so version /
+        # content_md reflect the committed state inside the critical section.
+        if existing_page is not None:
+            await session.refresh(existing_page)
+
+    if draft.draft_kind == "create":
+        meta = dict(draft.suggested_metadata or {})
+        overrides = metadata_overrides or {}
+        slug = (overrides.get("final_slug") or meta.get("slug") or "").strip()
+        title = (overrides.get("final_title") or meta.get("title") or "").strip()
+        page_type = overrides.get("final_page_type") or meta.get("page_type") or "concept"
+        kt_slugs = (
+            overrides.get("final_knowledge_type_slugs")
+            if overrides.get("final_knowledge_type_slugs") is not None
+            else meta.get("knowledge_type_slugs") or []
+        )
+        scope_type = meta.get("scope_type") or "global"
+        scope_id_raw = meta.get("scope_id")
+        try:
+            scope_id = uuid.UUID(scope_id_raw) if isinstance(scope_id_raw, str) else scope_id_raw
+        except (ValueError, TypeError):
+            scope_id = None
+        if scope_id is not None and not isinstance(scope_id, uuid.UUID):
+            # Hand-crafted metadata with a non-string non-UUID (e.g. int)
+            # shouldn't propagate downstream. Treat as missing scope.
+            scope_id = None
+
+        if not slug or slug in (INDEX_SLUG, LOG_SLUG, HOT_SLUG):
+            raise ValueError(f"Invalid slug for new page: '{slug}'")
+        if not title:
+            raise ValueError("Title is required to materialise a new page")
+
+        existing = await wiki_service.get_page_by_slug(session, slug, scope_type=scope_type, scope_id=scope_id)
+        if existing is not None:
+            raise CreateDraftSlugConflict(slug, scope_type, scope_id)
+
+        page = await wiki_service.apply_create(
+            session,
+            slug=slug, title=title, page_type=page_type,
+            content_md=final_content, summary="",
+            knowledge_type_slugs=list(kt_slugs), source_ids=[],
+            scope_type=scope_type, scope_id=scope_id,
+        )
+        # Tag the create-approval revision with reviewer context.
+        session.add(WikiPageRevision(
+            page_id=page.id,
+            version=page.version,
+            content_md=final_content,
+            change_type="draft_approved_create",
+            draft_id=draft.id,
+            changed_by_id=reviewer_id,
+            change_note=reviewer_note,
+        ))
+        # Backfill draft.page_id so subsequent UI reads can join cleanly.
+        draft.page_id = page.id
+    else:
+        page = await session.get(WikiPage, draft.page_id) if draft.page_id else None
+        if page is None:
+            raise ValueError(f"Wiki page {draft.page_id} not found")
+
+        if (
+            not allow_conflict
+            and edited_content_md is None
+            and draft.base_version is not None
+            and page.version is not None
+            and draft.base_version < page.version
+        ):
+            raise DraftConflictError(page.version, draft.base_version)
+
+        page.content_md = final_content
+        page.version = (page.version or 1) + 1
+        await session.flush()
+        await wiki_service.refresh_links(session, page.id, page.slug, final_content)
+
+        session.add(WikiPageRevision(
+            page_id=page.id,
+            version=page.version,
+            content_md=final_content,
+            change_type="draft_approved",
+            draft_id=draft.id,
+            changed_by_id=reviewer_id,
+            change_note=reviewer_note,
+        ))
+
+    draft.status = "approved"
+    draft.reviewed_by_id = reviewer_id
+    draft.reviewed_at = datetime.now(timezone.utc)
+    draft.reviewer_note = reviewer_note
+    await session.flush()
+    return page
+
+
+async def reject_wiki_draft(
+    session: AsyncSession,
+    draft: WikiPageDraft,
+    reviewer_id: uuid.UUID,
+    reviewer_note: str,
+) -> WikiPageDraft:
+    """Reject a pending draft with a required reason."""
+    draft.status = "rejected"
+    draft.reviewed_by_id = reviewer_id
+    draft.reviewed_at = datetime.now(timezone.utc)
+    draft.reviewer_note = reviewer_note
+    await session.flush()
+    return draft
 
 
 class InvalidTransition(Exception):

@@ -1098,7 +1098,7 @@ def register_tools(mcp: FastMCP):
             ):
                 return f"Error: base_version {effective_base} is ahead of current page v{page.version}."
 
-            draft = await wiki_service.create_draft(
+            draft = await contribution_service.create_wiki_draft(
                 session,
                 page_id=page.id,
                 author_id=employee.id,
@@ -1450,13 +1450,13 @@ def register_tools(mcp: FastMCP):
                 return "Error: you cannot approve your own draft. Ask another editor to review it."
 
             try:
-                await wiki_service.approve_draft(
+                await contribution_service.approve_wiki_draft(
                     session, draft, employee.id,
                     reviewer_note=reviewer_note,
                     edited_content_md=edited_content_md,
                     allow_conflict=allow_conflict,
                 )
-            except wiki_service.DraftConflictError as e:
+            except contribution_service.DraftConflictError as e:
                 return (
                     f"Conflict: {e}. Re-call with allow_conflict=true to overwrite "
                     "or supply edited_content_md after merging the latest changes."
@@ -1537,7 +1537,7 @@ def register_tools(mcp: FastMCP):
             if not await _can_review_page(session, employee, page):
                 return "Error: insufficient permission to reject drafts for this page."
 
-            await wiki_service.reject_draft(session, draft, employee.id, reviewer_note.strip())
+            await contribution_service.reject_wiki_draft(session, draft, employee.id, reviewer_note.strip())
             from cygnus.review import contributions as contribution_service
             from cygnus.review.contributions import wiki_draft_adapter
             await contribution_service.notify_rejected(
@@ -1856,7 +1856,7 @@ def register_tools(mcp: FastMCP):
                 "scope_type": scope_type,
                 "scope_id": str(sid) if sid else None,
             }
-            draft = await wiki_service.create_draft(
+            draft = await contribution_service.create_wiki_draft(
                 session,
                 page_id=None,
                 author_id=employee.id,

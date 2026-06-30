@@ -359,7 +359,7 @@ async def merge_branch(
         async with db.begin_nested():
             for d in drafts:
                 # Batch approve
-                await wiki_service.approve_draft(
+                await contribution_service.approve_wiki_draft(
                     db,
                     d,
                     reviewer_id=user.id,

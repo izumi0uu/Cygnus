@@ -23,6 +23,24 @@ class UpstreamCutoverGateTests(unittest.TestCase):
         failures = upstream_cutover_gate.collect_failures(Path(__file__).resolve().parents[1])
         self.assertEqual(failures, [])
 
+    def test_gate_report_exposes_structured_suite_sections(self) -> None:
+        report = upstream_cutover_gate.build_gate_report(Path(__file__).resolve().parents[1])
+
+        self.assertTrue(report["ok"])
+        sections = {section["name"]: section for section in report["sections"]}
+        self.assertEqual(
+            set(sections),
+            {
+                "code_residue_gate",
+                "compat_shrink_gate",
+                "owner_truth_gate",
+                "executable_path_gate",
+                "docs_truth_gate",
+            },
+        )
+        self.assertTrue(sections["owner_truth_gate"]["ok"])
+        self.assertTrue(sections["executable_path_gate"]["ok"])
+
     def test_gate_detects_forbidden_code_residue(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -47,6 +65,28 @@ class UpstreamCutoverGateTests(unittest.TestCase):
 
             failures = upstream_cutover_gate.check_removed_legacy_api_package(root)
             self.assertTrue(any("removed legacy package" in item for item in failures))
+
+    def test_gate_detects_missing_owner_truth_and_executable_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            for relative_path, snippets in upstream_cutover_gate.REQUIRED_DOC_SNIPPETS.items():
+                path = root / relative_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("\n".join(snippets), encoding="utf-8")
+
+            report = upstream_cutover_gate.build_gate_report(root)
+            sections = {section["name"]: section for section in report["sections"]}
+
+            self.assertFalse(report["ok"])
+            self.assertFalse(sections["owner_truth_gate"]["ok"])
+            self.assertFalse(sections["executable_path_gate"]["ok"])
+            self.assertTrue(
+                any("missing owner-truth file" in item for item in sections["owner_truth_gate"]["failures"])
+            )
+            self.assertTrue(
+                any("missing executable-path artifact" in item for item in sections["executable_path_gate"]["failures"])
+            )
 
 
 if __name__ == "__main__":

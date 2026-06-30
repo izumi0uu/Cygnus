@@ -22,6 +22,12 @@ from cygnus.runtime.config import settings
 from cygnus.runtime.database import get_db
 from cygnus.runtime.database.models import Employee, ScopeType, Source, SourceDepartment, WikiPage
 from cygnus.runtime.database.repository import Repository
+from cygnus.review import (
+    SourcePlanInvalidTransition,
+    approve_source_compilation_plan,
+    reject_source_compilation_plan,
+    request_source_plan_regeneration,
+)
 from cygnus.runtime.services.audit_service import log_audit
 from cygnus.runtime.services.auth_service import (
     get_current_user,
@@ -729,8 +735,6 @@ async def approve_compilation_plan(
     user: Employee = require_permission("doc:edit"),
 ):
     """Approve (and optionally modify) the compilation plan, then enqueue REFINE task."""
-    from datetime import datetime, timezone
-
     from cygnus.runtime.database.models import SourceCompilationPlan
 
     plan = (await db.execute(
@@ -740,28 +744,15 @@ async def approve_compilation_plan(
     )).scalar_one_or_none()
     if not plan:
         raise HTTPException(status_code=404, detail="No plan found for this source")
-    if plan.status == "regenerating":
-        raise HTTPException(
-            status_code=409,
-            detail="Plan is being regenerated. Wait for it to finish before approving.",
-        )
-    if plan.status != "pending_review":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Plan is not pending review (status={plan.status})",
-        )
-
-    plan.status = "approved"
-    plan.reviewed_by = user.id
-    plan.review_note = body.note
-    plan.reviewed_at = datetime.now(timezone.utc)
-    await log_audit(db, user, "approve", "compilation_plan", str(plan.id), reason=body.note or None)
-
     source = await db.get(Source, source_id)
-    if source:
-        source.status = "processing"
-        source.progress = 78
-        source.progress_message = "Plan approved — compiling wiki pages..."
+    try:
+        await approve_source_compilation_plan(db, plan, source, user, body.note)
+    except SourcePlanInvalidTransition as exc:
+        detail = str(exc)
+        raise HTTPException(
+            status_code=409 if "being regenerated" in detail else 400,
+            detail=detail,
+        ) from exc
 
     await db.flush()
 
@@ -803,15 +794,10 @@ async def regenerate_compilation_plan(
     )).scalar_one_or_none()
     if not plan:
         raise HTTPException(status_code=404, detail="No plan found for this source")
-    if plan.status not in ("pending_review", "rejected"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Plan cannot be regenerated (status={plan.status})",
-        )
-
-    plan.status = "regenerating"
-    plan.review_note = body.note[:1000]
-    await log_audit(db, user, "regenerate", "compilation_plan", str(plan.id), reason=body.note[:200])
+    try:
+        await request_source_plan_regeneration(db, plan, user, body.note)
+    except SourcePlanInvalidTransition as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     await db.commit()
 
     pool = await get_arq_pool()
@@ -833,8 +819,6 @@ async def reject_compilation_plan(
     user: Employee = require_permission("doc:edit"),
 ):
     """Reject the compilation plan. Source moves to error status."""
-    from datetime import datetime, timezone
-
     from cygnus.runtime.database.models import SourceCompilationPlan
 
     plan = (await db.execute(
@@ -844,27 +828,15 @@ async def reject_compilation_plan(
     )).scalar_one_or_none()
     if not plan:
         raise HTTPException(status_code=404, detail="No plan found for this source")
-    if plan.status == "regenerating":
-        raise HTTPException(
-            status_code=409,
-            detail="Plan is being regenerated. Wait for it to finish before rejecting.",
-        )
-    if plan.status != "pending_review":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Plan is not pending review (status={plan.status})",
-        )
-
-    plan.status = "rejected"
-    plan.reviewed_by = user.id
-    plan.review_note = body.note
-    plan.reviewed_at = datetime.now(timezone.utc)
-    await log_audit(db, user, "reject", "compilation_plan", str(plan.id), reason=body.note)
-
     source = await db.get(Source, source_id)
-    if source:
-        source.status = "error"
-        source.error_message = f"Compilation plan rejected: {body.note}"
+    try:
+        await reject_source_compilation_plan(db, plan, source, user, body.note)
+    except SourcePlanInvalidTransition as exc:
+        detail = str(exc)
+        raise HTTPException(
+            status_code=409 if "being regenerated" in detail else 400,
+            detail=detail,
+        ) from exc
 
     await db.commit()
     logger.info(f"Plan rejected for source {source_id} by user {user.id}: {body.note}")

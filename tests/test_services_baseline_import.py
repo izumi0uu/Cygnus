@@ -17,6 +17,7 @@ SERVICE_BASELINE_FILES = [
     "cygnus/runtime/services/auth_service.py",
     "cygnus/runtime/services/config_service.py",
     "cygnus/review/contributions.py",
+    "cygnus/review/source_plans.py",
     "cygnus/runtime/services/embedding_storage.py",
     "cygnus/runtime/services/image_service.py",
     "cygnus/runtime/services/kb_service.py",
@@ -67,6 +68,15 @@ SERVICE_BASELINE_MODULES = {
         "withdraw",
         "notify_approved",
         "notify_rejected",
+    ],
+    "cygnus.review.source_plans": [
+        "SourcePlanInvalidTransition",
+        "approve_source_compilation_plan",
+        "reject_source_compilation_plan",
+        "request_source_plan_regeneration",
+        "auto_approve_source_compilation_plan",
+        "restore_source_plan_pending_review",
+        "fail_source_plan_regeneration",
     ],
     "cygnus.runtime.services.embedding_storage": [
         "compute_content_hash",
@@ -156,7 +166,12 @@ class ServicesBaselineImportTests(unittest.TestCase):
         expected = {Path(path).relative_to("cygnus") for path in SERVICE_BASELINE_FILES}
         actual = {
             path.relative_to("cygnus")
-            for path in list(Path("cygnus/runtime/services").rglob("*.py")) + list(Path("cygnus/review/pre_review").rglob("*.py")) + list(Path("cygnus/review").glob("contributions.py"))
+            for path in (
+                list(Path("cygnus/runtime/services").rglob("*.py"))
+                + list(Path("cygnus/review/pre_review").rglob("*.py"))
+                + list(Path("cygnus/review").glob("contributions.py"))
+                + list(Path("cygnus/review").glob("source_plans.py"))
+            )
             if "__pycache__" not in path.parts
         }
 
@@ -190,6 +205,7 @@ class ServicesBaselineImportTests(unittest.TestCase):
             "cygnus/runtime/services/auth_service.py",
             "cygnus/runtime/services/config_service.py",
             "cygnus/review/contributions.py",
+            "cygnus/review/source_plans.py",
             "cygnus/runtime/services/kb_service.py",
             "cygnus/runtime/services/permission_engine.py",
             "cygnus/runtime/services/permissions.py",

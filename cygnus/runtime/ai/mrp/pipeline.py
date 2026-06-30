@@ -370,8 +370,7 @@ async def run_mrp_pipeline(
 
 async def _auto_trigger_refine(source_id: uuid.UUID, plan) -> dict:
     """Auto-approve plan and enqueue ingest_refine_task."""
-    from datetime import datetime, timezone
-
+    from cygnus.review import auto_approve_source_compilation_plan
     from cygnus.runtime.worker import get_arq_pool
 
     # Mark plan as approved
@@ -380,14 +379,9 @@ async def _auto_trigger_refine(source_id: uuid.UUID, plan) -> dict:
         async with async_session_factory() as sess:
             from cygnus.runtime.database.models import Source, SourceCompilationPlan
             p = await sess.get(SourceCompilationPlan, plan.id)
-            if p and p.status == "pending_review":
-                p.status = "approved"
-                p.review_note = "Auto-approved"
-                p.reviewed_at = datetime.now(timezone.utc)
             src = await sess.get(Source, source_id)
-            if src:
-                src.status = "processing"
-                src.progress_message = "Plan approved — compiling wiki pages..."
+            if p:
+                auto_approve_source_compilation_plan(p, src)
             await sess.commit()
     except Exception as exc:
         logger.warning(f"MRP auto-approve state update failed: {exc}")

@@ -4,6 +4,7 @@ Ownership:
 - review queue, pressure intake, drilldown, and source-blindness governance live here
 - contribution lifecycle and automated draft pre-review annotations live under ``cygnus.review``
 - contribution lifecycle, wiki branch lifecycle, and automated draft pre-review annotations live under ``cygnus.review``
+- source compilation-plan review lifecycle also lives under ``cygnus.review``
 - this package owns governance semantics, not runtime app-shell wiring
 """
 
@@ -88,6 +89,15 @@ from cygnus.review.queue import (
     build_review_queue_surface,
     get_review_queue_surface,
 )
+from cygnus.review.source_plans import (
+    SourcePlanInvalidTransition,
+    approve_source_compilation_plan,
+    auto_approve_source_compilation_plan,
+    fail_source_plan_regeneration,
+    reject_source_compilation_plan,
+    request_source_plan_regeneration,
+    restore_source_plan_pending_review,
+)
 from cygnus.review.source_blindness import (
     SourceBlindnessCommand,
     SourceBlindnessCommandType,
@@ -165,6 +175,7 @@ __all__ = [
     "ReviewRiskItem",
     "ReviewRiskType",
     "SituationFrame",
+    "SourcePlanInvalidTransition",
     "SourceBlindnessCommand",
     "SourceBlindnessCommandType",
     "SourceBlindnessContext",
@@ -184,6 +195,9 @@ __all__ = [
     "apply_pressure_commands",
     "get_source_blindness_surface",
     "apply_source_blindness_commands",
+    "approve_source_compilation_plan",
+    "auto_approve_source_compilation_plan",
+    "fail_source_plan_regeneration",
     "apply_queue_commands",
     "build_review_queue_surface",
     "get_review_queue_surface",
@@ -208,6 +222,9 @@ __all__ = [
     "sample_review_bundles",
     "sample_review_command_brief",
     "sample_review_command_surface",
+    "reject_source_compilation_plan",
+    "request_source_plan_regeneration",
+    "restore_source_plan_pending_review",
     "summarize_review_items",
     "UpstreamCommandTrace",
 ]

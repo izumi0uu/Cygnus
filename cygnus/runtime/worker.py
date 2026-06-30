@@ -964,6 +964,7 @@ async def regenerate_plan_task(ctx: dict, source_id: str, user_note: str):
     from cygnus.runtime.ai.registry import ProviderRegistry
     from cygnus.runtime.database import async_session_factory
     from cygnus.runtime.database.models import Source, SourceCompilationPlan
+    from cygnus.review import fail_source_plan_regeneration, restore_source_plan_pending_review
 
     sid = uuid.UUID(source_id)
 
@@ -1028,20 +1029,15 @@ async def regenerate_plan_task(ctx: dict, source_id: str, user_note: str):
             }
             new_plan_dict.update(internal_keys)
 
-            plan.plan_json = new_plan_dict
-            plan.status = "pending_review"
-            plan.reviewed_by = None
-            plan.review_note = None
-            plan.reviewed_at = None
+            restore_source_plan_pending_review(plan, plan_json=new_plan_dict)
             await session.commit()
             logger.success(f"regenerate_plan_task: plan refreshed for source {source_id}")
         except Exception as exc:
             logger.exception(f"regenerate_plan_task failed for {source_id}: {exc}")
             # Restore plan to pending_review so user isn't stuck on 'regenerating'
             plan2 = await session.get(SourceCompilationPlan, plan.id)
-            if plan2 and plan2.status == "regenerating":
-                plan2.status = "pending_review"
-                plan2.review_note = f"Regeneration failed: {str(exc)[:200]}"
+            if plan2:
+                fail_source_plan_regeneration(plan2, reason=str(exc))
                 await session.commit()
 
 

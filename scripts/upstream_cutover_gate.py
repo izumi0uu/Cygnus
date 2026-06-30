@@ -9,6 +9,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CODE_ROOTS = ("cygnus", "frontend")
+LINK_SCAN_ROOTS = ("cygnus", "frontend", "scripts", "tests")
+MANIFEST_FILES = ("pyproject.toml", "uv.lock")
 CODE_EXTENSIONS = {".py", ".ts", ".tsx", ".js", ".jsx", ".json"}
 FORBIDDEN_CODE_PATTERNS = (
     re.compile(r"__arkon_requires__"),
@@ -16,6 +18,13 @@ FORBIDDEN_CODE_PATTERNS = (
     re.compile(r"\bfrom\s+arkon\b"),
     re.compile(r"\bimport\s+arkon\b"),
     re.compile(r'"mcpServers"\s*:\s*\{\s*"arkon"'),
+)
+FORBIDDEN_EXTERNAL_CHECKOUT_PATTERNS = (
+    re.compile(r"nduckmink/arkon"),
+    re.compile(r"github\.com[:/][^\"'\s]*/arkon"),
+    re.compile(r"git@github\.com:[^\"'\s]*/arkon"),
+    re.compile(r"(?:^|[\"'=\s])\.\./[^\"'\s]*arkon(?:[\"'\s]|$)"),
+    re.compile(r"(?:^|[\"'=\s])/[^\"'\s]*/arkon(?:[\"'\s]|$)"),
 )
 IGNORED_CODE_PARTS = {"dist", "__pycache__"}
 REMOVED_COMPAT_FILES = (
@@ -171,6 +180,48 @@ def check_required_docs(repo_root: Path) -> list[str]:
     return failures
 
 
+def _is_within_repo(repo_root: Path, target: Path) -> bool:
+    try:
+        target.relative_to(repo_root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def check_external_checkout_dependencies(repo_root: Path) -> list[str]:
+    failures: list[str] = []
+
+    gitmodules = repo_root / ".gitmodules"
+    if gitmodules.exists() and gitmodules.read_text(encoding="utf-8").strip():
+        failures.append(".gitmodules: submodule configuration must be absent before upstream deletion")
+
+    for relative_path in MANIFEST_FILES:
+        path = repo_root / relative_path
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        for pattern in FORBIDDEN_EXTERNAL_CHECKOUT_PATTERNS:
+            if pattern.search(text):
+                failures.append(
+                    f"{relative_path}: forbidden external checkout reference `{pattern.pattern}`"
+                )
+                break
+
+    for relative_root in LINK_SCAN_ROOTS:
+        root = repo_root / relative_root
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if not path.is_symlink():
+                continue
+            resolved = path.resolve()
+            rel = path.relative_to(repo_root)
+            if not _is_within_repo(repo_root, resolved):
+                failures.append(f"{rel}: symlink escapes repo root -> {resolved}")
+
+    return failures
+
+
 def check_owner_truth(repo_root: Path) -> list[str]:
     failures: list[str] = []
     for relative_path, snippets in OWNER_TRUTH_FILES.items():
@@ -221,6 +272,11 @@ def build_gate_suite(repo_root: Path | None = None) -> list[GateSectionResult]:
             name="executable_path_gate",
             description="The cutover stop-line still points at executable golden-path and boot artifacts.",
             failures=tuple(check_executable_path(resolved_root)),
+        ),
+        GateSectionResult(
+            name="external_checkout_gate",
+            description="No manifest, submodule, or symlink still depends on an external Arkon checkout.",
+            failures=tuple(check_external_checkout_dependencies(resolved_root)),
         ),
         GateSectionResult(
             name="docs_truth_gate",

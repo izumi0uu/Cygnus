@@ -18,7 +18,6 @@ SERVICE_BASELINE_FILES = [
     "cygnus/runtime/services/config_service.py",
     "cygnus/review/contributions.py",
     "cygnus/review/source_plans.py",
-    "cygnus/runtime/services/image_service.py",
     "cygnus/runtime/services/kb_service.py",
     "cygnus/runtime/services/notification_service.py",
     "cygnus/runtime/services/permission_engine.py",
@@ -72,7 +71,6 @@ SERVICE_BASELINE_MODULES = {
         "restore_source_plan_pending_review",
         "fail_source_plan_regeneration",
     ],
-    "cygnus.runtime.services.image_service": ["ImageInfo", "extract_images_from_pdf", "extract_images_from_docx", "extract_images"],
     "cygnus.runtime.services.kb_service": ["ingest_source"],
     "cygnus.runtime.services.notification_service": [
         "NotificationType",

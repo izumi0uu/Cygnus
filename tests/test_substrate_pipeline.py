@@ -11,6 +11,7 @@ from cygnus.substrate.source_outline import (
     parse_page_range,
     slice_pages_by_range,
 )
+from cygnus.substrate.source_images import ImageInfo, extract_images
 
 
 class PipelinePhaseTests(unittest.TestCase):
@@ -92,3 +93,18 @@ class SourceOutlinePrimitiveTests(unittest.TestCase):
         self.assertEqual([item["page"] for item in selected], [1, 2])
         self.assertEqual(outline[0]["title"], "Intro")
         self.assertEqual(outline[0]["children"][0]["title"], "Details")
+
+
+class SourceImagePrimitiveTests(unittest.TestCase):
+    def test_image_primitives_are_importable_from_substrate(self) -> None:
+        self.assertTrue(callable(extract_images))
+        image = ImageInfo(
+            minio_key="sources/demo/images/1.png",
+            page_number=1,
+            image_index=0,
+            content_type="image/png",
+            size_bytes=128,
+        )
+
+        self.assertEqual(image.minio_key, "sources/demo/images/1.png")
+        self.assertEqual(image.page_number, 1)

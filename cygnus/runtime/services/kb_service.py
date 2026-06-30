@@ -6,7 +6,9 @@ Compile into wiki (LLM). No chunking, no per-chunk embeddings — embeddings now
 live on WikiPage rows. Search is handled by cygnus/runtime/services/wiki_service.py.
 
 Provider-agnostic: uses ProviderRegistry to resolve embedding/LLM/vision
-providers from app_config at runtime.
+providers from app_config at runtime. Source image extraction lives under
+`cygnus.substrate` because it is a compilation primitive rather than a
+runtime service owner concern.
 """
 
 import uuid
@@ -18,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cygnus.runtime.ai.registry import ProviderRegistry
 from cygnus.runtime.ai.wiki_compiler import compile_source_into_wiki
 from cygnus.runtime.database.models import KnowledgeType, Source, SourceImage
-from cygnus.runtime.services.image_service import ImageInfo, extract_images
+from cygnus.substrate.source_images import ImageInfo, extract_images, inline_image_markers
 from cygnus.substrate.source_outline import assemble_full_text, build_outline
 from cygnus.runtime.services.storage_service import storage_service
 
@@ -80,7 +82,7 @@ async def ingest_source(
         # --- Step 3: Extract & caption images, persist, inline markers ---
         images: list[ImageInfo] = []
         if file_data and file_name:
-            images = extract_images(file_data, file_name, str(source_id))
+            images = extract_images(file_data, file_name, str(source_id), storage_service)
             if vision_provider and images:
                 for idx, img in enumerate(images, 1):
                     try:
@@ -108,7 +110,7 @@ async def ingest_source(
                 await session.flush()  # populate row.id
                 img.image_id = str(row.id)
 
-        _inline_image_markers(pages_data, images)
+        inline_image_markers(pages_data, images)
 
         # --- Step 4: Build outline + assemble full_text ---
         source.outline_json = build_outline(pages_data)
@@ -168,47 +170,6 @@ def _guess_content_type(file_name: str) -> str:
         "csv": "text/csv",
         "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     }.get(ext, "application/octet-stream")
-
-
-def _sanitize_caption_for_alt(caption: str) -> str:
-    """Make a caption safe to use inside markdown image alt text."""
-    # Strip newlines + characters that would break `![alt](url)` parsing.
-    cleaned = caption.replace("\n", " ").replace("\r", " ")
-    cleaned = cleaned.replace("[", "(").replace("]", ")")
-    return cleaned.strip()
-
-
-def _inline_image_markers(pages_data: list[dict], images: list[ImageInfo]) -> None:
-    """Inject markdown image markers into per-page text.
-
-    Each image becomes `![caption](image://<uuid>)` appended at the end of the
-    page it came from. The wiki compiler is instructed to preserve these
-    markers in the most contextually-relevant wiki page, drop irrelevant ones,
-    and never invent UUIDs. Mutates pages_data in place.
-    """
-    if not images:
-        return
-
-    by_page: dict[int, list[str]] = {}
-    for img in images:
-        if not img.image_id:
-            continue
-        alt = _sanitize_caption_for_alt(img.caption or "")
-        marker = f"![{alt}](image://{img.image_id})"
-        page_num = img.page_number or 1
-        by_page.setdefault(page_num, []).append(marker)
-
-    if not by_page:
-        return
-
-    for page in pages_data:
-        pnum = page.get("page_number") or 1
-        markers = by_page.get(pnum)
-        if not markers:
-            continue
-        joined = "\n\n".join(markers)
-        page["content"] = (page.get("content") or "") + f"\n\n{joined}\n"
-
 
 async def _extract_text_from_file(
     file_data: bytes,

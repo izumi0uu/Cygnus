@@ -201,10 +201,9 @@ async def ingest_file_task(ctx: dict, source_id: str):
     """
     from cygnus.runtime.database import async_session_factory
     from cygnus.runtime.database.models import Source, SourceImage
-    from cygnus.runtime.services.image_service import extract_images
+    from cygnus.substrate.source_images import extract_images, inline_image_markers
     from cygnus.runtime.services.kb_service import (
         _extract_text_from_file,
-        _inline_image_markers,
     )
     from cygnus.substrate.source_outline import assemble_full_text, build_outline
     from cygnus.runtime.services.storage_service import storage_service
@@ -264,7 +263,7 @@ async def ingest_file_task(ctx: dict, source_id: str):
             # Captioning is offloaded to caption_images_task (enqueued below) so
             # this job is not blocked by the number of images in the document.
             await tracker.update(30, "Extracting images...")
-            images = extract_images(file_data, file_name, source_id)
+            images = extract_images(file_data, file_name, source_id, storage_service)
 
             # Persist images so wiki content_md can reference them by uuid.
             for img in images:
@@ -282,7 +281,7 @@ async def ingest_file_task(ctx: dict, source_id: str):
                 img.image_id = str(row.id)
 
             # Inline image markers into per-page text so the compiler sees them.
-            _inline_image_markers(pages_data, images)
+            inline_image_markers(pages_data, images)
             await tracker.update(40, f"Analyzed {len(images)} images")
 
             # --- Step 4: Build outline + assemble full_text (50%) ---

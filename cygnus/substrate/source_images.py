@@ -1,19 +1,23 @@
-"""
-Image extraction service — extract images from PDF and DOCX files.
-Uploads extracted images to MinIO and returns metadata for downstream
-captioning + persistence.
+"""Substrate source image extraction primitives for Cygnus.
+
+Ownership:
+- document image extraction for source ingestion/compilation lives here
+- these are source-media primitives, not runtime service ownership
+- callers provide the storage adapter so substrate does not depend on runtime wiring
 """
 
 import io
-from typing import Optional
+from typing import Optional, Protocol
 
 from loguru import logger
-
-from cygnus.runtime.services.storage_service import storage_service
 
 # Skip images smaller than this — they're almost always icons/decorators,
 # not content. Tune via env later if needed.
 MIN_IMAGE_BYTES = 2048
+
+
+class SourceImageStorage(Protocol):
+    def upload_file(self, object_name: str, data: bytes, content_type: str) -> None: ...
 
 
 def _mime_from_ext(ext: str) -> str:
@@ -56,6 +60,7 @@ class ImageInfo:
 def extract_images_from_pdf(
     file_data: bytes,
     source_id: str,
+    storage: SourceImageStorage,
 ) -> list[ImageInfo]:
     """
     Extract all images from a PDF file and upload to MinIO.
@@ -90,7 +95,7 @@ def extract_images_from_pdf(
 
                 content_type = _mime_from_ext(img_ext)
                 object_name = f"sources/{source_id}/images/page{page_num + 1}_{image_index}.{img_ext}"
-                storage_service.upload_file(
+                storage.upload_file(
                     object_name=object_name,
                     data=img_bytes,
                     content_type=content_type,
@@ -117,6 +122,7 @@ def extract_images_from_pdf(
 def extract_images_from_docx(
     file_data: bytes,
     source_id: str,
+    storage: SourceImageStorage,
 ) -> list[ImageInfo]:
     """
     Extract all images from a DOCX file and upload to MinIO.
@@ -144,7 +150,7 @@ def extract_images_from_docx(
                     continue
 
                 object_name = f"sources/{source_id}/images/docx_{image_index}.{ext}"
-                storage_service.upload_file(
+                storage.upload_file(
                     object_name=object_name,
                     data=img_blob,
                     content_type=content_type,
@@ -171,13 +177,47 @@ def extract_images(
     file_data: bytes,
     file_name: str,
     source_id: str,
+    storage: SourceImageStorage,
 ) -> list[ImageInfo]:
     """Auto-detect file type and extract images."""
     lower = file_name.lower()
     if lower.endswith(".pdf"):
-        return extract_images_from_pdf(file_data, source_id)
+        return extract_images_from_pdf(file_data, source_id, storage)
     elif lower.endswith(".docx"):
-        return extract_images_from_docx(file_data, source_id)
+        return extract_images_from_docx(file_data, source_id, storage)
     else:
         logger.debug(f"No image extraction for file type: {file_name}")
         return []
+
+
+def _sanitize_caption_for_alt(caption: str) -> str:
+    """Make a caption safe to use inside markdown image alt text."""
+    cleaned = caption.replace("\n", " ").replace("\r", " ")
+    cleaned = cleaned.replace("[", "(").replace("]", ")")
+    return cleaned.strip()
+
+
+def inline_image_markers(pages_data: list[dict], images: list[ImageInfo]) -> None:
+    """Inject markdown image markers into per-page text."""
+    if not images:
+        return
+
+    by_page: dict[int, list[str]] = {}
+    for img in images:
+        if not img.image_id:
+            continue
+        alt = _sanitize_caption_for_alt(img.caption or "")
+        marker = f"![{alt}](image://{img.image_id})"
+        page_num = img.page_number or 1
+        by_page.setdefault(page_num, []).append(marker)
+
+    if not by_page:
+        return
+
+    for page in pages_data:
+        pnum = page.get("page_number") or 1
+        markers = by_page.get(pnum)
+        if not markers:
+            continue
+        joined = "\n\n".join(markers)
+        page["content"] = (page.get("content") or "") + f"\n\n{joined}\n"

@@ -23,6 +23,7 @@ from cygnus.runtime.database import get_db
 from cygnus.runtime.database.models import Employee, ScopeType, Source, SourceDepartment, WikiPage
 from cygnus.runtime.database.repository import Repository
 from cygnus.runtime.source_state import (
+    mark_source_ingest_queued,
     mark_source_plan_refine_queued,
     mark_source_post_extraction_resume,
     mark_source_requeued_after_department_change,
@@ -364,15 +365,13 @@ async def upload_source(
         source_type="file",
         file_name=file_name,
         file_size=len(file_data),
-        status="pending",
-        progress=0,
-        progress_message="Queued for ingestion...",
         knowledge_type_id=uuid.UUID(knowledge_type_id) if knowledge_type_id else None,
         contributed_by_employee_id=user.id,
         scope_type=scope_type or ScopeType.GLOBAL.value,
         scope_id=uuid.UUID(scope_id) if scope_id else None,
         preserve_verbatim=preserve_verbatim,
     )
+    mark_source_ingest_queued(source)
     source = await repo.create(source)
     await db.flush()
 
@@ -402,8 +401,7 @@ async def upload_source(
     job = await pool.enqueue_job(
         "ingest_file_task", str(source.id),
     )
-    if job:
-        source.job_id = job.job_id
+    mark_source_ingest_queued(source, job_id=job.job_id if job else None)
     await db.commit()
 
     source = (await db.execute(
@@ -427,14 +425,12 @@ async def add_url_source(
         title=req.title or req.url,
         source_type="url",
         url=req.url,
-        status="pending",
-        progress=0,
-        progress_message="Queued for ingestion...",
         knowledge_type_id=req.knowledge_type_id,
         contributed_by_employee_id=user.id,
         scope_type=ScopeType.GLOBAL.value,
         preserve_verbatim=req.preserve_verbatim,
     )
+    mark_source_ingest_queued(source)
     source = await repo.create(source)
     await db.flush()
 
@@ -449,8 +445,7 @@ async def add_url_source(
 
     pool = await get_arq_pool()
     job = await pool.enqueue_job("ingest_url_task", str(source.id))
-    if job:
-        source.job_id = job.job_id
+    mark_source_ingest_queued(source, job_id=job.job_id if job else None)
     await db.commit()
 
     source = (await db.execute(

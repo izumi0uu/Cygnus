@@ -60,6 +60,19 @@ def mark_source_retry_queued(
     return attach_source_runtime_job(source, job_id=job_id)
 
 
+def mark_source_ingest_queued(
+    source,
+    *,
+    job_id: Optional[str] = None,
+) -> object:
+    """Mark a source as queued for its initial ingest path."""
+    source.status = "pending"
+    source.progress = 0
+    source.progress_message = "Queued for ingestion..."
+    source.error_message = None
+    return attach_source_runtime_job(source, job_id=job_id)
+
+
 def mark_source_post_extraction_resume(
     source,
     *,

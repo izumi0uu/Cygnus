@@ -65,6 +65,26 @@ class RuntimeSourceStateTests(unittest.TestCase):
         self.assertIsNone(source.error_message)
         self.assertEqual(source.job_id, "job-2")
 
+    def test_mark_source_ingest_queued_sets_initial_ingest_fields(self) -> None:
+        from cygnus.runtime.source_state import mark_source_ingest_queued
+
+        source = types.SimpleNamespace(
+            status="draft",
+            progress=10,
+            progress_message="old",
+            error_message="bad",
+            job_id=None,
+        )
+
+        result = mark_source_ingest_queued(source, job_id="job-ingest-1")
+
+        self.assertIs(result, source)
+        self.assertEqual(source.status, "pending")
+        self.assertEqual(source.progress, 0)
+        self.assertEqual(source.progress_message, "Queued for ingestion...")
+        self.assertIsNone(source.error_message)
+        self.assertEqual(source.job_id, "job-ingest-1")
+
     def test_mark_source_post_extraction_resume_covers_caption_and_direct_paths(self) -> None:
         from cygnus.runtime.source_state import mark_source_post_extraction_resume
 

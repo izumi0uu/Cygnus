@@ -167,6 +167,7 @@ def test_package_dunders_publish_single_owner_story() -> None:
             "def mark_source_processing(",
             "def mark_source_requeued_after_department_change(",
             "def mark_source_retry_queued(",
+            "def mark_source_ingest_queued(",
             "def mark_source_post_extraction_resume(",
             "def mark_source_plan_refine_queued(",
             "def mark_source_awaiting_approval(",

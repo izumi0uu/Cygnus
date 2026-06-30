@@ -261,6 +261,12 @@ def test_package_dunders_publish_single_owner_story() -> None:
             "storage ownership remains in the runtime shell",
             "class StorageService:",
         ],
+        "cygnus/runtime/services/stats_aggregator.py": [
+            "Daily rollup aggregator for the Cygnus runtime admin analytics surface.",
+            "admin statistics rollups, dashboard metrics, usage-gap aggregation, and audit-denial summaries live here",
+            "this module recomputes runtime analytics projections; it does not own support-domain objects or governance decisions themselves",
+            "async def run_daily_rollup(",
+        ],
         "cygnus/runtime/services/wiki_service.py": [
             "Wiki Service — CRUD and wikilink graph for WikiPage.",
             "wiki-page materialization, revision persistence, and wikilink graph maintenance live here",

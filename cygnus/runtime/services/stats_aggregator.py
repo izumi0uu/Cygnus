@@ -1,5 +1,9 @@
 """
-Daily rollup aggregator for the admin Statistics dashboard.
+Daily rollup aggregator for the Cygnus runtime admin analytics surface.
+
+Ownership:
+- admin statistics rollups, dashboard metrics, usage-gap aggregation, and audit-denial summaries live here
+- this module recomputes runtime analytics projections; it does not own support-domain objects or governance decisions themselves
 
 `run_daily_rollup(target_date)` recomputes all rollup metrics for the UTC day
 that starts at `target_date 00:00`. Idempotent — re-running for the same date

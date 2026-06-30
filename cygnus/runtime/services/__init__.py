@@ -11,5 +11,6 @@ Ownership:
 - source image extraction primitives no longer live here; they converged to ``cygnus.substrate``
 - source text extraction and content-type primitives no longer live here; they converged to ``cygnus.substrate``
 - raw-source verbatim indexing and chunk retrieval no longer live here; they converged to ``cygnus.retrieval``
+- admin statistics rollups and runtime analytics projections still live here
 - this package is runtime/service wiring, not the governance control plane
 """

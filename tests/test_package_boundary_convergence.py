@@ -200,8 +200,15 @@ def test_package_dunders_publish_single_owner_story() -> None:
         ],
         "cygnus/runtime/__init__.py": [
             "runtime shell preserving imported Arkon topology",
-            "source execution-state transitions also live here as runtime truth",
+            "source execution-state transitions and source-ingest orchestration also live here as runtime truth",
             "not the whole Cygnus product boundary",
+        ],
+        "cygnus/runtime/source_ingest.py": [
+            "Source ingest orchestration for the Cygnus runtime shell.",
+            "file/url source ingest orchestration, source-media persistence, and wiki-compilation handoff live here",
+            "source text/image/outline extraction primitives stay under ``cygnus.substrate``",
+            "runtime storage, provider registry, and source-row mutation wiring stay in the runtime shell",
+            "async def ingest_source(",
         ],
         "cygnus/runtime/source_state.py": [
             "Source runtime execution-state transitions for Cygnus.",
@@ -468,17 +475,18 @@ def test_source_image_primitives_live_under_substrate_tree() -> None:
     substrate_images = Path("cygnus/substrate/source_images.py").read_text(encoding="utf-8")
     runtime_services_init = Path("cygnus/runtime/services/__init__.py").read_text(encoding="utf-8")
     worker_text = Path("cygnus/runtime/worker.py").read_text(encoding="utf-8")
-    kb_service_text = Path("cygnus/runtime/services/kb_service.py").read_text(encoding="utf-8")
+    source_ingest_text = Path("cygnus/runtime/source_ingest.py").read_text(encoding="utf-8")
 
     assert "source image extraction primitives" in substrate_init
     assert "Substrate source image extraction primitives for Cygnus." in substrate_images
     assert "source image extraction primitives no longer live here" in runtime_services_init
+    assert "source ingest orchestration no longer lives here" in runtime_services_init
     assert "from cygnus.substrate.source_images import extract_images, inline_image_markers" in worker_text
-    assert "from cygnus.substrate.source_images import ImageInfo, extract_images, inline_image_markers" in kb_service_text
+    assert "from cygnus.substrate.source_images import ImageInfo, extract_images, inline_image_markers" in source_ingest_text
     assert "extract_images(file_data, file_name, source_id, storage_service)" in worker_text
-    assert "extract_images(file_data, file_name, str(source_id), storage_service)" in kb_service_text
+    assert "extract_images(file_data, file_name, str(source_id), storage_service)" in source_ingest_text
     assert "inline_image_markers(pages_data, images)" in worker_text
-    assert "inline_image_markers(pages_data, images)" in kb_service_text
+    assert "inline_image_markers(pages_data, images)" in source_ingest_text
 
     assert Path("cygnus/substrate/source_images.py").exists()
     assert not Path("cygnus/runtime/services/image_service.py").exists()
@@ -488,20 +496,34 @@ def test_source_text_primitives_live_under_substrate_tree() -> None:
     substrate_init = Path("cygnus/substrate/__init__.py").read_text(encoding="utf-8")
     substrate_text = Path("cygnus/substrate/source_text.py").read_text(encoding="utf-8")
     runtime_services_init = Path("cygnus/runtime/services/__init__.py").read_text(encoding="utf-8")
-    kb_service_text = Path("cygnus/runtime/services/kb_service.py").read_text(encoding="utf-8")
+    source_ingest_text = Path("cygnus/runtime/source_ingest.py").read_text(encoding="utf-8")
     worker_text = Path("cygnus/runtime/worker.py").read_text(encoding="utf-8")
     sources_router_text = Path("cygnus/runtime/routers/sources.py").read_text(encoding="utf-8")
 
     assert "source text extraction and content-type primitives" in substrate_init
     assert "Substrate source text extraction primitives for Cygnus." in substrate_text
     assert "source text extraction and content-type primitives no longer live here" in runtime_services_init
-    assert "from cygnus.substrate.source_text import _extract_text_from_file, _extract_text_from_url, _guess_content_type" in kb_service_text
+    assert "from cygnus.substrate.source_text import _extract_text_from_file, _extract_text_from_url, _guess_content_type" in source_ingest_text
     assert "from cygnus.substrate.source_text import _extract_text_from_file" in worker_text
     assert "from cygnus.substrate.source_text import _extract_text_from_url" in worker_text
     assert "from cygnus.substrate.source_text import _guess_content_type" in worker_text
     assert "from cygnus.substrate.source_text import _guess_content_type" in sources_router_text
 
     assert Path("cygnus/substrate/source_text.py").exists()
+
+
+def test_source_ingest_orchestration_lives_under_runtime_tree() -> None:
+    runtime_init = Path("cygnus/runtime/__init__.py").read_text(encoding="utf-8")
+    runtime_services_init = Path("cygnus/runtime/services/__init__.py").read_text(encoding="utf-8")
+    source_ingest_text = Path("cygnus/runtime/source_ingest.py").read_text(encoding="utf-8")
+
+    assert "source execution-state transitions and source-ingest orchestration also live here as runtime truth" in runtime_init
+    assert "source ingest orchestration no longer lives here" in runtime_services_init
+    assert "Source ingest orchestration for the Cygnus runtime shell." in source_ingest_text
+    assert "async def ingest_source(" in source_ingest_text
+
+    assert Path("cygnus/runtime/source_ingest.py").exists()
+    assert not Path("cygnus/runtime/services/kb_service.py").exists()
 
 
 def test_external_notification_dispatch_lives_under_integrations_tree() -> None:

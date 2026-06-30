@@ -1,15 +1,11 @@
 """
-Knowledge Base service — document ingestion via the LLM Wiki pipeline.
+Source ingest orchestration for the Cygnus runtime shell.
 
-Pipeline: Upload → Extract text → Extract & caption images → Build outline →
-Compile into wiki (LLM). No chunking, no per-chunk embeddings — embeddings now
-live on WikiPage rows. Search is handled by cygnus/runtime/services/wiki_service.py.
-
-Provider-agnostic: uses ProviderRegistry to resolve embedding/LLM/vision
-providers from app_config at runtime. Source image extraction lives under
-`cygnus.substrate`, and source text extraction/content-type guessing also live
-there because they are compilation primitives rather than runtime service
-owner concerns.
+Ownership:
+- file/url source ingest orchestration, source-media persistence, and wiki-compilation handoff live here
+- source text/image/outline extraction primitives stay under ``cygnus.substrate``
+- runtime storage, provider registry, and source-row mutation wiring stay in the runtime shell
+- this module owns source-ingest execution orchestration, not generic runtime service catalog truth
 """
 
 import uuid
@@ -21,14 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cygnus.runtime.ai.registry import ProviderRegistry
 from cygnus.runtime.ai.wiki_compiler import compile_source_into_wiki
 from cygnus.runtime.database.models import KnowledgeType, Source, SourceImage
+from cygnus.runtime.services.storage_service import storage_service
 from cygnus.substrate.source_images import ImageInfo, extract_images, inline_image_markers
 from cygnus.substrate.source_outline import assemble_full_text, build_outline
 from cygnus.substrate.source_text import _extract_text_from_file, _extract_text_from_url, _guess_content_type
-from cygnus.runtime.services.storage_service import storage_service
 
-# ---------------------------------------------------------------------------
-# Ingestion pipeline
-# ---------------------------------------------------------------------------
 
 async def ingest_source(
     session: AsyncSession,
@@ -55,7 +48,6 @@ async def ingest_source(
         source.status = "processing"
         await session.flush()
 
-        # --- Step 1: Upload original file ---
         if file_data and file_name:
             minio_key = f"sources/{source_id}/original/{file_name}"
             storage_service.upload_file(
@@ -67,7 +59,6 @@ async def ingest_source(
             source.file_name = file_name
             source.file_size = len(file_data)
 
-        # --- Step 2: Extract text per page ---
         if file_data and file_name:
             pages_data = await _extract_text_from_file(file_data, file_name, vision_provider=vision_provider)
         elif source.url:
@@ -75,61 +66,57 @@ async def ingest_source(
         else:
             pages_data = []
 
-        if not pages_data or not any((p.get("content") or "").strip() for p in pages_data):
+        if not pages_data or not any((page.get("content") or "").strip() for page in pages_data):
             source.status = "error"
             source.error_message = "Could not extract text content from source"
             await session.flush()
             return source
 
-        # --- Step 3: Extract & caption images, persist, inline markers ---
         images: list[ImageInfo] = []
         if file_data and file_name:
             images = extract_images(file_data, file_name, str(source_id), storage_service)
             if vision_provider and images:
-                for idx, img in enumerate(images, 1):
+                for idx, image in enumerate(images, 1):
                     try:
                         if idx % 5 == 0 or idx == 1 or idx == len(images):
                             logger.info(f"Vision AI analyzing image {idx}/{len(images)}...")
-                        img_bytes = storage_service.download_file(img.minio_key)
-                        img.caption = await vision_provider.analyze_image(
-                            img_bytes, img.content_type
+                        img_bytes = storage_service.download_file(image.minio_key)
+                        image.caption = await vision_provider.analyze_image(
+                            img_bytes,
+                            image.content_type,
                         )
-                    except Exception as e:
-                        logger.warning(f"Failed to analyze image {img.minio_key}: {e}")
+                    except Exception as exc:
+                        logger.warning(f"Failed to analyze image {image.minio_key}: {exc}")
 
-            # Persist source_images rows so wiki content_md can reference by uuid.
-            for img in images:
+            for image in images:
                 row = SourceImage(
                     source_id=source_id,
-                    minio_key=img.minio_key,
-                    page_number=img.page_number,
-                    image_index=img.image_index,
-                    caption=img.caption,
-                    content_type=img.content_type,
-                    size_bytes=img.size_bytes,
+                    minio_key=image.minio_key,
+                    page_number=image.page_number,
+                    image_index=image.image_index,
+                    caption=image.caption,
+                    content_type=image.content_type,
+                    size_bytes=image.size_bytes,
                 )
                 session.add(row)
-                await session.flush()  # populate row.id
-                img.image_id = str(row.id)
+                await session.flush()
+                image.image_id = str(row.id)
 
         inline_image_markers(pages_data, images)
 
-        # --- Step 4: Build outline + assemble full_text ---
         source.outline_json = build_outline(pages_data)
         full_text, page_offsets = assemble_full_text(pages_data)
         source.full_text = full_text
         source.page_offsets = page_offsets
 
-        # --- Step 5: Resolve KnowledgeType context ---
         kt_slug = kt_name = kt_desc = None
         if source.knowledge_type_id:
-            kt = await session.get(KnowledgeType, source.knowledge_type_id)
-            if kt:
-                kt_slug = kt.slug
-                kt_name = kt.name
-                kt_desc = kt.description
+            knowledge_type = await session.get(KnowledgeType, source.knowledge_type_id)
+            if knowledge_type:
+                kt_slug = knowledge_type.slug
+                kt_name = knowledge_type.name
+                kt_desc = knowledge_type.description
 
-        # --- Step 6: Compile into wiki ---
         result = await compile_source_into_wiki(
             session=session,
             source=source,
@@ -149,10 +136,9 @@ async def ingest_source(
         )
         return source
 
-    except Exception as e:
-        logger.error(f"Ingestion failed for source {source_id}: {e}")
+    except Exception as exc:
+        logger.error(f"Ingestion failed for source {source_id}: {exc}")
         source.status = "error"
-        source.error_message = str(e)[:500]
+        source.error_message = str(exc)[:500]
         await session.flush()
         raise
-

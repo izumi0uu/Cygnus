@@ -87,10 +87,13 @@ def test_package_dunders_publish_single_owner_story() -> None:
         "cygnus/publish/__init__.py": [
             "Governance control-plane publish modules for Cygnus",
             "owns publish governance semantics, not runtime app-shell wiring",
+            "publish preview, blast radius, propagation, and projection live here",
         ],
         "cygnus/recovery/__init__.py": [
             "Governance control-plane recovery modules for Cygnus",
             "owns governance recovery semantics, not runtime app-shell wiring",
+            "downstream reality check, governance overview, recovery window, and recovery proof surfaces live here",
+            "RecoveryProofSurface",
         ],
         "cygnus/retrieval/__init__.py": [
             "Object/evidence retrieval and source-trace query layer for Cygnus",
@@ -120,6 +123,27 @@ def test_package_dunders_publish_single_owner_story() -> None:
         text = Path(relative_path).read_text(encoding="utf-8")
         for snippet in snippets:
             assert snippet in text, f"missing `{snippet}` in {relative_path}"
+
+
+def test_recovery_proof_surface_lives_under_recovery_tree() -> None:
+    publish_init = Path("cygnus/publish/__init__.py").read_text(encoding="utf-8")
+    recovery_init = Path("cygnus/recovery/__init__.py").read_text(encoding="utf-8")
+    publish_router_text = Path("cygnus/runtime/routers/governance/publish.py").read_text(encoding="utf-8")
+    recovery_router_text = Path("cygnus/runtime/routers/governance/recovery.py").read_text(encoding="utf-8")
+
+    assert "cygnus.publish.recovery" not in publish_init
+    assert "get_pressure_intake_recovery_proof_surface" not in publish_init
+    assert "RecoveryProofSurface" not in publish_init
+
+    assert "get_pressure_intake_recovery_proof_surface" in recovery_init
+    assert "RecoveryProofSurface" in recovery_init
+    assert "cygnus.recovery" not in publish_router_text
+    assert "get_pressure_intake_recovery_proof_surface" not in publish_router_text
+    assert "cygnus.recovery" in recovery_router_text
+    assert "get_pressure_intake_recovery_proof_surface" in recovery_router_text
+
+    assert not Path("cygnus/publish/recovery.py").exists()
+    assert Path("cygnus/recovery/proof.py").exists()
 
 
 def test_governance_router_owner_converges_to_backend_router_package() -> None:

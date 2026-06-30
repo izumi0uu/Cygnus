@@ -1,7 +1,7 @@
 """Governance control-plane recovery modules for Cygnus.
 
 Ownership:
-- downstream reality check, governance overview, and recovery window surfaces live here
+- downstream reality check, governance overview, recovery window, and recovery proof surfaces live here
 - this package owns governance recovery semantics, not runtime app-shell wiring
 """
 
@@ -43,6 +43,14 @@ from cygnus.recovery.reality_check import (
     MismatchByAudience,
     RealityCheckStrip,
     build_downstream_reality_check_surface,
+)
+from cygnus.recovery.proof import (
+    RecoveryBehaviorType,
+    RecoveryProofSurface,
+    RecoveryProofWindow,
+    RecoverySignal,
+    RecoverySignalStatus,
+    get_pressure_intake_recovery_proof_surface,
 )
 from cygnus.recovery.window import (
     AlignmentPlaneChange,
@@ -89,6 +97,11 @@ __all__ = [
     "RecoveryWindowQuery",
     "RecoveryWindowSurface",
     "ResidualRisk",
+    "RecoveryBehaviorType",
+    "RecoveryProofSurface",
+    "RecoveryProofWindow",
+    "RecoverySignal",
+    "RecoverySignalStatus",
     "sample_all_recovery_residual_risks",
     "TruthPlaneState",
     "sample_recovery_alignment_planes",
@@ -99,4 +112,5 @@ __all__ = [
     "sample_restrict_command_ref",
     "sample_reality_check_command_ref",
     "sample_reality_check_feedback",
+    "get_pressure_intake_recovery_proof_surface",
 ]

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from cygnus.publish import get_pressure_intake_recovery_proof_surface
+from cygnus.recovery import get_pressure_intake_recovery_proof_surface
 
 
 class PublishRecoverySurfaceTests(unittest.TestCase):

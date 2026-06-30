@@ -7,7 +7,6 @@ from cygnus.publish import (
     apply_pressure_intake_publish_action,
     get_pressure_intake_publish_preview_surface,
     get_pressure_intake_publish_propagation_surface,
-    get_pressure_intake_recovery_proof_surface,
     projection_store,
 )
 from cygnus.runtime.services.auth_service import get_current_user, require_admin
@@ -79,16 +78,3 @@ def publish_propagation(
         action_key=action_key,
     ).to_dict()
 
-
-@router.get("/api/recovery-proof")
-def recovery_proof(
-    object_ref: str | None = None,
-    action_key: str | None = None,
-    _current_user=Depends(get_current_user),
-) -> dict[str, object]:
-    """Frontline reality-check surface proving whether a governance command changed support behavior."""
-    return get_pressure_intake_recovery_proof_surface(
-        selected_object_ref=object_ref,
-        records=sample_pressure_intake_records(),
-        action_key=action_key,
-    ).to_dict()

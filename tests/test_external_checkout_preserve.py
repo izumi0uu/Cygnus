@@ -21,8 +21,10 @@ def _load_module():
 external_checkout_preserve = _load_module()
 
 
+
 def _git(cwd: Path, *args: str) -> str:
     return subprocess.check_output(["git", "-C", str(cwd), *args], text=True).strip()
+
 
 
 def _git_ok(cwd: Path, *args: str) -> None:
@@ -68,8 +70,12 @@ class ExternalCheckoutPreserveTests(unittest.TestCase):
             self.assertEqual(artifact.head_commit, head)
             self.assertEqual(len(artifact.ahead_commits), 1)
             self.assertTrue(Path(artifact.manifest_path).is_file())
+            self.assertTrue(Path(artifact.status_path).is_file())
             self.assertTrue(Path(artifact.delta_bundle_path).is_file())
             self.assertTrue(Path(artifact.full_bundle_path).is_file())
+            self.assertTrue(Path(artifact.staged_patch_path).is_file())
+            self.assertTrue(Path(artifact.worktree_patch_path).is_file())
+            self.assertTrue(Path(artifact.untracked_archive_path).is_file())
             self.assertEqual(len(list(Path(artifact.patches_dir).glob("*.patch"))), 1)
 
     def test_verify_delta_bundle_restores_original_head(self) -> None:
@@ -103,6 +109,30 @@ class ExternalCheckoutPreserveTests(unittest.TestCase):
             self.assertEqual(verification.expected_subjects, ["feat: local ahead"])
             self.assertFalse(verification.head_matches_original)
             self.assertTrue(verification.subjects_match_expected)
+            self.assertTrue(Path(verification.restore_dir).exists())
+
+    def test_verify_worktree_state_restores_staged_unstaged_and_untracked_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo, _base, head = self._make_repo_with_ahead_history(root)
+            (repo / "feature.txt").write_text("one\nlocal change\n", encoding="utf-8")
+            (repo / "tracked.txt").write_text("staged\n", encoding="utf-8")
+            _git_ok(repo, "add", "tracked.txt")
+            (repo / "notes.txt").write_text("scratch\n", encoding="utf-8")
+            out = root / "artifacts"
+            artifact = external_checkout_preserve.create_preservation_artifacts(repo, out)
+
+            self.assertEqual(artifact.head_commit, head)
+            self.assertTrue(any(line.startswith(" M feature.txt") for line in artifact.status_lines))
+            self.assertTrue(any(line.startswith("A  tracked.txt") for line in artifact.status_lines))
+            self.assertIn("notes.txt", artifact.untracked_files)
+
+            verification = external_checkout_preserve.verify_worktree_state(repo, artifact, cleanup=False)
+            assert verification is not None
+            self.assertEqual(verification.original_head, head)
+            self.assertEqual(verification.restored_head, head)
+            self.assertEqual(verification.restored_status_lines, artifact.status_lines)
+            self.assertTrue(verification.status_matches_original)
             self.assertTrue(Path(verification.restore_dir).exists())
 
 

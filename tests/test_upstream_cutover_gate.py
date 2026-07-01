@@ -34,12 +34,14 @@ class UpstreamCutoverGateTests(unittest.TestCase):
                 "code_residue_gate",
                 "compat_shrink_gate",
                 "owner_truth_gate",
+                "dependency_internalization_gate",
                 "executable_path_gate",
                 "external_checkout_gate",
                 "docs_truth_gate",
             },
         )
         self.assertTrue(sections["owner_truth_gate"]["ok"])
+        self.assertTrue(sections["dependency_internalization_gate"]["ok"])
         self.assertTrue(sections["executable_path_gate"]["ok"])
         self.assertTrue(sections["external_checkout_gate"]["ok"])
 
@@ -124,6 +126,83 @@ class UpstreamCutoverGateTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(".gitmodules" in item for item in sections["external_checkout_gate"]["failures"])
+            )
+
+    def test_gate_detects_direct_dependency_residue(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            for relative_path, snippets in upstream_cutover_gate.REQUIRED_DOC_SNIPPETS.items():
+                path = root / relative_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("\n".join(snippets), encoding="utf-8")
+
+            for relative_path, snippets in upstream_cutover_gate.OWNER_TRUTH_FILES.items():
+                path = root / relative_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("\n".join(snippets), encoding="utf-8")
+
+            for relative_path in upstream_cutover_gate.EXECUTABLE_PATH_FILES:
+                path = root / relative_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("# executable artifact\n", encoding="utf-8")
+
+            (root / "pyproject.toml").write_text(
+                "[project]\ndependencies = [\"content-core>=1.14.1,<2\"]\n",
+                encoding="utf-8",
+            )
+            (root / "uv.lock").write_text('name = "content-core"\n', encoding="utf-8")
+
+            report = upstream_cutover_gate.build_gate_report(root)
+            sections = {section["name"]: section for section in report["sections"]}
+
+            self.assertFalse(sections["dependency_internalization_gate"]["ok"])
+            self.assertTrue(
+                any("direct dependency `content-core`" in item for item in sections["dependency_internalization_gate"]["failures"])
+            )
+            self.assertTrue(
+                any("forbidden lockfile residue" in item for item in sections["dependency_internalization_gate"]["failures"])
+            )
+
+    def test_gate_detects_runtime_protocol_owner_regression(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            for relative_path, snippets in upstream_cutover_gate.REQUIRED_DOC_SNIPPETS.items():
+                path = root / relative_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("\n".join(snippets), encoding="utf-8")
+
+            for relative_path, snippets in upstream_cutover_gate.OWNER_TRUTH_FILES.items():
+                path = root / relative_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("\n".join(snippets), encoding="utf-8")
+
+            for relative_path in upstream_cutover_gate.EXECUTABLE_PATH_FILES:
+                path = root / relative_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("# executable artifact\n", encoding="utf-8")
+
+            shim_path = root / upstream_cutover_gate.PROTOCOL_OWNER_SHIM
+            shim_path.parent.mkdir(parents=True, exist_ok=True)
+            shim_path.write_text(
+                "from cygnus.substrate.agent_protocol import (\n    AssistantTurn,\n)\n",
+                encoding="utf-8",
+            )
+
+            residue = root / "cygnus/runtime/ai/providers/base.py"
+            residue.parent.mkdir(parents=True, exist_ok=True)
+            residue.write_text(
+                "from cygnus.runtime.ai.agent_protocol import AssistantTurn\n",
+                encoding="utf-8",
+            )
+
+            report = upstream_cutover_gate.build_gate_report(root)
+            sections = {section["name"]: section for section in report["sections"]}
+
+            self.assertFalse(sections["owner_truth_gate"]["ok"])
+            self.assertTrue(
+                any("runtime protocol owner residue" in item for item in sections["owner_truth_gate"]["failures"])
             )
 
 

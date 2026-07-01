@@ -6,10 +6,12 @@ import configparser
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_BASE_REF = "origin/main"
 UPSTREAM_REMOTE_PATTERNS = (
     re.compile(r"github\.com[:/][^\"'\s]*/arkon(?:\.git)?$"),
     re.compile(r"nduckmink/arkon(?:\.git)?$"),
@@ -92,7 +94,43 @@ def is_upstream_origin(url: str | None) -> bool:
     return any(pattern.search(url) for pattern in UPSTREAM_REMOTE_PATTERNS)
 
 
-def classify_repo(repo_path: Path) -> dict[str, object] | None:
+def run_git(repo_path: Path, *args: str) -> str:
+    return subprocess.check_output(["git", "-C", str(repo_path), *args], text=True).strip()
+
+
+def safe_git(repo_path: Path, *args: str) -> tuple[str | None, str | None]:
+    try:
+        return run_git(repo_path, *args), None
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        return None, str(exc)
+
+
+def collect_ahead_commits(repo_path: Path, base_ref: str) -> tuple[list[dict[str, str]], str | None]:
+    raw, error = safe_git(repo_path, "log", "--reverse", "--format=%H%x09%s", f"{base_ref}..HEAD")
+    if error is not None:
+        return [], error
+    if not raw:
+        return [], None
+
+    commits: list[dict[str, str]] = []
+    for line in raw.splitlines():
+        sha, subject = line.split("\t", 1)
+        commits.append({"sha": sha, "subject": subject})
+    return commits, None
+
+
+def collect_status_lines(repo_path: Path) -> tuple[list[str], str | None]:
+    try:
+        raw = subprocess.check_output(
+            ["git", "-C", str(repo_path), "status", "--porcelain=v1"],
+            text=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        return [], str(exc)
+    return [line for line in raw.splitlines() if line], None
+
+
+def classify_repo(repo_path: Path, *, base_ref: str = DEFAULT_BASE_REF) -> dict[str, object] | None:
     origin_url = read_origin_url(repo_path)
     contains_arkon_name = "arkon" in repo_path.name.lower()
     upstream = is_upstream_origin(origin_url)
@@ -100,12 +138,45 @@ def classify_repo(repo_path: Path) -> dict[str, object] | None:
     if not contains_arkon_name and not upstream:
         return None
 
+    branch, branch_error = safe_git(repo_path, "rev-parse", "--abbrev-ref", "HEAD")
+    head_commit, head_error = safe_git(repo_path, "rev-parse", "HEAD")
+    status_lines, status_error = collect_status_lines(repo_path)
+    ahead_commits, ahead_error = collect_ahead_commits(repo_path, base_ref)
+
+    untracked_files = [line[3:] for line in status_lines if line.startswith("?? ")]
+    has_tracked_dirty = any(not line.startswith("?? ") for line in status_lines)
+    preservation_reasons: list[str] = []
+    if ahead_commits:
+        preservation_reasons.append(f"{len(ahead_commits)} ahead commit(s)")
+    if has_tracked_dirty:
+        preservation_reasons.append("dirty tracked worktree changes")
+    if untracked_files:
+        preservation_reasons.append(f"{len(untracked_files)} untracked file(s)")
+
+    inspection_errors = [
+        error
+        for error in (branch_error, head_error, status_error, ahead_error)
+        if error is not None
+    ]
+
     return {
         "path": str(repo_path),
         "repo_name": repo_path.name,
         "contains_arkon_name": contains_arkon_name,
         "origin_url": origin_url,
         "is_upstream_origin": upstream,
+        "branch": branch,
+        "head_commit": head_commit,
+        "base_ref": base_ref,
+        "ahead_commit_count": len(ahead_commits),
+        "ahead_commits": ahead_commits,
+        "status_lines": status_lines,
+        "untracked_files": untracked_files,
+        "has_tracked_dirty": has_tracked_dirty,
+        "requires_preservation": bool(preservation_reasons),
+        "preservation_reasons": preservation_reasons,
+        "physical_delete_blocked": True,
+        "inspection_errors": inspection_errors,
     }
 
 
@@ -113,6 +184,7 @@ def audit_external_checkouts(
     search_roots: list[Path] | None = None,
     *,
     max_depth: int = 4,
+    base_ref: str = DEFAULT_BASE_REF,
 ) -> dict[str, object]:
     roots = search_roots or default_search_roots()
     seen_paths: set[Path] = set()
@@ -124,15 +196,17 @@ def audit_external_checkouts(
             if resolved in seen_paths:
                 continue
             seen_paths.add(resolved)
-            classified = classify_repo(resolved)
+            classified = classify_repo(resolved, base_ref=base_ref)
             if classified is not None:
                 checkouts.append(classified)
 
     checkouts.sort(key=lambda item: str(item["path"]))
     return {
         "audit_name": "external_checkout_audit",
+        "base_ref": base_ref,
         "search_roots": [str(path) for path in roots],
         "checkout_count": len(checkouts),
+        "requires_preservation_count": sum(1 for item in checkouts if item["requires_preservation"]),
         "checkouts": checkouts,
     }
 
@@ -154,6 +228,11 @@ def main() -> int:
         help="Maximum directory depth to search under each root.",
     )
     parser.add_argument(
+        "--base-ref",
+        default=DEFAULT_BASE_REF,
+        help="Base ref used to detect ahead commits. Default: origin/main",
+    )
+    parser.add_argument(
         "--fail-if-found",
         action="store_true",
         help="Return exit code 1 when any external checkout is found.",
@@ -167,7 +246,7 @@ def main() -> int:
 
     explicit_roots = [Path(value).expanduser().resolve() for value in args.search_root]
     search_roots = explicit_roots or default_search_roots()
-    payload = audit_external_checkouts(search_roots, max_depth=args.max_depth)
+    payload = audit_external_checkouts(search_roots, max_depth=args.max_depth, base_ref=args.base_ref)
 
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
@@ -175,10 +254,12 @@ def main() -> int:
         print("[external-checkout-audit]")
         print(f"- search roots: {', '.join(payload['search_roots'])}")
         print(f"- external checkout count: {payload['checkout_count']}")
+        print(f"- requires preservation: {payload['requires_preservation_count']}")
         for item in payload["checkouts"]:
             print(
                 f"  - {item['path']} "
-                f"(name_match={item['contains_arkon_name']}, upstream_origin={item['is_upstream_origin']})"
+                f"(name_match={item['contains_arkon_name']}, upstream_origin={item['is_upstream_origin']}, "
+                f"preserve={item['requires_preservation']})"
             )
 
     if args.fail_if_found and payload["checkout_count"] > 0:

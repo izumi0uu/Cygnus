@@ -14,6 +14,8 @@ BOUNDARY_FILES = [
     "docs/agent/en/execution-context.md",
     ".codex/skills/cygnus-jira-execution/SKILL.md",
     "scripts/upstream_cutover_gate.py",
+    "scripts/external_checkout_audit.py",
+    "scripts/external_checkout_preserve.py",
 ]
 
 
@@ -59,12 +61,16 @@ def test_completion_states_remain_explicit() -> None:
             "#### 5.5.1 Readiness gate checklist",
             "`scripts/upstream_cutover_gate.py` 通过",
             "Jira 不再把“继续依赖外部 Arkon”当成默认前提",
+            "`scripts/external_checkout_preserve.py`",
+            "`scripts/external_checkout_audit.py --fail-if-found`",
         ],
         "docs/en/arkon-internalization-plan.md": [
             "### 5.5 Upstream deletion readiness",
             "#### 5.5.1 Readiness gate checklist",
             "`scripts/upstream_cutover_gate.py` passes",
             "Jira no longer assumes “continue depending on external Arkon” as the default premise",
+            "`scripts/external_checkout_preserve.py`",
+            "`scripts/external_checkout_audit.py --fail-if-found`",
         ],
         "docs/zh/jira-project-configuration-plan.md": [
             "### 8.3 延期 shell parity lane",
@@ -93,6 +99,8 @@ def test_completion_states_remain_explicit() -> None:
             "internalized substrate",
             "implemented support verticalization",
             "deletion-readiness gate",
+            "`scripts/external_checkout_preserve.py`",
+            "`scripts/external_checkout_audit.py`",
             "### D. Deferred shell-parity lane",
             "classify `auth / admin / wiki` shell candidates",
             "support-relevant shell candidates",
@@ -108,6 +116,8 @@ def test_completion_states_remain_explicit() -> None:
             "deletion-readiness gate",
             "`scripts/upstream_cutover_gate.py` 通过之前",
             "不能把 cutover 叙事写成 shell parity 或 P3",
+            "`scripts/external_checkout_preserve.py`",
+            "`scripts/external_checkout_audit.py --fail-if-found`",
         ],
         "docs/agent/en/execution-context.md": [
             "Status-language contract",
@@ -118,6 +128,8 @@ def test_completion_states_remain_explicit() -> None:
             "deletion-readiness gate",
             "before `scripts/upstream_cutover_gate.py` passes",
             "must not describe cutover as shell parity or P3",
+            "before any destructive deletion proposal",
+            "`scripts/external_checkout_audit.py --fail-if-found` remains the physical-deletion proof",
         ],
     }
 
@@ -135,6 +147,10 @@ def test_mainline_has_no_direct_langgraph_or_langchain_dependencies() -> None:
         dependency.startswith("langgraph") or dependency.startswith("langchain")
         for dependency in dependencies
     )
+    assert not any(
+        dependency.startswith("content-core")
+        for dependency in dependencies
+    )
 
 
 def test_mainline_docs_code_and_skills_do_not_reintroduce_langgraph_or_langchain() -> None:
@@ -148,6 +164,7 @@ def test_mainline_docs_code_and_skills_do_not_reintroduce_langgraph_or_langchain
         "docs/agent/zh/execution-context.md",
         "docs/agent/en/execution-context.md",
         ".codex/skills/cygnus-jira-execution/SKILL.md",
+        "scripts/upstream_cutover_gate.py",
     }
 
     for root in scan_roots:
@@ -188,5 +205,6 @@ def test_legacy_scope_seam_was_removed_from_current_mainline() -> None:
 def test_langgraph_lockfile_residue_stays_non_authoritative() -> None:
     lock_text = Path("uv.lock").read_text(encoding="utf-8")
 
-    if 'name = "langgraph"' in lock_text or 'name = "langchain-core"' in lock_text:
-        assert 'name = "content-core"' in lock_text
+    assert 'name = "content-core"' not in lock_text
+    assert 'name = "langgraph"' not in lock_text
+    assert 'name = "langchain-core"' not in lock_text

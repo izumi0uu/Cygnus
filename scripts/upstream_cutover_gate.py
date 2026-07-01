@@ -5,6 +5,7 @@ import argparse
 import json
 import re
 import sys
+import tomllib
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -41,6 +42,8 @@ REQUIRED_DOC_SNIPPETS = {
         "所有 gate item 都为 green",
         "`scripts/upstream_cutover_gate.py` 通过",
         "Jira 不再把“继续依赖外部 Arkon”当成默认前提",
+        "`scripts/external_checkout_preserve.py`",
+        "`scripts/external_checkout_audit.py --fail-if-found`",
     ],
     "docs/en/arkon-internalization-plan.md": [
         "### 5.5 Upstream deletion readiness",
@@ -48,21 +51,29 @@ REQUIRED_DOC_SNIPPETS = {
         "all gate items remain green",
         "`scripts/upstream_cutover_gate.py` passes",
         "Jira no longer assumes “continue depending on external Arkon” as the default premise",
+        "`scripts/external_checkout_preserve.py`",
+        "`scripts/external_checkout_audit.py --fail-if-found`",
     ],
     "docs/agent/zh/execution-context.md": [
         "deletion-readiness gate",
         "`scripts/upstream_cutover_gate.py` 通过之前",
         "不能把 cutover 叙事写成 shell parity 或 P3",
+        "`scripts/external_checkout_preserve.py`",
+        "`scripts/external_checkout_audit.py --fail-if-found`",
     ],
     "docs/agent/en/execution-context.md": [
         "deletion-readiness gate",
         "before `scripts/upstream_cutover_gate.py` passes",
         "must not describe cutover as shell parity or P3",
+        "`scripts/external_checkout_preserve.py`",
+        "`scripts/external_checkout_audit.py --fail-if-found`",
     ],
     ".codex/skills/cygnus-jira-execution/SKILL.md": [
         "deletion-readiness gate",
         "upstream cutover started",
         "must not imply support verticalization or shell parity",
+        "`scripts/external_checkout_preserve.py`",
+        "`scripts/external_checkout_audit.py`",
     ],
 }
 OWNER_TRUTH_FILES = {
@@ -91,6 +102,32 @@ EXECUTABLE_PATH_FILES = (
     "cygnus/workflows/golden_path.py",
     "tests/test_workflows_golden_path.py",
     "tests/test_app_assembly_recovery.py",
+    "scripts/external_checkout_audit.py",
+    "scripts/external_checkout_preserve.py",
+    "tests/test_external_checkout_audit.py",
+    "tests/test_external_checkout_preserve.py",
+)
+PROTOCOL_OWNER_SHIM = "cygnus/runtime/ai/agent_protocol.py"
+FORBIDDEN_RUNTIME_PROTOCOL_IMPORT_PATTERNS = (
+    re.compile(r"\bfrom\s+cygnus\.runtime\.ai\.agent_protocol\s+import\b"),
+    re.compile(r"\bimport\s+cygnus\.runtime\.ai\.agent_protocol\b"),
+    re.compile(r"\bfrom\s+cygnus\.runtime\.ai\s+import\s+agent_protocol\b"),
+    re.compile(r"\bfrom\s+\.agent_protocol\s+import\b"),
+)
+FORBIDDEN_DIRECT_DEPENDENCIES = (
+    "content-core",
+    "langgraph",
+    "langchain",
+    "langchain-core",
+)
+FORBIDDEN_LOCK_PACKAGES = (
+    'name = "content-core"',
+    'name = "langgraph"',
+    'name = "langgraph-checkpoint"',
+    'name = "langgraph-prebuilt"',
+    'name = "langgraph-sdk"',
+    'name = "langchain-core"',
+    'name = "langchain-protocol"',
 )
 
 
@@ -233,6 +270,38 @@ def check_owner_truth(repo_root: Path) -> list[str]:
         for snippet in snippets:
             if snippet not in text:
                 failures.append(f"{relative_path}: missing owner-truth snippet `{snippet}`")
+    failures.extend(check_protocol_owner_convergence(repo_root))
+    return failures
+
+
+def check_protocol_owner_convergence(repo_root: Path) -> list[str]:
+    failures: list[str] = []
+
+    shim_path = repo_root / PROTOCOL_OWNER_SHIM
+    if not shim_path.exists():
+        failures.append(f"{PROTOCOL_OWNER_SHIM}: missing runtime compatibility shim")
+        return failures
+
+    shim_text = shim_path.read_text(encoding="utf-8")
+    if "from cygnus.substrate.agent_protocol import (" not in shim_text:
+        failures.append(
+            f"{PROTOCOL_OWNER_SHIM}: runtime compatibility shim must re-export the substrate protocol owner"
+        )
+
+    for path in (repo_root / "cygnus").rglob("*.py"):
+        relative_path = path.relative_to(repo_root).as_posix()
+        if relative_path == PROTOCOL_OWNER_SHIM:
+            continue
+
+        file_text = path.read_text(encoding="utf-8")
+        for lineno, line in enumerate(file_text.splitlines(), 1):
+            for pattern in FORBIDDEN_RUNTIME_PROTOCOL_IMPORT_PATTERNS:
+                if pattern.search(line):
+                    failures.append(
+                        f"{relative_path}:{lineno}: runtime protocol owner residue `{pattern.pattern}`"
+                    )
+                    break
+
     return failures
 
 
@@ -242,6 +311,37 @@ def check_executable_path(repo_root: Path) -> list[str]:
         path = repo_root / relative_path
         if not path.exists():
             failures.append(f"{relative_path}: missing executable-path artifact")
+    return failures
+
+
+def check_internalized_dependencies(repo_root: Path) -> list[str]:
+    failures: list[str] = []
+
+    pyproject_path = repo_root / "pyproject.toml"
+    if pyproject_path.exists():
+        project = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+        dependencies = [
+            str(dependency).lower()
+            for dependency in project.get("project", {}).get("dependencies", [])
+        ]
+        for forbidden in FORBIDDEN_DIRECT_DEPENDENCIES:
+            if any(
+                dependency == forbidden or dependency.startswith(f"{forbidden}>") or dependency.startswith(f"{forbidden}<") or dependency.startswith(f"{forbidden}=")
+                for dependency in dependencies
+            ):
+                failures.append(
+                    f"pyproject.toml: direct dependency `{forbidden}` must stay removed after substrate internalization"
+                )
+
+    lock_path = repo_root / "uv.lock"
+    if lock_path.exists():
+        lock_text = lock_path.read_text(encoding="utf-8")
+        for forbidden in FORBIDDEN_LOCK_PACKAGES:
+            if forbidden in lock_text:
+                failures.append(
+                    f"uv.lock: forbidden lockfile residue `{forbidden}` must stay absent after substrate internalization"
+                )
+
     return failures
 
 
@@ -267,6 +367,11 @@ def build_gate_suite(repo_root: Path | None = None) -> list[GateSectionResult]:
             name="owner_truth_gate",
             description="Canonical Cygnus runtime owners and package boundaries remain frozen.",
             failures=tuple(check_owner_truth(resolved_root)),
+        ),
+        GateSectionResult(
+            name="dependency_internalization_gate",
+            description="Cygnus-owned substrate stays free of generic external extraction/graph runtime dependencies.",
+            failures=tuple(check_internalized_dependencies(resolved_root)),
         ),
         GateSectionResult(
             name="executable_path_gate",

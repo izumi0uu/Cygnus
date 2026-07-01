@@ -26,9 +26,9 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
-          <Route path="/demo/plotter" element={<PlotterDemo />} />
-          <Route path="/demo/mastermind" element={<Mastermind />} />
           <Route element={<RequireAuth />}>
+            <Route path="/demo/plotter" element={<PlotterDemo />} />
+            <Route path="/demo/mastermind" element={<Mastermind />} />
             <Route path="/console" element={<AppShell />}>
               <Route index element={<Overview />} />
               <Route path="queue" element={<ReviewQueue />} />

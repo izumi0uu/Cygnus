@@ -799,7 +799,7 @@ async def _write_page_complex(
     Mini agent loop for pages with many evidence items or large existing content.
     Returns (content_md, summary, citations_meta).
     """
-    from cygnus.runtime.ai.agent_protocol import assistant_message_from_turn, tool_results_message
+    from cygnus.substrate.agent_protocol import assistant_message_from_turn, tool_results_message
     from cygnus.runtime.services import wiki_service
 
     scope_type = source.scope_type or "global"
@@ -846,7 +846,7 @@ async def _write_page_complex(
     result_summary = None
 
     for step in range(WRITER_AGENT_MAX_STEPS):
-        from cygnus.runtime.ai.agent_protocol import AssistantTurn
+        from cygnus.substrate.agent_protocol import AssistantTurn
         try:
             turn: AssistantTurn = await asyncio.wait_for(
                 llm.generate_with_tools(

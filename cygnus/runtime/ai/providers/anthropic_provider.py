@@ -6,7 +6,7 @@ Supports: Claude Sonnet, Claude Haiku, Claude Opus, etc.
 
 from typing import Optional
 
-from cygnus.runtime.ai.agent_protocol import (
+from cygnus.substrate.agent_protocol import (
     AssistantTurn,
     ToolCall,
     neutral_to_anthropic_messages,

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import unittest
 
+from cygnus.runtime.ai import agent_protocol as runtime_protocol
 from cygnus.substrate.agent_protocol import (
     AssistantTurn,
     ToolCall,
     ToolDefinition,
     assistant_message_from_turn,
+    neutral_to_anthropic_messages,
     neutral_to_openai_messages,
     openai_tools_to_anthropic,
     tool_results_message,
@@ -40,6 +42,31 @@ class AgentProtocolTests(unittest.TestCase):
         self.assertEqual(openai_messages[0]["tool_calls"][0]["function"]["name"], "validate_publish_policy")
         self.assertEqual(openai_messages[1]["role"], "tool")
 
+    def test_neutral_messages_project_to_anthropic_tool_shapes(self) -> None:
+        turn = AssistantTurn(
+            text="Checking publish policy.",
+            tool_calls=(
+                ToolCall(
+                    id="call-3",
+                    name="validate_publish_policy",
+                    arguments={"draft_id": "draft-3"},
+                ),
+            ),
+            finish_reason="tool_use",
+        )
+
+        anthropic_messages = neutral_to_anthropic_messages(
+            [
+                assistant_message_from_turn(turn),
+                tool_results_message([("call-3", "validate_publish_policy", {"status": "ok"})]),
+            ]
+        )
+
+        self.assertEqual(anthropic_messages[0]["role"], "assistant")
+        self.assertEqual(anthropic_messages[0]["content"][0]["type"], "text")
+        self.assertEqual(anthropic_messages[0]["content"][1]["type"], "tool_use")
+        self.assertEqual(anthropic_messages[1]["content"][0]["type"], "tool_result")
+
     def test_openai_tools_can_be_projected_to_anthropic_shape(self) -> None:
         definition = ToolDefinition(
             name="search_support_evidence",
@@ -52,6 +79,11 @@ class AgentProtocolTests(unittest.TestCase):
 
         self.assertEqual(anthropic_tools[0]["name"], "search_support_evidence")
         self.assertIn("input_schema", anthropic_tools[0])
+
+    def test_runtime_shim_points_to_substrate_owner(self) -> None:
+        self.assertIs(runtime_protocol.AssistantTurn, AssistantTurn)
+        self.assertIs(runtime_protocol.ToolCall, ToolCall)
+        self.assertIs(runtime_protocol.neutral_to_openai_messages, neutral_to_openai_messages)
 
     def test_registry_dispatches_tools_without_provider_specific_message_shape(self) -> None:
         registry = ToolRegistry()

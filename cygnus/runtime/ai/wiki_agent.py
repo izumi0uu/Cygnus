@@ -13,7 +13,7 @@ from typing import Any, Awaitable, Callable, Optional
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cygnus.runtime.ai.agent_protocol import (
+from cygnus.substrate.agent_protocol import (
     AssistantTurn,
     assistant_message_from_turn,
     tool_results_message,

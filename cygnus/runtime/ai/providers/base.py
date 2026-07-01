@@ -11,7 +11,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
-    from cygnus.runtime.ai.agent_protocol import AssistantTurn
+    from cygnus.substrate.agent_protocol import AssistantTurn
 
 
 # ---------------------------------------------------------------------------

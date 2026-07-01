@@ -13,7 +13,7 @@ from typing import Optional
 
 from loguru import logger
 
-from cygnus.runtime.ai.agent_protocol import (
+from cygnus.substrate.agent_protocol import (
     AssistantTurn,
     ToolCall,
     neutral_to_gemini_contents,

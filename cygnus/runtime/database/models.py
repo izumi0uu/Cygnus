@@ -1173,8 +1173,7 @@ class SkillContribution(Base):
         comment="Version number this contribution was forked from. Null for new skills.",
     )
     status: Mapped[str] = mapped_column(
-        String(20), default=SkillContributionStatus.DRAFT.value,
-        index=True
+        String(20), default=SkillContributionStatus.DRAFT.value
     )
     # Increments each time the contributor resubmits after needs_revision.
     revision_round: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -1301,4 +1300,3 @@ class StatsDailyRollup(Base):
         Index("ix_stats_rollup_date", "date"),
         Index("ix_stats_rollup_metric", "metric_key", "date"),
     )
-

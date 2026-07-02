@@ -5,6 +5,7 @@ Ownership:
 - this package is runtime bootstrap behavior, not repo-tooling scripts
 """
 
+from cygnus.runtime.bootstrap.init_local_stack import bootstrap_local_stack
 from cygnus.runtime.bootstrap.seed_builtin_skills import seed_builtin_skills
 
-__all__ = ["seed_builtin_skills"]
+__all__ = ["bootstrap_local_stack", "seed_builtin_skills"]

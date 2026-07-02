@@ -17,6 +17,7 @@ __pycache__/
 # Local env (secrets) — the .env.example template is tracked, real .env is not
 .env
 .env.local
+.env.docker.local
 
 # Local prototype exports
 prototypes/

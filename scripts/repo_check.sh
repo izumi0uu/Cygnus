@@ -30,6 +30,7 @@ echo "[repo-check] Unit tests"
 
 echo "[repo-check] Shell syntax"
 sh -n scripts/install_git_hooks.sh
+sh -n scripts/docker_smoke.sh
 sh -n scripts/repo_check.sh
 sh -n .githooks/commit-msg
 sh -n .githooks/pre-push

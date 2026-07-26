@@ -13,6 +13,8 @@ from cygnus.integrations.notification_dispatch import dispatch_external
 from cygnus.integrations.oauth_service import OAuthService
 from cygnus.integrations.nanobot_tools import (
     build_default_tool_registry,
+    configure_governed_knowledge,
+    configure_governed_knowledge_from_substrate,
     get_downstream_reality_check,
     get_governance_overview,
     get_recovery_window,
@@ -22,6 +24,7 @@ from cygnus.integrations.nanobot_tools import (
     publish_knowledge_object,
     read_knowledge_object,
     request_review,
+    reset_governed_knowledge,
     search_knowledge_objects,
     search_support_evidence,
     validate_publish_policy,
@@ -33,6 +36,8 @@ __all__ = [
     "ResolvedIdentity",
     "apply_scope_filter",
     "build_default_tool_registry",
+    "configure_governed_knowledge",
+    "configure_governed_knowledge_from_substrate",
     "dispatch_external",
     "get_downstream_reality_check",
     "get_governance_overview",
@@ -43,6 +48,7 @@ __all__ = [
     "publish_knowledge_object",
     "read_knowledge_object",
     "request_review",
+    "reset_governed_knowledge",
     "search_knowledge_objects",
     "search_support_evidence",
     "validate_publish_policy",

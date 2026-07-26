@@ -9,6 +9,12 @@ from fastapi.testclient import TestClient
 from cygnus.runtime.main import app
 from cygnus.runtime.services.auth_service import get_current_user, require_admin
 from cygnus.publish import clear_publish_projections
+from cygnus.retrieval import (
+    SubstrateKnowledgeSnapshot,
+    sample_knowledge_objects,
+    sample_support_evidence,
+)
+from cygnus.runtime.routers.governance.knowledge_graph import get_substrate_snapshot
 
 
 class CommandCenterApiTests(unittest.TestCase):
@@ -29,6 +35,10 @@ class CommandCenterApiTests(unittest.TestCase):
         for patcher in self.patches:
             patcher.start()
         self.client = TestClient(app)
+        app.dependency_overrides[get_substrate_snapshot] = lambda: SubstrateKnowledgeSnapshot(
+            objects=sample_knowledge_objects(),
+            evidence=sample_support_evidence(),
+        )
 
     def tearDown(self) -> None:
         self.client.close()

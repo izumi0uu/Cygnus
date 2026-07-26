@@ -4,6 +4,7 @@ import unittest
 
 from cygnus.integrations.nanobot_tools import (
     build_default_tool_registry,
+    configure_governed_knowledge,
     get_downstream_reality_check,
     get_governance_overview,
     get_recovery_window,
@@ -13,15 +14,31 @@ from cygnus.integrations.nanobot_tools import (
     publish_knowledge_object,
     read_knowledge_object,
     request_review,
+    reset_governed_knowledge,
     search_knowledge_objects,
     search_support_evidence,
     validate_publish_policy,
 )
+from cygnus.retrieval import sample_knowledge_objects, sample_support_evidence
 from cygnus.substrate.agent_protocol import ToolCall
 from cygnus.substrate.tool_runtime import dispatch_tool_calls
 
 
 class NanobotToolIntegrationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        configure_governed_knowledge(
+            objects=sample_knowledge_objects(),
+            evidence=sample_support_evidence(),
+        )
+
+    def tearDown(self) -> None:
+        reset_governed_knowledge()
+
+    def test_unconfigured_governed_tools_raise(self) -> None:
+        reset_governed_knowledge()
+        with self.assertRaises(RuntimeError):
+            search_knowledge_objects(query="refund")
+
     def test_tools_return_structured_contracts(self) -> None:
         retrieval = search_knowledge_objects(
             query="invoice export rollout",

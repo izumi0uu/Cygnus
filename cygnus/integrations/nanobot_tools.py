@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from functools import lru_cache
-from typing import Any
+from typing import TYPE_CHECKING, Any, Iterable
 
 from cygnus.domain import AudienceContext, LifecycleState, Visibility
 from cygnus.domain.objects import AnswerCard, EscalationRoute, KnowledgeObject, KnownIssuePage, PolicyRule, TroubleshootingFlow
+from cygnus.evidence.records import SupportEvidence
 from cygnus.recovery import (
     DownstreamRealityCheckQuery,
     GovernanceOverviewQuery,
@@ -16,8 +16,8 @@ from cygnus.recovery import (
 from cygnus.retrieval import (
     EvidenceIndex,
     KnowledgeObjectIndex,
-    sample_knowledge_objects,
-    sample_support_evidence,
+    SubstrateKnowledgeSnapshot,
+    load_substrate_snapshot,
     slugify,
 )
 from cygnus.review.drift import get_drift_governance_surface
@@ -25,15 +25,61 @@ from cygnus.review.fixtures import sample_review_bundles
 from cygnus.substrate.agent_protocol import ToolDefinition
 from cygnus.substrate.tool_runtime import ToolRegistry
 
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
-@lru_cache(maxsize=1)
+_UNCONFIGURED_MESSAGE = (
+    "governed knowledge is not configured; call configure_governed_knowledge(...) "
+    "or configure_governed_knowledge_from_substrate(session) first"
+)
+
+_object_index_state: KnowledgeObjectIndex | None = None
+_evidence_index_state: EvidenceIndex | None = None
+
+
+def configure_governed_knowledge(
+    *,
+    objects: Iterable[KnowledgeObject],
+    evidence: Iterable[SupportEvidence],
+) -> None:
+    """Install the governed object/evidence truth used by the tool surface.
+
+    Runtime wiring must install substrate-backed truth (see
+    ``configure_governed_knowledge_from_substrate``); tests may inject
+    fixtures explicitly. There is no implicit sample fallback.
+    """
+    global _object_index_state, _evidence_index_state
+    evidence_tuple = tuple(evidence)
+    _object_index_state = KnowledgeObjectIndex(tuple(objects), evidence_tuple)
+    _evidence_index_state = EvidenceIndex(evidence_tuple)
+
+
+async def configure_governed_knowledge_from_substrate(
+    session: "AsyncSession",
+) -> SubstrateKnowledgeSnapshot:
+    """Load substrate truth and install it as the governed tool-surface truth."""
+    snapshot = await load_substrate_snapshot(session)
+    configure_governed_knowledge(objects=snapshot.objects, evidence=snapshot.evidence)
+    return snapshot
+
+
+def reset_governed_knowledge() -> None:
+    """Clear the installed governed truth (test isolation / rewiring)."""
+    global _object_index_state, _evidence_index_state
+    _object_index_state = None
+    _evidence_index_state = None
+
+
 def _knowledge_object_index() -> KnowledgeObjectIndex:
-    return KnowledgeObjectIndex(sample_knowledge_objects(), sample_support_evidence())
+    if _object_index_state is None:
+        raise RuntimeError(_UNCONFIGURED_MESSAGE)
+    return _object_index_state
 
 
-@lru_cache(maxsize=1)
 def _evidence_index() -> EvidenceIndex:
-    return EvidenceIndex(sample_support_evidence())
+    if _evidence_index_state is None:
+        raise RuntimeError(_UNCONFIGURED_MESSAGE)
+    return _evidence_index_state
 
 
 

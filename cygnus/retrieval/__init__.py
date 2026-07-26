@@ -20,6 +20,14 @@ from cygnus.retrieval.sample_data import sample_knowledge_objects, sample_suppor
 from cygnus.retrieval.semantic_search import search_pages_semantic, search_source_chunks_semantic
 from cygnus.retrieval.source_chunks import VerbatimChunk, build_verbatim_chunks, index_verbatim_source
 from cygnus.retrieval.source_trace import SourceTraceResolver, collect_evidence_links
+from cygnus.retrieval.substrate_provider import (
+    SubstrateKnowledgeSnapshot,
+    build_substrate_snapshot,
+    load_substrate_snapshot,
+    resolve_object_type,
+    source_to_support_evidence,
+    wiki_page_to_knowledge_object,
+)
 
 __all__ = [
     "EvidenceHit",
@@ -28,6 +36,8 @@ __all__ = [
     "KnowledgeObjectIndex",
     "SourceTrace",
     "SourceTraceResolver",
+    "SubstrateKnowledgeSnapshot",
+    "build_substrate_snapshot",
     "collect_evidence_links",
     "excerpt_ref_for",
     "freshness_rollup",
@@ -39,4 +49,8 @@ __all__ = [
     "VerbatimChunk",
     "build_verbatim_chunks",
     "index_verbatim_source",
+    "load_substrate_snapshot",
+    "resolve_object_type",
+    "source_to_support_evidence",
+    "wiki_page_to_knowledge_object",
 ]

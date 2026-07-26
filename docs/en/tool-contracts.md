@@ -502,9 +502,9 @@ This section reconciles the current implementation in `cygnus/integrations/nanob
 The goal is to avoid reading the target contract above as if the code were already complete.
 
 ### 13.1 Capabilities actually fulfilled today
-- **Group A — Retrieval (4/4):** `search_knowledge_objects` / `read_knowledge_object` / `search_support_evidence` / `get_source_trace`, wired to real indexes (`object_index` / `evidence_index` / `source_trace`). This is the part closest to real product semantics today.
+- **Group A — Retrieval (4/4):** `search_knowledge_objects` / `read_knowledge_object` / `search_support_evidence` / `get_source_trace`, wired to real indexes (`object_index` / `evidence_index` / `source_trace`); since CYG-97 the index data comes from substrate truth — the runtime must install it via `configure_governed_knowledge_from_substrate(session)` (wiki pages + ready sources projected by `cygnus/retrieval/substrate_provider.py`), and sample fixtures exist only as test injection with no implicit fallback. `/api/knowledge-graph` and `/api/traceability/{id}` read the same DB-backed snapshot. This remains the part closest to real product semantics today.
 - **Group B — Draft/Review (2/4):** only `propose_knowledge_object` and `request_review` are callable, and both are currently **placeholder stubs** (correct return shape, but no persistence and no queue insertion). So they fulfill interface shape, not durable governance-state changes.
-- **Group C — Governance (3/4):** `validate_publish_policy` and `publish_knowledge_object` are callable but still **placeholder stubs** (approval = an internal/external check on the `target_channel` string); `list_drift_alerts` is wired to the real drift governance surface.
+- **Group C — Governance (3/4):** `validate_publish_policy` and `publish_knowledge_object` are callable but still **placeholder stubs** (approval = an internal/external check on the `target_channel` string); `list_drift_alerts` is wired to the real drift governance surface (its bundle data still defaults to sample fixtures until the CYG-97 review-bundle plane switch).
 
 ### 13.2 Target interfaces not yet fulfilled
 - `update_draft_object` (Group B, R1)

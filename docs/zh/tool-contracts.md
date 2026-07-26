@@ -502,9 +502,9 @@ Nanobot 只消费结果，不拥有检索真相。
 不要把本文件前半部分的目标接口，误读成当前代码已经全部完成。
 
 ### 13.1 当前真正已兑现的能力
-- **Group A — Retrieval（4/4）**：`search_knowledge_objects` / `read_knowledge_object` / `search_support_evidence` / `get_source_trace`，已接入真实索引（`object_index` / `evidence_index` / `source_trace`）。这是当前最接近真实产品语义的一组接口。
+- **Group A — Retrieval（4/4）**：`search_knowledge_objects` / `read_knowledge_object` / `search_support_evidence` / `get_source_trace`，已接入真实索引（`object_index` / `evidence_index` / `source_trace`）；且自 CYG-97 起索引数据来自 substrate 真相——运行时必须通过 `configure_governed_knowledge_from_substrate(session)` 装载（wiki pages + ready sources 经 `cygnus/retrieval/substrate_provider.py` 投影），sample fixtures 仅存在于测试注入路径，无隐式回退。`/api/knowledge-graph` 与 `/api/traceability/{id}` 读同一份 DB-backed snapshot。这是当前最接近真实产品语义的一组接口。
 - **Group B — Draft/Review（2/4）**：仅 `propose_knowledge_object`、`request_review` 可调用，但当前仍是**占位桩**（返回结构正确，但不落库、不入队），因此只兑现了“接口形状”，没有兑现“治理状态变更”。
-- **Group C — Governance（3/4）**：`validate_publish_policy`、`publish_knowledge_object` 可调用，但当前仍是**占位桩**（审批 = 按 `target_channel` 字符串判定 internal/external）；`list_drift_alerts` 已接入真实 drift 治理面。
+- **Group C — Governance（3/4）**：`validate_publish_policy`、`publish_knowledge_object` 可调用，但当前仍是**占位桩**（审批 = 按 `target_channel` 字符串判定 internal/external）；`list_drift_alerts` 已接入真实 drift 治理面（其 bundle 数据仍默认 sample fixtures，待 CYG-97 review-bundle 平面切换）。
 
 ### 13.2 尚未兑现的目标接口
 - `update_draft_object`（Group B，R1）

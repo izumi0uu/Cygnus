@@ -4,12 +4,6 @@ CLAUDE.md
 .codex/
 .claude/
 
-# Local product documentation drafts
-DESIGN.md
-docs/
-README.md
-frontend/README.md
-
 # Local test/runtime cache
 __pycache__/
 *.pyc
@@ -31,10 +25,9 @@ prototypes/
 frontend/public/fonts/thunder.woff2
 
 
-# Local venv / OMX state / tool caches
+# Local venv / tool caches
 .venv/
 .venv-runability/
-.omx/
 .pytest_cache/
 .uv-cache/
 .ruff_cache/

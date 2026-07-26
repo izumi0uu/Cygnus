@@ -1,0 +1,164 @@
+# Support Brain for SaaS — Agent 执行上下文
+
+## 1. 目的
+本文件给后续 agent 一个稳定、简洁、可执行的产品语境，避免后续实现或扩写时把项目带偏。
+
+## 2. Source of truth 优先级
+1. `docs/zh/prd.md` / `docs/en/prd.md`
+2. `docs/zh/domain-model.md` / `docs/en/domain-model.md`
+3. `docs/zh/workflows.md` / `docs/en/workflows.md`
+4. `docs/zh/information-architecture.md` / `docs/en/information-architecture.md`
+5. `docs/zh/architecture.md` / `docs/en/architecture.md`
+6. `docs/zh/tool-contracts.md` / `docs/en/tool-contracts.md`
+7. `docs/zh/loop-boundaries.md` / `docs/en/loop-boundaries.md`
+8. `docs/zh/open-questions.md` / `docs/en/open-questions.md`
+9. `docs/zh/agent-harness.md` / `docs/en/agent-harness.md`
+10. `docs/zh/eval-plan.md` / `docs/en/eval-plan.md`
+11. `docs/zh/rag-strategy.md` / `docs/en/rag-strategy.md`
+12. `docs/zh/arkon-full-port-migration-plan.md` / `docs/en/arkon-full-port-migration-plan.md`
+13. `.omx/plans/ralplan-cygnus-arkon-full-port-baseline-consensus.md`
+
+如果文件之间冲突：
+- 以 PRD 的产品定位为上位约束
+- 以 domain model 约束对象命名
+- 以 workflows 约束生命周期逻辑
+- open questions 中列出的未决项，不允许在实现中假装已定
+- harness / eval 文档属于实现指导，不得覆盖更高位的产品与边界文档
+- full-port migration plan 约束当前工程顺序，不允许回退成选择性抽取真相
+
+## 3. 核心定位不变量
+后续任何实现、扩写、页面设计、技术方案都必须保留：
+- 这是 **support knowledge operating system**
+- 这是一个 **Arkon-enhanced** 的 support 产品，不是与 Arkon 脱钩重造
+- 它不是 generic RAG 产品
+- 它不是 another customer-facing support bot
+- 第一阶段优先 internal copilot + knowledge compiler
+- review / publish / traceability 是中心，而非附属功能
+- Nanobot 是唯一 general-purpose session loop
+- Cygnus 内部工作流编排只能服务于 selected governance workflows，不得变成第二套自由游走 runtime
+- LangGraph 不属于当前 Cygnus 主线；若仍有残留，也只能被视为传递依赖余留或归档规划上下文
+
+## 4. 当前迁移纪律
+当前不是从零定义新系统，而是在执行：
+
+1. **P0 — Migration Manifest & Boundary Freeze**
+2. **P1 — Arkon full-port source parity import**
+3. **P2 — repair / runability recovery**
+4. **P2.5 — Arkon internalization / upstream cutover**
+5. **P3 — Cygnus support verticalization**
+6. **P4 — optional product-shell parity**
+
+Agent 必须保留以下纪律：
+- 不要把 `CYG-6 ~ CYG-17` 误当成当前第一个工程入口
+- 当前工程主线是 `CYG-23+`
+- `CYG-18 ~ CYG-22` 是 bootstrap history，不是当前迁移真相
+- 不要把 import parity、runability recovered、internalization completed、verticalization completed 混成一个完成态
+- 优先保留 upstream Arkon topology；重命名/重构属于后续阶段，不是迁入阶段默认动作
+- 如果目标是完整吸收 Arkon 并最终删除独立上游代码基座，必须进入独立的 P2.5 内化迁移线，而不是回写成 P1 迁入动作
+
+### 4.1 状态语言契约
+后续 agent 在 Jira 评论、handoff、日志、结项时必须遵守：
+
+- **P1** 只能说“已镜像 / 已导入 / parity established”，不能说“已跑通”
+- **P2** 只能说“已恢复接线 / 已恢复启动 / runability recovered”，不能说“产品已完成”
+- **P2.5** 只能说“internalized substrate / upstream cutover started / Cygnus-owned runtime identity established”，不能说“support verticalization 已完成”
+- **P3** 才能说“support verticalization implemented / governance surface established”
+- 没有阶段限定词时，不要单独使用模糊的“已完成”来描述迁移结果
+- `CYG-23 ~ CYG-25` 父线票不能因为一张子票完成就被 agent 误报为整条主线完成
+- 新的内化迁移父线也不能被误报成“shell parity 已决定”或“P3 已开始”
+
+## 4.2 Package owner contract
+当前 package 解释必须保持一致：
+
+- `cygnus/runtime/*` = imported runtime/app shell/reference topology
+  - source execution-state transitions 与 source-ingest orchestration 可以留在 `cygnus.runtime`
+- `cygnus/substrate/*` = Cygnus-owned substrate contracts
+  - `source_outline` / `source_images` / `source_text` 现在都是 substrate owner boundary
+  - 不要把这些 source compilation primitives 重新塞回 `cygnus.runtime.services`
+- `cygnus/domain/*` = support-domain contracts / object vocabulary
+- `cygnus/evidence/*` = evidence normalization and record layer
+- `cygnus/retrieval/*` = object/evidence retrieval and source-trace query layer
+  - semantic embedding persistence 也属于这个 owner boundary
+- `cygnus/review/*` / `cygnus/publish/*` / `cygnus/recovery/*` = governance control-plane modules
+- `cygnus/integrations/*` = external/session-facing integration adapters
+- `cygnus/workflows/*` = workflow composition layer，不是 generic runtime shell
+- `cygnus/api/*` = 已移除的 legacy package，目录下不应再有 Python 模块
+
+当前 import policy 也必须保持一致：
+- `cygnus.runtime.main` 是 canonical app owner
+- `cygnus.api.*` 不得成为内部默认入口
+- `cygnus.api.auth` / `cygnus.api.config` / `cygnus.api.governance_router` / `cygnus.api.app` 不得再被内部代码依赖
+- 不允许重新引入 `app.*` 旧命名空间
+
+当前 deletion-readiness gate 也必须保持一致：
+- 在 `scripts/upstream_cutover_gate.py` 通过之前，不要声称“现在可以安全删除独立 Arkon 代码基座”
+- 不能把 cutover 叙事写成 shell parity 或 P3 support verticalization
+- 只有 gate 通过后，才允许把“删除前 readiness 已满足”写入 Jira / handoff / 结项说明
+- 如果磁盘上还存在独立外部 checkout，先用 `scripts/external_checkout_preserve.py` 保全 ahead commits、dirty worktree 和 untracked files，再讨论破坏性删除
+- `scripts/external_checkout_audit.py --fail-if-found` 才是物理删除完成的证明，不是 preserve 这一步本身
+
+执行约束：
+- 不要把 `runtime` 当成“整个产品后端”的唯一命名真相
+- 不要再把新的治理/知识领域能力默认塞回 `cygnus/api/*`
+- 只有在明确的架构收敛票中，才允许继续重组 `runtime` 或拆分出新的长期结构
+- 在后续进一步 package 收敛时，优先保持 owner 解释和 import policy 一致
+
+## 5. 关键术语
+- **Answer Card**：标准回答对象
+- **Troubleshooting Flow**：排障对象
+- **Policy Rule**：支持策略对象
+- **Known Issue Page**：已知问题对象
+- **Escalation Route**：升级路径对象
+- **Audience Variant**：受众差异层
+- **Support Evidence**：知识依据证据
+- **Ticket Cluster**：重复工单模式候选输入
+
+治理状态词汇（**Review Risk Type** / **Owner State** / **Propagation Status** 等）见 `domain-model.md` §7 与 `workflows.md`；同样不要弱化成 generic 名词。
+
+除非人明确要求，否则不要把这些对象重新命名成 generic article / chunk / snippet 等弱语义名词。
+
+## 6. 文档维护规则
+- 中英文文件要保持结构大体对齐
+- 可以允许微小措辞差异，但不允许产品边界不一致
+- 新增文档时，优先判断它属于 human-facing 还是 agent-facing
+- 若新增内容是未决假设，先写入 open questions，而不是写进既定 PRD
+
+## 7. 扩写约束
+### 可继续扩写的方向
+- MVP 计划
+- 更细的权限模型
+- MCP tool surface
+- 轻量技术架构草图
+- 仪表盘指标体系
+- agent harness contract
+- eval plan 与 fixture design
+- RAG strategy 与 retrieval-policy design
+
+### 暂不默认扩写
+- GTM / pricing
+- full customer bot conversation design
+- deep infra design
+- action layer detailed flows
+
+## 8. 后续实现时的判断标准
+一个方案更可能是对的，如果它：
+- 强化知识对象，而不是强化搜索片段
+- 让人工审核更强，而不是被绕过
+- 让 traceability 更短路径可见
+- 让 audience-aware publishing 更显性
+- 让 ticket-to-knowledge 成为闭环的一部分
+- 让 Cygnus 的治理面建立在 Arkon substrate truth 上，而不是只建立在页面叙事上
+
+一个方案更可能是错的，如果它：
+- 把产品中心换成聊天窗口
+- 把对象层退化成文档段落检索
+- 绕开 review 直接上线新知识
+- 把 internal/external 或 audience 差异放到后处理里
+- 把全量迁移误写成“马上重构成全新 support-native architecture”
+
+## 9. 交接提示
+如果后续要进入计划或实现模式，建议顺序：
+1. 先从这些文档出发做正式计划
+2. 先确认当前属于 P1 / P2 / P2.5 / P3 的哪一个执行面
+3. 再决定 MVP 范围与 milestone
+4. 最后才进入架构与开发

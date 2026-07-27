@@ -75,12 +75,16 @@ class NanobotToolIntegrationTests(unittest.TestCase):
         drift = list_drift_alerts()
         reality = get_downstream_reality_check(command_id="cmd-publish-1")
         recovery = get_recovery_window(command_id="cmd-publish-1")
-        overview = get_governance_overview(command_ids=["cmd-publish-1", "cmd-restrict-2"])
+        overview = get_governance_overview(
+            command_ids=["cmd-publish-1", "cmd-restrict-2"]
+        )
 
         self.assertEqual(retrieval["status"], "success")
         self.assertEqual(retrieval["data"]["results"][0]["object_type"], "answer_card")
         self.assertEqual(knowledge_object["status"], "success")
-        self.assertEqual(knowledge_object["data"]["source_trace_summary"]["freshness"], "stale")
+        self.assertEqual(
+            knowledge_object["data"]["source_trace_summary"]["freshness"], "stale"
+        )
         self.assertEqual(evidence["status"], "success")
         self.assertEqual(evidence["data"]["results"][0]["source_type"], "internal_sop")
         self.assertEqual(trace["status"], "success")
@@ -101,6 +105,7 @@ class NanobotToolIntegrationTests(unittest.TestCase):
             "continue_with_lightweight_follow_up",
         )
         self.assertEqual(overview["status"], "success")
+        self.assertTrue(overview["data"]["rehearsal"])
         self.assertEqual(
             overview["data"]["highest_leverage_command"],
             "cmd-restrict-2",
@@ -109,7 +114,9 @@ class NanobotToolIntegrationTests(unittest.TestCase):
 
     def test_default_registry_exposes_governed_tool_surface(self) -> None:
         registry = build_default_tool_registry()
-        definitions = {definition.name: definition for definition in registry.list_definitions()}
+        definitions = {
+            definition.name: definition for definition in registry.list_definitions()
+        }
 
         self.assertIn("search_knowledge_objects", definitions)
         self.assertIn("get_downstream_reality_check", definitions)
@@ -128,7 +135,13 @@ class NanobotToolIntegrationTests(unittest.TestCase):
                     name="request_review",
                     arguments={"draft_id": "draft-123"},
                 ),
+                ToolCall(
+                    id="tool-2",
+                    name="get_governance_overview",
+                    arguments={"command_ids": ["cmd-publish-1", "cmd-restrict-2"]},
+                ),
             ),
         )
 
         self.assertEqual(results[0][2]["status"], "success")
+        self.assertTrue(results[1][2]["data"]["rehearsal"])

@@ -3,7 +3,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Iterable
 
 from cygnus.domain import AudienceContext, LifecycleState, Visibility
-from cygnus.domain.objects import AnswerCard, EscalationRoute, KnowledgeObject, KnownIssuePage, PolicyRule, TroubleshootingFlow
+from cygnus.domain.objects import (
+    AnswerCard,
+    EscalationRoute,
+    KnowledgeObject,
+    KnownIssuePage,
+    PolicyRule,
+    TroubleshootingFlow,
+)
 from cygnus.evidence.records import SupportEvidence
 from cygnus.recovery import (
     DownstreamRealityCheckQuery,
@@ -82,7 +89,6 @@ def _evidence_index() -> EvidenceIndex:
     return _evidence_index_state
 
 
-
 def search_knowledge_objects(
     *,
     query: str,
@@ -113,7 +119,6 @@ def search_knowledge_objects(
         "warnings": [],
         "errors": [],
     }
-
 
 
 def read_knowledge_object(
@@ -157,7 +162,6 @@ def read_knowledge_object(
     }
 
 
-
 def search_support_evidence(
     *,
     query: str,
@@ -179,7 +183,6 @@ def search_support_evidence(
     }
 
 
-
 def get_source_trace(*, object_id: str) -> dict[str, Any]:
     trace = _knowledge_object_index().trace_resolver.get_trace(object_id)
     if trace is None:
@@ -199,7 +202,6 @@ def get_source_trace(*, object_id: str) -> dict[str, Any]:
         "warnings": warnings,
         "errors": [],
     }
-
 
 
 def propose_knowledge_object(
@@ -225,7 +227,6 @@ def propose_knowledge_object(
     }
 
 
-
 def request_review(*, draft_id: str) -> dict[str, Any]:
     return {
         "status": "success",
@@ -237,7 +238,6 @@ def request_review(*, draft_id: str) -> dict[str, Any]:
         "warnings": [],
         "errors": [],
     }
-
 
 
 def validate_publish_policy(*, draft_id: str, target_channel: str) -> dict[str, Any]:
@@ -255,10 +255,11 @@ def validate_publish_policy(*, draft_id: str, target_channel: str) -> dict[str, 
     }
 
 
-
 def publish_knowledge_object(*, draft_id: str, target_channel: str) -> dict[str, Any]:
     return {
-        "status": "approval_required" if target_channel != "internal_copilot" else "success",
+        "status": "approval_required"
+        if target_channel != "internal_copilot"
+        else "success",
         "summary": f"Publish request recorded for {draft_id}",
         "data": {
             "draft_id": draft_id,
@@ -270,7 +271,6 @@ def publish_knowledge_object(*, draft_id: str, target_channel: str) -> dict[str,
         "warnings": [],
         "errors": [],
     }
-
 
 
 def list_drift_alerts(*, filters: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -304,9 +304,7 @@ def get_downstream_reality_check(*, command_id: str) -> dict[str, Any]:
 
 
 def get_recovery_window(*, command_id: str) -> dict[str, Any]:
-    surface = get_recovery_window_surface(
-        RecoveryWindowQuery(command_id=command_id)
-    )
+    surface = get_recovery_window_surface(RecoveryWindowQuery(command_id=command_id))
     payload = surface.to_dict()
     return {
         "status": "success",
@@ -322,6 +320,7 @@ def get_governance_overview(*, command_ids: list[str]) -> dict[str, Any]:
         GovernanceOverviewQuery(command_ids=tuple(command_ids))
     )
     payload = surface.to_dict()
+    payload["rehearsal"] = True
     return {
         "status": "success",
         "summary": "Governance overview loaded",
@@ -331,13 +330,11 @@ def get_governance_overview(*, command_ids: list[str]) -> dict[str, Any]:
     }
 
 
-
 def build_default_tool_registry() -> ToolRegistry:
     registry = ToolRegistry()
     for definition, handler in _tool_bindings():
         registry.register(definition, handler)
     return registry
-
 
 
 def _tool_bindings() -> tuple[tuple[ToolDefinition, Any], ...]:
@@ -537,8 +534,9 @@ def _tool_bindings() -> tuple[tuple[ToolDefinition, Any], ...]:
     )
 
 
-
-def _audience_context_from_payload(payload: dict[str, Any] | None) -> AudienceContext | None:
+def _audience_context_from_payload(
+    payload: dict[str, Any] | None,
+) -> AudienceContext | None:
     if payload is None:
         return None
 
@@ -559,7 +557,6 @@ def _audience_context_from_payload(payload: dict[str, Any] | None) -> AudienceCo
         language=normalized.get("language"),
         product_version=normalized.get("product_version"),
     )
-
 
 
 def _allowed_channels_for(object_: KnowledgeObject) -> tuple[str, ...]:

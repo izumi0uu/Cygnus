@@ -1,12 +1,18 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Check } from 'lucide-react'
-import { fetchSourceBlindnessSurface, type SourceBlindnessSurface, type SourceBlindnessContext } from '@/lib/api'
+import {
+  fetchSourceBlindnessSurface,
+  type SourceBlindnessContext,
+  type SourceBlindnessSurface,
+} from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Stat } from '@/components/Stat'
 import { useVocab } from '@/lib/vocab'
 import { CmdButton } from '@/components/CmdButton'
 import { PageSkeleton } from '@/components/Skeleton'
+import { ObservationBanner } from '@/components/ObservationBanner'
+import { SourceFailureCard } from '@/components/SourceFailureCard'
 
 // freshness → tol style (stale = urgent heat, fresh = ok, unknown = muted)
 const FRESH_TOL: Record<string, string> = { stale: 'bp-tol-urgent', fresh: 'bp-tol-ok', unknown: 'bp-tol-flat' }
@@ -40,6 +46,7 @@ export default function SourcesEvidence() {
   if (!data) return null
 
   const rows = data.contexts
+  const failures = data.source_observations
   const stale = rows.filter((c) => c.freshness_states.includes('stale')).length
   const surfaces = new Set(rows.flatMap((c) => c.affected_surfaces)).size
   const watched = new Set(rows.flatMap((c) => c.evidence_ids)).size
@@ -48,15 +55,27 @@ export default function SourcesEvidence() {
 
   return (
     <>
+      <ObservationBanner observation={data.observation} />
       <p className="mb-3 font-mono text-[12px] leading-relaxed text-muted-foreground">{data.summary}</p>
 
       <div className="mb-4 flex flex-wrap gap-2.5">
-        <Stat n={rows.length} label={t('src.statSources')} dot="var(--urgent)" />
+        <Stat n={failures.length} label={t('observation.sourceFacts')} dot="var(--high)" />
+        <Stat n={rows.length} label={t('observation.completeRisks')} dot="var(--urgent)" />
         <Stat n={stale} label={t('frame.urgent')} dot="var(--urgent)" />
         <Stat n={surfaces} label={t('queue.statSurfaces')} />
         <Stat n={watched} label={t('src.statWatched')} />
       </div>
 
+      {failures.length > 0 && (
+        <section className="mb-5" aria-labelledby="source-facts-heading">
+          <div id="source-facts-heading" className="mb-2 bp-label">{t('observation.sourceFacts')}</div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {failures.map((failure) => <SourceFailureCard key={failure.source_id} failure={failure} />)}
+          </div>
+        </section>
+      )}
+
+      {rows.length > 0 && <div className="mb-2 bp-label">{t('observation.completeRisks')}</div>}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {rows.map((c) => (
           <SourceCard key={c.proposal_ref} ctx={c} command={data.available_commands[0]} />
@@ -64,7 +83,13 @@ export default function SourcesEvidence() {
       </div>
 
       {rows.length === 0 ? (
-        <div className="bp-panel px-[18px] py-10 text-center font-mono text-sm text-muted-foreground">{t('src.empty')}</div>
+        <div className="bp-panel px-[18px] py-10 text-center font-mono text-sm text-muted-foreground">
+          {data.observation.state === 'ready'
+            ? t('src.empty')
+            : failures.length > 0
+              ? t('observation.sourceImpactPending')
+              : t('observation.sourceEmptyPartial')}
+        </div>
       ) : ok > 0 ? (
         <div className="mt-4 flex items-center gap-2 bp-panel px-4 py-3 font-mono text-[13px] text-muted-foreground">
           <Check size={16} style={{ color: 'var(--ok)' }} />
@@ -74,6 +99,7 @@ export default function SourcesEvidence() {
     </>
   )
 }
+
 
 function SourceCard({ ctx, command }: { ctx: SourceBlindnessContext; command: string }) {
   const { t } = useTranslation()

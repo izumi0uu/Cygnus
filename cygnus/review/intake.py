@@ -10,10 +10,14 @@ from cygnus.evidence.records import EvidenceSourceType, FreshnessState, SupportE
 from cygnus.review.home import ReviewHomeQuery, get_review_home_surface
 from cygnus.review.drilldown import ReviewQueueDrilldownQuery, ReviewQueueDrilldownSurface, get_review_queue_drilldown
 from cygnus.review.pressure import ReviewPressureSurface, build_review_pressure_surface
-from cygnus.review.source_blindness import SourceBlindnessSurface, build_source_blindness_surface
+from cygnus.review.source_blindness import (
+    SourceBlindnessSurface,
+    SourceFailureObservation,
+    build_source_blindness_surface,
+)
 from cygnus.review.briefing import ReviewRiskType
 from cygnus.review.service import ProposalBundle, ReviewSignal
-from cygnus.review.surface import ReviewCommandSurface
+from cygnus.review.surface import ReviewCommandSurface, SurfaceObservation
 from cygnus.substrate.compilation_plan import CompilationProposal, EvidenceSufficiency, PlanAction, UrgencyLevel
 
 
@@ -143,22 +147,55 @@ def compile_pressure_proposal_bundles(records: Iterable[PressureIntakeRecord]) -
 def build_pressure_intake_surfaces(
     records: Iterable[PressureIntakeRecord] | None = None,
     *,
+    bundles: Iterable[ProposalBundle] | None = None,
     review_query: ReviewHomeQuery | None = None,
+    review_observation: SurfaceObservation | None = None,
+    source_observation: SurfaceObservation | None = None,
+    source_observations: Iterable[SourceFailureObservation] = (),
 ) -> PressureIntakeSurfaces:
-    source_records = tuple(records) if records is not None else sample_pressure_intake_records()
-    if not source_records:
-        raise ValueError("pressure intake requires at least one record")
-    bundles = compile_pressure_proposal_bundles(source_records)
+    if records is not None and bundles is not None:
+        raise ValueError("provide pressure intake records or proposal bundles, not both")
 
-    review_home = get_review_home_surface(review_query, bundles=bundles)
-    pressure_bundles = tuple(bundle for bundle in bundles if bundle.signal.risk_type is ReviewRiskType.TICKET_PRESSURE)
-    source_bundles = tuple(bundle for bundle in bundles if bundle.signal.risk_type is ReviewRiskType.SOURCE_BLINDNESS)
+    if bundles is not None:
+        proposal_bundles = tuple(bundles)
+    else:
+        source_records = tuple(records) if records is not None else sample_pressure_intake_records()
+        if not source_records and review_observation is None:
+            raise ValueError("empty pressure intake requires an explicit review observation")
+        proposal_bundles = compile_pressure_proposal_bundles(source_records)
+
+    if not proposal_bundles and review_observation is None:
+        raise ValueError("empty pressure intake requires an explicit review observation")
+
+    review_home = get_review_home_surface(
+        review_query,
+        bundles=proposal_bundles,
+        observation=review_observation,
+    )
+    pressure_bundles = tuple(
+        bundle
+        for bundle in proposal_bundles
+        if bundle.signal.risk_type is ReviewRiskType.TICKET_PRESSURE
+    )
+    source_bundles = tuple(
+        bundle
+        for bundle in proposal_bundles
+        if bundle.signal.risk_type is ReviewRiskType.SOURCE_BLINDNESS
+    )
 
     return PressureIntakeSurfaces(
-        bundles=bundles,
+        bundles=proposal_bundles,
         review_home=review_home,
         pressure_surface=build_review_pressure_surface(pressure_bundles) if pressure_bundles else None,
-        source_blindness_surface=build_source_blindness_surface(source_bundles) if source_bundles else None,
+        source_blindness_surface=(
+            build_source_blindness_surface(
+                source_bundles,
+                observation=source_observation,
+                source_observations=source_observations,
+            )
+            if source_bundles or source_observation is not None
+            else None
+        ),
     )
 
 

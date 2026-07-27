@@ -125,12 +125,19 @@ export default function Mastermind() {
   const [isNewBest, setIsNewBest] = useState(false)
 
   useEffect(() => {
+    let frame = 0
+    const scheduleScore = (nextBest: number | null, nextIsNewBest: boolean) => {
+      frame = requestAnimationFrame(() => {
+        setBest(nextBest)
+        setIsNewBest(nextIsNewBest)
+      })
+    }
+
     // Difficulty changed or a new round started (phase left 'won') — re-read
     // the stored best and clear the new-best flag.
     if (state.phase !== 'won') {
-      setIsNewBest(false)
-      setBest(getBest(state.difficulty))
-      return
+      scheduleScore(getBest(state.difficulty), false)
+      return () => cancelAnimationFrame(frame)
     }
     // Winning render: compute the new-best flag from the PRE-write stored
     // value, then persist. maybeSetBest is idempotent (writes only on
@@ -140,8 +147,8 @@ export default function Mastermind() {
     const priorBest = getBest(state.difficulty)
     const beat = priorBest === null || guesses < priorBest
     maybeSetBest(state.difficulty, guesses)
-    setBest(getBest(state.difficulty))
-    setIsNewBest(beat)
+    scheduleScore(getBest(state.difficulty), beat)
+    return () => cancelAnimationFrame(frame)
   }, [state.phase, state.difficulty, state.winningGuesses])
 
   const inMenu = menuDifficulty !== null ? false : true

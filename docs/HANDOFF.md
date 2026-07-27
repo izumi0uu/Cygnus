@@ -132,6 +132,18 @@ the command-center `priority_stack` (read-first by severity via `commandCenterSo
 3. **Placeholder audit page** — blueprint-styled but has no backend endpoint; it's a
    reserved sheet (SEC-G) by design until that surface exists.
 
+### 8.1 Governed observation truth (CYG-97)
+
+The SPA consumes typed, machine-code `observation` payloads from `api.ts`; `ObservationBanner` localizes state/reason/signal codes in both zh and en. It is presentation-only and must not derive risk or issue commands.
+
+- `/console/queue`: partial review coverage; source failure facts and complete governance risks render in separate sections. An empty stack under partial coverage does **not** mean every detector is clear.
+- `/console/drift`: unavailable detector coverage; never render the old “no drift risk” copy unless the API is `ready`.
+- `/console/sources`: `SourceFailureObservation` cards display error, visible linked refs, timestamp, and `IMPACT · UNKNOWN`; they have no audience, surface, owner, or command affordance.
+- `/console/objects`: an empty `nodes` array renders a same-size blueprint explanation instead of mounting `ForceGraph2D`.
+- `/console`: API-driven `rehearsal:true` renders a prominent non-dismissible banner before recovery loops.
+
+Compose-backed DB smoke passed on 2026-07-26 with the seeded administrator. Deterministic global ready/error sources plus a support Wiki page proved nonempty graph, partial queue/source observations, unavailable drift, and the rehearsal banner; a zero-department viewer did not receive the cross-department node/source or its traceability record (404). After seed cleanup, `/console/objects` rendered its same-size no-canvas explanation. Browser checks found no page-console errors; dark-mode toggle and keyboard focus both worked. `scripts/docker_smoke.sh` now bypasses ambient proxies for its loopback-only health checks.
+
 ## 9. Commits that got us here (this session)
 
 ```

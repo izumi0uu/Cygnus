@@ -528,3 +528,13 @@ That means the externally callable publish contract does not yet equal the real 
 So the accurate current statement is not “Cygnus has finished approval governance,” but rather:
 - the contract says approval should belong to Cygnus
 - the code has not yet fully substantiated that governance truth
+
+### 13.5 Implemented governed-observation boundary (CYG-97)
+`/api/command-center`, `/api/review-intake`, `/api/drift`, and `/api/source-blindness` now read from a request-scoped, permission-filtered `GovernanceReadSnapshot`; those runtime paths must not implicitly call `sample_*` fixtures.
+
+- Every governance-risk surface returns `observation`: `ready` means complete coverage, `partial` names both covered and missing detectors, and `unavailable` means a detector is not connected—not that there is no risk. Reasons and signals are machine codes rendered through client i18n.
+- Without a complete proposal bundle, Review Queue, drift, and source-blindness contexts must be empty and offer no governance command. Ordinary `WikiPageDraft` rows must not be projected into an owner, audience, surface, or risk.
+- A `Source.status="error"` row projects only to a `SourceFailureObservation` fact: visible linked refs may be returned, but `impact_state` is fixed to `unknown`, with no invented audience, surface, owner, or command.
+- `/api/recovery/overview` explicitly returns `rehearsal: true`; this read surface is not durable recovery truth.
+
+The durable providers still missing for ticket pressure, release/incident drift, audience conflict, review assignment, and source impact remain explicit follow-up work. An empty array or green UI must never stand in for their health.

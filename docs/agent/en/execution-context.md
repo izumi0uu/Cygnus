@@ -67,6 +67,12 @@ Downstream agents must follow this contract in Jira comments, handoffs, logs, an
 - parent-lane tickets like `CYG-23 ~ CYG-25` must not be reported as complete just because one child ticket closed
 - the new internalization parent lane must not be misreported as “shell parity decided” or “P3 already started”
 
+### 4.1.1 Governed observation truth
+- Governance reads must query inside the permission scope before projection; runtime results must not be filled from `sample_*` fixtures or session memory.
+- `ready`, `partial`, and `unavailable` describe detector coverage, not swallowed failures. Empty arrays under `partial` or `unavailable` must never be summarized as “no risk.”
+- A `SourceFailureObservation` is a source-failure fact. Before `impact_state="unknown"` is resolved, do not infer a risk, owner, audience, surface, or executable command.
+- Preserve `rehearsal:true` from recovery overview in every client or agent summary; it is not durable recovery truth.
+
 ## 4.2 Package owner contract
 Current package interpretation must remain consistent:
 

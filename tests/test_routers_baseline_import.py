@@ -13,6 +13,7 @@ ROUTER_BASELINE_FILES = [
     "cygnus/runtime/routers/audit.py",
     "cygnus/runtime/routers/auth.py",
     "cygnus/runtime/routers/governance/__init__.py",
+    "cygnus/runtime/routers/governance/dependencies.py",
     "cygnus/runtime/routers/governance/command_center.py",
     "cygnus/runtime/routers/governance/knowledge_graph.py",
     "cygnus/runtime/routers/governance/publish.py",
@@ -87,7 +88,7 @@ class RouterBaselineImportTests(unittest.TestCase):
             source = Path(relative_path).read_text(encoding="utf-8")
             compile(source, relative_path, "exec")
 
-    def test_router_baseline_topology_is_exactly_the_upstream_module_family(self) -> None:
+    def test_router_baseline_topology_matches_current_runtime_module_family(self) -> None:
         expected = {Path(path).relative_to("cygnus/runtime/routers") for path in ROUTER_BASELINE_FILES}
         actual = {
             path.relative_to("cygnus/runtime/routers")

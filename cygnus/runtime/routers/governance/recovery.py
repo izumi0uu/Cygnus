@@ -41,7 +41,7 @@ def recovery_window(
 @router.get("/api/recovery/overview")
 def governance_overview(_current_user=Depends(get_current_user)) -> dict[str, object]:
     """Compare open loops to choose the next highest-leverage command."""
-    return get_default_governance_overview_surface().to_dict()
+    return get_default_governance_overview_surface().to_dict() | {"rehearsal": True}
 
 
 @router.get("/api/recovery-proof")

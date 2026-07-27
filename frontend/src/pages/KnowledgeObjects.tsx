@@ -172,7 +172,14 @@ export default function KnowledgeObjects() {
       </div>
 
       <div ref={wrapRef} className="bp-panel overflow-hidden" style={{ height: H }}>
-        {w > 0 && (
+        {data.nodes.length === 0 ? (
+          <div className="flex h-full items-center justify-center px-8 text-center">
+            <div className="max-w-xl">
+              <div className="mb-2 bp-label">{t('placeholder.noData')}</div>
+              <p className="font-mono text-[12px] leading-relaxed text-muted-foreground">{t('observation.graphEmpty')}</p>
+            </div>
+          </div>
+        ) : w > 0 ? (
           <ForceGraph2D
             key={resolvedTheme}
             ref={fgRef}
@@ -191,7 +198,7 @@ export default function KnowledgeObjects() {
             nodePointerAreaPaint={drawHit}
             onNodeClick={(node: ForceNode) => { if (node.kind === 'object' && node.node) openObject(node.node.id) }}
           />
-        )}
+        ) : null}
       </div>
 
       {selected && <Drawer node={selected} edges={data.edges} nodes={data.nodes} onClose={closeObject} />}

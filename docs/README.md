@@ -127,6 +127,7 @@ This package is intentionally focused on:
 - review + publish + audience-aware distribution
 - governance command framing (risk-ranked review, blast-radius publish, propagation + recovery)
 - human/AI shared source of truth
+- request-scoped governed reads whose explicit observation coverage prevents empty risk arrays from being interpreted as healthy truth
 
 This package intentionally does **not** expand into:
 - GTM / pricing / sales collateral
@@ -143,3 +144,5 @@ Cygnus is no longer only a documentation package. It now combines:
 - early governance/control-plane prototype surfaces
 
 So downstream readers should not treat this repo as docs-only, and should not assume the visual/product-story pack is the current engineering entry point. The migration mainline (baseline import -> runability recovery -> internalization / upstream cutover) is complete and the first support-verticalization wave is closed; the current engineering mainline is the Nanobot ↔ Cygnus governed session seam (CYG-92–96), sitting on top of governed-plane substrate-truth convergence.
+
+The governed plane currently exposes sparse, request-scoped truth: source errors are observable facts, while ticket pressure, release/incident drift, audience conflict, review assignment, and source-impact inference remain explicitly partial or unavailable rather than fixture-backed claims.

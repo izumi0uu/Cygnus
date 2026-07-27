@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy import delete as sql_delete
-from sqlalchemy import exists, func, or_, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -42,7 +42,7 @@ from cygnus.runtime.services.auth_service import (
 )
 from cygnus.runtime.services.permission_engine import (
     _get_user_permissions,
-    get_scope_level,
+    build_document_scope_clause,
 )
 from cygnus.runtime.worker import get_arq_pool as get_worker_arq_pool
 from cygnus.runtime.worker import (
@@ -203,34 +203,10 @@ async def list_sources(
     count_base = select(func.count(Source.id))
 
     # --- Scope filtering ---
-    scope_level = "all" if user.role == "admin" else get_scope_level(list(perms), "doc", "read")
-
-    if scope_level == "own_dept":
-        # Only show: global docs (no departments) OR docs overlapping the
-        # user's department set. Empty set → only global docs.
-        user_dept_ids = list(user.department_ids)
-        global_clause = ~exists(
-            select(SourceDepartment.source_id)
-            .where(SourceDepartment.source_id == Source.id)
-        )
-        if user_dept_ids:
-            dept_filter = or_(
-                global_clause,
-                exists(
-                    select(SourceDepartment.source_id)
-                    .where(
-                        SourceDepartment.source_id == Source.id,
-                        SourceDepartment.department_id.in_(user_dept_ids),
-                    )
-                ),
-            )
-        else:
-            dept_filter = global_clause
-        base = base.where(dept_filter)
-        count_base = count_base.where(dept_filter)
-    elif scope_level is None:
-        # No doc:read permission at all
-        return {"items": [], "total": 0, "page": page, "page_size": page_size, "total_pages": 1}
+    scope_clause = build_document_scope_clause(user)
+    if scope_clause is not None:
+        base = base.where(scope_clause)
+        count_base = count_base.where(scope_clause)
 
     # --- Additional filters ---
     if knowledge_type_id:

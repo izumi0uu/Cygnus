@@ -20,6 +20,13 @@ export CYGNUS_DOCKER_MINIO_CONSOLE_HOST_PORT
 export CYGNUS_DOCKER_API_HOST_PORT
 export CYGNUS_DOCKER_FRONTEND_HOST_PORT
 
+# The smoke stack is published on loopback. CI and developer environments may
+# set a global proxy that cannot route those host ports, so explicitly preserve
+# direct localhost access for every curl probe below.
+NO_PROXY="127.0.0.1,localhost${NO_PROXY:+,$NO_PROXY}"
+no_proxy="$NO_PROXY"
+export NO_PROXY no_proxy
+
 BASE_URL=${CYGNUS_SMOKE_BASE_URL:-http://127.0.0.1:${CYGNUS_DOCKER_API_HOST_PORT}}
 FRONTEND_URL=${CYGNUS_SMOKE_FRONTEND_URL:-http://127.0.0.1:${CYGNUS_DOCKER_FRONTEND_HOST_PORT}}
 ADMIN_EMAIL=${CYGNUS_SMOKE_ADMIN_EMAIL:-admin@cygnus.local}

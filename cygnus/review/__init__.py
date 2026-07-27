@@ -104,15 +104,23 @@ from cygnus.review.source_blindness import (
     SourceBlindnessContext,
     SourceBlindnessResult,
     SourceBlindnessSurface,
+    SourceFailureObservation,
     SourceRepairDirective,
     apply_source_blindness_commands,
     build_source_blindness_surface,
+    build_source_failure_observations,
     get_source_blindness_surface,
 )
 from cygnus.review.providers import build_review_command_surface, build_review_command_surface_from_bundles
 from cygnus.review.queries import build_review_command_brief, summarize_review_items
 from cygnus.review.service import ProposalBundle, ReviewSignal, assemble_review_command_brief, build_review_risk_item, rank_review_item
-from cygnus.review.surface import PriorityStackCard, ReviewCommandSurface, SituationFrame
+from cygnus.review.surface import (
+    ObservationState,
+    PriorityStackCard,
+    ReviewCommandSurface,
+    SituationFrame,
+    SurfaceObservation,
+)
 
 __all__ = [
     "BranchMergeConflict",
@@ -149,6 +157,7 @@ __all__ = [
     "DriftGovernanceSurface",
     "EvidenceStrength",
     "OwnerState",
+    "ObservationState",
     "PressureCommand",
     "PressureCommandType",
     "PressureIntakeBundle",
@@ -181,6 +190,8 @@ __all__ = [
     "SourceBlindnessContext",
     "SourceBlindnessResult",
     "SourceBlindnessSurface",
+    "SourceFailureObservation",
+    "SurfaceObservation",
     "SourceRepairDirective",
     "WhyNowFrame",
     "build_review_command_brief",
@@ -188,6 +199,7 @@ __all__ = [
     "build_review_item_detail_surface",
     "build_review_pressure_surface",
     "build_source_blindness_surface",
+    "build_source_failure_observations",
     "get_drift_governance_surface",
     "get_review_item_detail",
     "apply_drift_governance_commands",

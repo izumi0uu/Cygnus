@@ -14,7 +14,11 @@ from cygnus.retrieval import (
     sample_knowledge_objects,
     sample_support_evidence,
 )
-from cygnus.runtime.routers.governance.knowledge_graph import get_substrate_snapshot
+from cygnus.review.source_blindness import SourceFailureObservation
+from cygnus.runtime.routers.governance.dependencies import (
+    GovernanceReadSnapshot,
+    get_governance_read_snapshot,
+)
 
 
 class CommandCenterApiTests(unittest.TestCase):
@@ -35,10 +39,15 @@ class CommandCenterApiTests(unittest.TestCase):
         for patcher in self.patches:
             patcher.start()
         self.client = TestClient(app)
-        app.dependency_overrides[get_substrate_snapshot] = lambda: SubstrateKnowledgeSnapshot(
-            objects=sample_knowledge_objects(),
-            evidence=sample_support_evidence(),
+        self.snapshot = GovernanceReadSnapshot(
+            knowledge=SubstrateKnowledgeSnapshot(
+                objects=sample_knowledge_objects(),
+                evidence=sample_support_evidence(),
+            ),
+            source_observations=(),
+            visible_source_count=0,
         )
+        app.dependency_overrides[get_governance_read_snapshot] = lambda: self.snapshot
 
     def tearDown(self) -> None:
         self.client.close()
@@ -55,6 +64,7 @@ class CommandCenterApiTests(unittest.TestCase):
         self.assertEqual(self.client.get("/healthz").json(), {"status": "ok"})
 
     def test_governance_reads_require_auth(self) -> None:
+        app.dependency_overrides.pop(get_governance_read_snapshot)
         protected_paths = (
             "/api/command-center",
             "/api/drift",
@@ -78,8 +88,11 @@ class CommandCenterApiTests(unittest.TestCase):
         self.assertIn("situation_frame", payload)
         self.assertIn("priority_stack", payload)
         self.assertIn("available_commands", payload)
-        self.assertEqual(len(payload["priority_stack"]), 4)
-        self.assertEqual(payload["situation_frame"]["urgent_items"], 1)
+        self.assertEqual(payload["priority_stack"], [])
+        self.assertEqual(payload["situation_frame"]["urgent_items"], 0)
+        self.assertEqual(payload["observation"]["state"], "partial")
+        self.assertEqual(payload["observation"]["reason"], "review_signal_coverage_partial")
+        self.assertIn("ticket_pressure", payload["observation"]["missing_signals"])
 
     def test_review_intake_payload_shape(self) -> None:
         self.enable_auth()
@@ -88,8 +101,69 @@ class CommandCenterApiTests(unittest.TestCase):
         self.assertIn("pressure_surface", payload)
         self.assertIn("source_blindness_surface", payload)
         self.assertEqual(payload["review_home"]["surface_id"], "review-home")
-        self.assertEqual(payload["pressure_surface"]["surface_id"], "review-pressure")
+        self.assertIsNone(payload["pressure_surface"])
         self.assertEqual(payload["source_blindness_surface"]["surface_id"], "source-health")
+        self.assertEqual(payload["source_blindness_surface"]["contexts"], [])
+        self.assertEqual(payload["source_blindness_surface"]["source_observations"], [])
+
+    def test_drift_payload_marks_unavailable_detectors(self) -> None:
+        self.enable_auth()
+        payload = self.client.get("/api/drift").json()
+        self.assertEqual(payload["contexts"], [])
+        self.assertEqual(payload["available_commands"], [])
+        self.assertEqual(payload["observation"]["state"], "unavailable")
+        self.assertEqual(payload["observation"]["reason"], "drift_detectors_unavailable")
+        self.assertEqual(
+            payload["observation"]["missing_signals"],
+            ["release_delta", "incident_delta", "ticket_pressure"],
+        )
+
+    def test_target_governance_routes_do_not_fall_back_to_sample_fixtures(self) -> None:
+        self.enable_auth()
+        with (
+            patch("cygnus.review.home.sample_review_bundles", side_effect=AssertionError),
+            patch("cygnus.review.drift.sample_review_bundles", side_effect=AssertionError),
+            patch("cygnus.review.source_blindness.sample_review_bundles", side_effect=AssertionError),
+            patch("cygnus.review.intake.sample_pressure_intake_records", side_effect=AssertionError),
+        ):
+            for path in ("/api/command-center", "/api/drift", "/api/source-blindness", "/api/review-intake"):
+                with self.subTest(path=path):
+                    self.assertEqual(self.client.get(path).status_code, 200)
+
+    def test_source_failure_remains_fact_without_fabricated_impact_or_command(self) -> None:
+        self.snapshot = GovernanceReadSnapshot(
+            knowledge=self.snapshot.knowledge,
+            source_observations=(
+                SourceFailureObservation(
+                    source_id="source-failed",
+                    title="Incident feed",
+                    source_ref="https://status.example/feed",
+                    status="error",
+                    error_message="upstream timeout",
+                    linked_wiki_refs=("wiki-incident",),
+                    linked_object_refs=("ko-incident",),
+                    observed_at="2026-07-26T10:00:00Z",
+                ),
+            ),
+            visible_source_count=1,
+        )
+        self.enable_auth()
+
+        source_payload = self.client.get("/api/source-blindness").json()
+        self.assertEqual(source_payload["contexts"], [])
+        self.assertEqual(source_payload["available_commands"], [])
+        self.assertEqual(source_payload["observation"]["state"], "partial")
+        self.assertEqual(source_payload["observation"]["missing_signals"], ["source_impact"])
+        self.assertEqual(source_payload["source_observations"][0]["source_id"], "source-failed")
+        self.assertEqual(source_payload["source_observations"][0]["impact_state"], "unknown")
+
+        intake_payload = self.client.get("/api/review-intake").json()
+        self.assertEqual(intake_payload["review_home"]["priority_stack"], [])
+        self.assertIsNone(intake_payload["pressure_surface"])
+        self.assertEqual(
+            intake_payload["source_blindness_surface"]["source_observations"][0]["source_id"],
+            "source-failed",
+        )
 
     def test_review_queue_item_returns_intake_drilldown_surface(self) -> None:
         self.enable_auth()
@@ -157,6 +231,7 @@ class CommandCenterApiTests(unittest.TestCase):
         self.assertIn("highest_leverage_command", payload)
         self.assertEqual(len(payload["open_loops"]), 2)
         self.assertEqual(payload["highest_leverage_command"], "cmd-restrict-2")
+        self.assertTrue(payload["rehearsal"])
 
     def test_knowledge_graph_payload_shape(self) -> None:
         self.enable_auth()

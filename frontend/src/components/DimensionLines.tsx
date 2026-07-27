@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 /**
  * DimensionLines — the "caliper cursor" from HANDOFF §12 Idea 2.
@@ -132,11 +132,11 @@ export function DimensionLines<T>({ items, hoverIndex, containerRef, config, row
 
   // Resolve rows by querying the container. Both hosts are short lists and we
   // re-query on every hover, so we don't cache row element refs.
-  const resolveRows = (): (HTMLElement | null)[] => {
+  const resolveRows = useCallback((): (HTMLElement | null)[] => {
     const container = containerRef.current
     if (!container) return []
     return Array.from(container.querySelectorAll<HTMLElement>(rowSelector ?? '[data-rank-index]'))
-  }
+  }, [containerRef, rowSelector])
 
   // Track container size for the component's lifetime. ResizeObserver fires an
   // initial callback once the container is laid out, which populates `size`
@@ -156,54 +156,43 @@ export function DimensionLines<T>({ items, hoverIndex, containerRef, config, row
   useEffect(() => {
     // Need at least 2 items to measure a gap. With 1 item there is nothing to
     // compare; with 2, the single pair is a legitimate measurement.
-    if (hoverIndex == null || items.length < 2) {
-      setPairs([])
-      return
-    }
-    const container = containerRef.current
-    if (!container) {
-      setPairs([])
-      return
-    }
-    const rows = resolveRows()
-    const hoverEl = rows[hoverIndex]
-    if (!hoverEl) {
-      setPairs([])
-      return
+    let measured: MeasuredPair[] = []
+    if (hoverIndex != null && items.length >= 2) {
+      const container = containerRef.current
+      if (container) {
+        const rows = resolveRows()
+        const hoverEl = rows[hoverIndex]
+        if (hoverEl) {
+          const tol = deriveTolerance(items, config)
+          const cRect = container.getBoundingClientRect()
+          const centerOf = (el: HTMLElement) => el.getBoundingClientRect().top - cRect.top + el.offsetHeight / 2
+          const targets = selectTargets(items, hoverIndex, config)
+          const hoverY = centerOf(hoverEl)
+
+          measured = targets.flatMap(({ targetIndex, extremum }, lane) => {
+            const targetEl = rows[targetIndex]
+            if (!targetEl) return []
+            const delta = Math.abs(config.getValue(items[hoverIndex]) - config.getValue(items[targetIndex]))
+            return [{
+              targetIndex,
+              delta,
+              tol,
+              noisy: tol >= delta,
+              hoverY,
+              targetY: centerOf(targetEl),
+              extremum,
+              laneX: laneXFor(lane, config.geometry, container.clientWidth),
+            }]
+          })
+        }
+      }
     }
 
-    const tol = deriveTolerance(items, config)
-    const cRect = container.getBoundingClientRect()
-    const centerOf = (el: HTMLElement) => el.getBoundingClientRect().top - cRect.top + el.offsetHeight / 2
-
-    const targets = selectTargets(items, hoverIndex, config)
-    if (targets.length === 0) {
-      setPairs([])
-      return
-    }
-
-    const hoverY = centerOf(hoverEl)
-    const measured: MeasuredPair[] = []
-    targets.forEach(({ targetIndex, extremum }, lane) => {
-      const targetEl = rows[targetIndex]
-      if (!targetEl) return
-      const delta = Math.abs(config.getValue(items[hoverIndex]) - config.getValue(items[targetIndex]))
-      measured.push({
-        targetIndex,
-        delta,
-        tol,
-        noisy: tol >= delta,
-        hoverY,
-        targetY: centerOf(targetEl),
-        extremum,
-        laneX: laneXFor(lane, config.geometry, container.clientWidth),
-      })
-    })
-    setPairs(measured)
+    const frame = requestAnimationFrame(() => setPairs(measured))
+    return () => cancelAnimationFrame(frame)
     // Re-measure on hover change, items identity change (navigation/reload),
     // and container width change (responsive resize) so lane positions follow.
-    // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure on hover/items/width
-  }, [hoverIndex, items, containerRef, size.w, config])
+  }, [hoverIndex, items, containerRef, size.w, config, resolveRows])
 
   if (pairs.length === 0) return null
 

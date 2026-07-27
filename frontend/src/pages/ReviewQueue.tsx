@@ -11,6 +11,8 @@ import { CmdButton } from '@/components/CmdButton'
 import { PageSkeleton } from '@/components/Skeleton'
 import { useFocusTrap } from '@/lib/useFocusTrap'
 import { PlotterPanel } from '@/components/PlotterPanel'
+import { ObservationBanner } from '@/components/ObservationBanner'
+import { SourceFailureCard } from '@/components/SourceFailureCard'
 
 const HEAT: Record<string, string> = { urgent: 'bp-tol-urgent', high: 'bp-tol-high', medium: 'bp-tol-high', low: 'bp-tol-flat' }
 const DOT: Record<string, string> = { urgent: 'var(--urgent)', high: 'var(--high)', medium: 'var(--medium)', low: 'var(--faint)' }
@@ -60,6 +62,7 @@ export default function ReviewQueue() {
   const home = data.review_home
   const sf = home.situation_frame
   const selectedId = searchParams.get('risk')
+  const sourceFailures = data.source_blindness_surface?.source_observations ?? []
   const selected = selectedId ? home.priority_stack.find((it) => it.risk_id === selectedId) ?? null : null
   const rows = home.priority_stack.filter((it) =>
     filter === 'all' ? true : filter === 'urgent' ? it.urgency === 'urgent' : it.owner_state === 'unassigned',
@@ -67,12 +70,23 @@ export default function ReviewQueue() {
 
   return (
     <>
+      <ObservationBanner observation={home.observation} />
       <div className="mb-4 flex flex-wrap gap-2.5">
-        <Stat n={home.priority_stack.length} label={t('queue.statRisks')} />
+        <Stat n={home.priority_stack.length} label={t('observation.completeRisks')} />
+        <Stat n={sourceFailures.length} label={t('observation.sourceFacts')} dot="var(--high)" />
         <Stat n={sf.urgent_items} label={t('frame.urgent')} dot="var(--urgent)" />
         <Stat n={sf.owner_gaps} label={t('frame.ownerGaps')} dot="var(--high)" />
         <Stat n={sf.affected_surfaces?.length ?? 0} label={t('queue.statSurfaces')} />
       </div>
+
+      {sourceFailures.length > 0 && (
+        <section className="mb-5" aria-labelledby="review-source-facts-heading">
+          <div id="review-source-facts-heading" className="mb-2 bp-label">{t('observation.sourceFacts')}</div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {sourceFailures.map((failure) => <SourceFailureCard key={failure.source_id} failure={failure} />)}
+          </div>
+        </section>
+      )}
 
       <div className="mb-3.5 flex items-center gap-3">
         <Segmented
@@ -133,7 +147,11 @@ export default function ReviewQueue() {
             </span>
           </div>
         ))}
-        {rows.length === 0 && <div className="px-[18px] py-10 text-center font-mono text-sm text-muted-foreground">{t('state.empty')}</div>}
+        {rows.length === 0 && (
+          <div className="px-[18px] py-10 text-center font-mono text-sm text-muted-foreground">
+            {home.observation.state === 'ready' ? t('state.empty') : t('observation.queueEmptyPartial')}
+          </div>
+        )}
       </div>
 
       {selected && <Drawer item={selected} bundle={bundlesByRef.get(selected.object_ref) ?? null} onClose={closeRisk} />}

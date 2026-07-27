@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable
 
 from cygnus.domain.audience import AudienceFilter, Visibility
 from cygnus.domain.objects import KnowledgeObjectType
 from cygnus.evidence.records import FreshnessState, SupportEvidence
+from cygnus.retrieval.substrate_provider import resolve_object_type
 from cygnus.publish.actions import (
     PublishGovernanceAction,
     PublishGovernanceActionType,
@@ -20,6 +21,10 @@ from cygnus.review.fixtures import sample_review_bundles
 from cygnus.review.providers import build_review_command_surface_from_bundles
 from cygnus.review.queue import ReviewQueueSurface, build_review_queue_surface
 from cygnus.review.service import ProposalBundle
+from cygnus.review.surface import ObservationState, SurfaceObservation
+
+if TYPE_CHECKING:
+    from cygnus.runtime.database.models import Source, WikiPage
 
 
 def _normalize(values: Iterable[str] | None, *, label: str) -> tuple[str, ...]:
@@ -32,6 +37,88 @@ def _normalize(values: Iterable[str] | None, *, label: str) -> tuple[str, ...]:
             raise ValueError(f"{label} must not be blank")
         out.append(value)
     return tuple(out)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SourceFailureObservation:
+    source_id: str
+    title: str
+    source_ref: str
+    status: str
+    error_message: str
+    linked_wiki_refs: tuple[str, ...] = field(default_factory=tuple)
+    linked_object_refs: tuple[str, ...] = field(default_factory=tuple)
+    observed_at: str | None = None
+    impact_state: str = "unknown"
+
+    def __post_init__(self) -> None:
+        for value, label in (
+            (self.source_id, "source_id"),
+            (self.title, "title"),
+            (self.source_ref, "source_ref"),
+            (self.error_message, "error_message"),
+        ):
+            if not value.strip():
+                raise ValueError(f"{label} must not be blank")
+        if self.status != "error":
+            raise ValueError("source failure observation status must be error")
+        if self.impact_state != "unknown":
+            raise ValueError("source failure impact_state must remain unknown")
+        if self.observed_at is not None and not self.observed_at.strip():
+            raise ValueError("observed_at must not be blank when provided")
+        object.__setattr__(
+            self,
+            "linked_wiki_refs",
+            tuple(dict.fromkeys(_normalize(self.linked_wiki_refs, label="linked wiki ref"))),
+        )
+        object.__setattr__(
+            self,
+            "linked_object_refs",
+            tuple(dict.fromkeys(_normalize(self.linked_object_refs, label="linked object ref"))),
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "source_id": self.source_id,
+            "title": self.title,
+            "source_ref": self.source_ref,
+            "status": self.status,
+            "error_message": self.error_message,
+            "linked_wiki_refs": list(self.linked_wiki_refs),
+            "linked_object_refs": list(self.linked_object_refs),
+            "observed_at": self.observed_at,
+            "impact_state": self.impact_state,
+        }
+
+
+def build_source_failure_observations(
+    sources: Iterable["Source"],
+    linked_pages: Iterable["WikiPage"],
+) -> tuple[SourceFailureObservation, ...]:
+    page_refs_by_source: dict[object, list[tuple[str, str | None]]] = {}
+    for page in linked_pages:
+        object_ref = f"ko-{page.slug}" if resolve_object_type(page.knowledge_type_slugs) is not None else None
+        for source_id in page.source_ids or ():
+            page_refs_by_source.setdefault(source_id, []).append((page.slug, object_ref))
+
+    observations: list[SourceFailureObservation] = []
+    for source in sorted(sources, key=lambda row: str(row.id)):
+        if source.status != "error":
+            continue
+        linked_refs = page_refs_by_source.get(source.id, ())
+        observations.append(
+            SourceFailureObservation(
+                source_id=str(source.id),
+                title=(source.title or "").strip() or source.file_name or f"source:{source.id}",
+                source_ref=source.url or source.file_name or f"source:{source.id}",
+                status=source.status,
+                error_message=(source.error_message or "").strip() or "source_error_detail_unavailable",
+                linked_wiki_refs=tuple(sorted({slug for slug, _object_ref in linked_refs})),
+                linked_object_refs=tuple(sorted({object_ref for _slug, object_ref in linked_refs if object_ref is not None})),
+                observed_at=source.updated_at.isoformat() if source.updated_at else None,
+            )
+        )
+    return tuple(observations)
 
 
 class SourceBlindnessCommandType(str, Enum):
@@ -97,7 +184,9 @@ class SourceBlindnessSurface:
     surface_id: str
     headline: str
     summary: str
+    observation: SurfaceObservation
     contexts: tuple[SourceBlindnessContext, ...]
+    source_observations: tuple[SourceFailureObservation, ...] = field(default_factory=tuple)
     available_commands: tuple[str, ...] = field(default_factory=tuple)
     proposal_lane: tuple[str, ...] = field(default_factory=tuple)
     bundles: tuple[ProposalBundle, ...] = field(default_factory=tuple, repr=False, compare=False)
@@ -110,18 +199,19 @@ class SourceBlindnessSurface:
         if not self.summary.strip():
             raise ValueError("summary must not be blank")
         object.__setattr__(self, "contexts", tuple(self.contexts))
+        object.__setattr__(self, "source_observations", tuple(self.source_observations))
         object.__setattr__(self, "available_commands", _normalize(self.available_commands, label="available command"))
         object.__setattr__(self, "proposal_lane", _normalize(self.proposal_lane, label="proposal lane"))
         object.__setattr__(self, "bundles", tuple(self.bundles))
-        if not self.contexts:
-            raise ValueError("contexts must not be empty")
 
     def to_dict(self) -> dict[str, object]:
         return {
             "surface_id": self.surface_id,
             "headline": self.headline,
             "summary": self.summary,
+            "observation": self.observation.to_dict(),
             "contexts": [context.to_dict() for context in self.contexts],
+            "source_observations": [item.to_dict() for item in self.source_observations],
             "available_commands": list(self.available_commands),
             "proposal_lane": list(self.proposal_lane),
         }
@@ -199,27 +289,52 @@ class SourceBlindnessResult:
 def get_source_blindness_surface(
     *,
     bundles: Iterable[ProposalBundle] | None = None,
+    observation: SurfaceObservation | None = None,
+    source_observations: Iterable[SourceFailureObservation] = (),
 ) -> SourceBlindnessSurface:
     source_bundles = tuple(bundles) if bundles is not None else sample_review_bundles()
-    return build_source_blindness_surface(source_bundles)
+    return build_source_blindness_surface(
+        source_bundles,
+        observation=observation,
+        source_observations=source_observations,
+    )
 
 
 def build_source_blindness_surface(
     bundles: Iterable[ProposalBundle],
+    *,
+    observation: SurfaceObservation | None = None,
+    source_observations: Iterable[SourceFailureObservation] = (),
 ) -> SourceBlindnessSurface:
     blindness_bundles = tuple(bundle for bundle in bundles if _is_source_blindness_bundle(bundle))
-    if not blindness_bundles:
-        raise ValueError("source blindness surface requires at least one source-blindness bundle")
+    if not blindness_bundles and observation is None:
+        raise ValueError("empty source blindness surfaces require an explicit observation")
     contexts = tuple(_context_from_bundle(bundle) for bundle in blindness_bundles)
+    resolved_observation = observation or SurfaceObservation(
+        state=ObservationState.READY,
+        observed_count=len(blindness_bundles),
+        reason="source_impact_observed",
+        covered_signals=("source_status", "source_impact"),
+    )
     return SourceBlindnessSurface(
         surface_id="source-health",
-        headline="Source blindness is now expressed as governance loss, not sync noise",
-        summary=_build_summary(contexts),
+        headline="Source health governance",
+        summary=(
+            _build_summary(contexts)
+            if contexts
+            else "Source failures are observable; downstream impact is not yet modeled."
+        ),
+        observation=resolved_observation,
         contexts=contexts,
+        source_observations=tuple(source_observations),
         available_commands=(
-            SourceBlindnessCommandType.REPAIR_SOURCE.value,
-            SourceBlindnessCommandType.RESTRICT_PROPAGATION.value,
-            SourceBlindnessCommandType.ROUTE_TO_HUMAN_REVIEW.value,
+            (
+                SourceBlindnessCommandType.REPAIR_SOURCE.value,
+                SourceBlindnessCommandType.RESTRICT_PROPAGATION.value,
+                SourceBlindnessCommandType.ROUTE_TO_HUMAN_REVIEW.value,
+            )
+            if contexts
+            else ()
         ),
         proposal_lane=tuple(context.proposal_ref for context in contexts),
         bundles=blindness_bundles,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Iterable
 
 from cygnus.domain.audience import AudienceFilter
@@ -20,6 +21,60 @@ def _normalize(values: Iterable[str] | None, *, label: str) -> tuple[str, ...]:
             raise ValueError(f"{label} must not be blank")
         out.append(value)
     return tuple(out)
+
+
+class ObservationState(str, Enum):
+    READY = "ready"
+    PARTIAL = "partial"
+    UNAVAILABLE = "unavailable"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SurfaceObservation:
+    state: ObservationState
+    observed_count: int
+    reason: str
+    covered_signals: tuple[str, ...] = field(default_factory=tuple)
+    missing_signals: tuple[str, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        reason = self.reason.strip()
+        if not reason:
+            raise ValueError("reason must not be blank")
+        if self.observed_count < 0:
+            raise ValueError("observed_count must not be negative")
+
+        covered_signals = tuple(
+            dict.fromkeys(_normalize(self.covered_signals, label="covered signal"))
+        )
+        missing_signals = tuple(
+            dict.fromkeys(_normalize(self.missing_signals, label="missing signal"))
+        )
+        object.__setattr__(self, "reason", reason)
+        object.__setattr__(self, "covered_signals", covered_signals)
+        object.__setattr__(self, "missing_signals", missing_signals)
+
+        if self.state is ObservationState.READY:
+            if not covered_signals or missing_signals:
+                raise ValueError("ready observation requires covered signals and no missing signals")
+            return
+        if self.state is ObservationState.PARTIAL:
+            if not covered_signals or not missing_signals:
+                raise ValueError("partial observation requires covered and missing signals")
+            return
+        if covered_signals or not missing_signals or self.observed_count != 0:
+            raise ValueError(
+                "unavailable observation requires zero observations, no covered signals, and missing signals"
+            )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "state": self.state.value,
+            "observed_count": self.observed_count,
+            "reason": self.reason,
+            "covered_signals": list(self.covered_signals),
+            "missing_signals": list(self.missing_signals),
+        }
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -120,6 +175,7 @@ class PriorityStackCard:
 class ReviewCommandSurface:
     surface_id: str
     headline: str
+    observation: SurfaceObservation
     situation_frame: SituationFrame
     priority_stack: tuple[PriorityStackCard, ...]
     available_commands: tuple[str, ...] = field(default_factory=tuple)
@@ -132,13 +188,12 @@ class ReviewCommandSurface:
             raise ValueError("headline must not be blank")
         object.__setattr__(self, "priority_stack", tuple(self.priority_stack))
         object.__setattr__(self, "available_commands", _normalize(self.available_commands, label="available command"))
-        if not self.priority_stack:
-            raise ValueError("priority_stack must not be empty")
 
     def to_dict(self) -> dict[str, object]:
         return {
             "surface_id": self.surface_id,
             "headline": self.headline,
+            "observation": self.observation.to_dict(),
             "situation_frame": self.situation_frame.to_dict(),
             "priority_stack": [card.to_dict() for card in self.priority_stack],
             "available_commands": list(self.available_commands),

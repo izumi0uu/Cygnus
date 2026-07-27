@@ -1,32 +1,21 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.domain.objects import TroubleshootingFlow
 from cygnus.publish import get_publish_projection
-from cygnus.retrieval import (
-    SourceTraceResolver,
-    SubstrateKnowledgeSnapshot,
-    load_substrate_snapshot,
+from cygnus.retrieval import SourceTraceResolver, SubstrateKnowledgeSnapshot
+from cygnus.runtime.routers.governance.dependencies import (
+    get_governance_knowledge_snapshot,
 )
-from cygnus.runtime.database import get_db
-from cygnus.runtime.services.auth_service import get_current_user
-
 router = APIRouter()
 
 
-async def get_substrate_snapshot(
-    db: AsyncSession = Depends(get_db),
-) -> SubstrateKnowledgeSnapshot:
-    """Governed object/evidence snapshot loaded from substrate truth."""
-    return await load_substrate_snapshot(db)
 
 
 @router.get("/api/knowledge-graph")
 async def knowledge_graph(
-    _current_user=Depends(get_current_user),
-    snapshot: SubstrateKnowledgeSnapshot = Depends(get_substrate_snapshot),
+    snapshot: SubstrateKnowledgeSnapshot = Depends(get_governance_knowledge_snapshot),
 ) -> dict[str, object]:
     """Typed knowledge objects, evidence, and audiences as a relationship graph."""
     objects = snapshot.objects
@@ -122,8 +111,7 @@ async def knowledge_graph(
 @router.get("/api/traceability/{object_id}")
 async def traceability(
     object_id: str,
-    _current_user=Depends(get_current_user),
-    snapshot: SubstrateKnowledgeSnapshot = Depends(get_substrate_snapshot),
+    snapshot: SubstrateKnowledgeSnapshot = Depends(get_governance_knowledge_snapshot),
 ) -> dict[str, object]:
     """Full evidence→source→freshness traceability chain for one knowledge object."""
     resolver = SourceTraceResolver(objects=snapshot.objects, evidence=snapshot.evidence)

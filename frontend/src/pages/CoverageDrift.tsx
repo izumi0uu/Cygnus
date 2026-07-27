@@ -7,6 +7,7 @@ import { Stat } from '@/components/Stat'
 import { useVocab } from '@/lib/vocab'
 import { CmdButton } from '@/components/CmdButton'
 import { PageSkeleton } from '@/components/Skeleton'
+import { ObservationBanner } from '@/components/ObservationBanner'
 
 const HEAT: Record<string, string> = { urgent: 'bp-tol-urgent', high: 'bp-tol-high', medium: 'bp-tol-high', low: 'bp-tol-flat' }
 
@@ -46,6 +47,7 @@ export default function CoverageDrift() {
 
   return (
     <>
+      <ObservationBanner observation={data.observation} />
       <p className="mb-3 font-mono text-[12px] leading-relaxed text-muted-foreground">{data.summary}</p>
 
       <div className="mb-4 flex flex-wrap gap-2.5">
@@ -62,7 +64,9 @@ export default function CoverageDrift() {
       </div>
 
       {rows.length === 0 ? (
-        <div className="bp-panel px-[18px] py-10 text-center font-mono text-sm text-muted-foreground">{t('drift.empty')}</div>
+        <div className="bp-panel px-[18px] py-10 text-center font-mono text-sm text-muted-foreground">
+          {data.observation.state === 'ready' ? t('drift.empty') : t('observation.driftUnavailable')}
+        </div>
       ) : ok > 0 ? (
         <div className="mt-4 flex items-center gap-2 bp-panel px-4 py-3 font-mono text-[13px] text-muted-foreground">
           <Check size={16} style={{ color: 'var(--ok)' }} />

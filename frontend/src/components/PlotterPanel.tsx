@@ -11,6 +11,7 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type CSSProperties,
   type ElementType,
   type HTMLAttributes,
@@ -272,14 +273,22 @@ function SweptTitleBlock({
   )
 }
 
+const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)'
+
+function subscribeToReducedMotion(onStoreChange: () => void): () => void {
+  const media = window.matchMedia(REDUCED_MOTION_QUERY)
+  media.addEventListener('change', onStoreChange)
+  return () => media.removeEventListener('change', onStoreChange)
+}
+
+function getReducedMotionPreference(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia(REDUCED_MOTION_QUERY).matches
+}
+
 function usePrefersReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(false)
-  useEffect(() => {
-    const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
-    setReduced(mq.matches)
-    const handler = (e: MediaQueryListEvent) => setReduced(e.matches)
-    mq.addEventListener('change', handler)
-    return () => mq.removeEventListener('change', handler)
-  }, [])
-  return reduced
+  return useSyncExternalStore(
+    subscribeToReducedMotion,
+    getReducedMotionPreference,
+    () => false,
+  )
 }

@@ -38,9 +38,20 @@ export interface SituationFrame {
   recommended_commands: string[]
 }
 
+export type ObservationState = 'ready' | 'partial' | 'unavailable'
+
+export interface SurfaceObservation {
+  state: ObservationState
+  observed_count: number
+  reason: string
+  covered_signals: string[]
+  missing_signals: string[]
+}
+
 export interface CommandCenterSurface {
   surface_id: string
   headline: string
+  observation: SurfaceObservation
   situation_frame: SituationFrame
   priority_stack: PriorityItem[]
   available_commands: string[]
@@ -157,6 +168,7 @@ export interface DriftSurface {
   surface_id: string
   headline: string
   summary: string
+  observation: SurfaceObservation
   contexts: DriftContext[]
   available_commands: string[]
   proposal_lane: string[]
@@ -182,11 +194,25 @@ export interface SourceBlindnessContext {
   signal_loss_summary: string
 }
 
+export interface SourceFailureObservation {
+  source_id: string
+  title: string
+  source_ref: string
+  status: 'error'
+  error_message: string
+  linked_wiki_refs: string[]
+  linked_object_refs: string[]
+  observed_at: string | null
+  impact_state: 'unknown'
+}
+
 export interface SourceBlindnessSurface {
   surface_id: string
   headline: string
   summary: string
+  observation: SurfaceObservation
   contexts: SourceBlindnessContext[]
+  source_observations: SourceFailureObservation[]
   available_commands: string[]
   proposal_lane: string[]
 }
@@ -225,6 +251,7 @@ export interface GovernanceOverviewSurface {
   surface_id: string
   headline: string
   summary: string
+  rehearsal: boolean
   open_loops: GovernanceOpenLoop[]
   open_loop_ranks: GovernanceOpenLoopRank[]
   highest_leverage_command: string | null
@@ -251,9 +278,37 @@ export interface ReviewIntakeBundle {
   audience_notes: string[]
 }
 
+export interface ReviewPressureLine {
+  proposal_ref: string
+  title: string
+  risk_type: string
+  suggested_object_type: string
+  owner_state: string
+  queue_owner: string | null
+  urgency: string
+  trigger_signals: string[]
+  affected_audience_labels: string[]
+  affected_surfaces: string[]
+  evidence_sufficiency: string
+  visibility_consequence: string
+  impact_summary: string
+  command_actions: string[]
+}
+
+export interface ReviewPressureSurface {
+  surface_id: string
+  headline: string
+  summary: string
+  pressure_lines: ReviewPressureLine[]
+  available_commands: string[]
+  proposal_lane: string[]
+}
+
 export interface ReviewIntakeSurface {
   bundles: ReviewIntakeBundle[]
   review_home: CommandCenterSurface
+  pressure_surface: ReviewPressureSurface | null
+  source_blindness_surface: SourceBlindnessSurface | null
 }
 
 export async function fetchReviewIntake(): Promise<ReviewIntakeSurface> {

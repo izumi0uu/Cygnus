@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- ThemeProvider and useTheme are intentionally one public context API. */
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 
 export type Theme = 'light' | 'dark' | 'system'

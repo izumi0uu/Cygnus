@@ -19,6 +19,7 @@ from cygnus.review.fixtures import sample_review_bundles
 from cygnus.review.providers import build_review_command_surface_from_bundles
 from cygnus.review.queue import ReviewQueueSurface, build_review_queue_surface
 from cygnus.review.service import ProposalBundle
+from cygnus.review.surface import ObservationState, SurfaceObservation
 from cygnus.substrate.compilation_plan import UrgencyLevel
 
 
@@ -91,6 +92,7 @@ class DriftGovernanceSurface:
     surface_id: str
     headline: str
     summary: str
+    observation: SurfaceObservation
     contexts: tuple[DriftContext, ...]
     available_commands: tuple[str, ...] = field(default_factory=tuple)
     proposal_lane: tuple[str, ...] = field(default_factory=tuple)
@@ -107,14 +109,13 @@ class DriftGovernanceSurface:
         object.__setattr__(self, "available_commands", _normalize(self.available_commands, label="available command"))
         object.__setattr__(self, "proposal_lane", _normalize(self.proposal_lane, label="proposal lane"))
         object.__setattr__(self, "bundles", tuple(self.bundles))
-        if not self.contexts:
-            raise ValueError("contexts must not be empty")
 
     def to_dict(self) -> dict[str, object]:
         return {
             "surface_id": self.surface_id,
             "headline": self.headline,
             "summary": self.summary,
+            "observation": self.observation.to_dict(),
             "contexts": [context.to_dict() for context in self.contexts],
             "available_commands": list(self.available_commands),
             "proposal_lane": list(self.proposal_lane),
@@ -161,27 +162,45 @@ class DriftGovernanceResult:
 def get_drift_governance_surface(
     *,
     bundles: Iterable[ProposalBundle] | None = None,
+    observation: SurfaceObservation | None = None,
 ) -> DriftGovernanceSurface:
     source_bundles = tuple(bundles) if bundles is not None else sample_review_bundles()
-    return build_drift_governance_surface(source_bundles)
+    return build_drift_governance_surface(source_bundles, observation=observation)
 
 
 def build_drift_governance_surface(
     bundles: Iterable[ProposalBundle],
+    *,
+    observation: SurfaceObservation | None = None,
 ) -> DriftGovernanceSurface:
     drift_bundles = tuple(bundle for bundle in bundles if _is_drift_bundle(bundle))
-    if not drift_bundles:
-        raise ValueError("drift governance surface requires at least one release/incident drift bundle")
+    if not drift_bundles and observation is None:
+        raise ValueError("empty drift surfaces require an explicit observation")
     contexts = tuple(_context_from_bundle(bundle) for bundle in drift_bundles)
+    resolved_observation = observation or SurfaceObservation(
+        state=ObservationState.READY,
+        observed_count=len(drift_bundles),
+        reason="drift_signals_observed",
+        covered_signals=("release_delta", "incident_delta", "ticket_pressure"),
+    )
     return DriftGovernanceSurface(
         surface_id="drift-governance",
-        headline="Release and incident drift can now force a governance path",
-        summary=_build_summary(contexts),
+        headline="Release and incident drift governance",
+        summary=(
+            _build_summary(contexts)
+            if contexts
+            else "Release and incident drift detectors are not connected."
+        ),
+        observation=resolved_observation,
         contexts=contexts,
         available_commands=(
-            DriftGovernanceCommandType.OPEN_URGENT_REVIEW.value,
-            DriftGovernanceCommandType.FREEZE_EXTERNAL_PUBLISH.value,
-            DriftGovernanceCommandType.FORCE_AUDIENCE_RECHECK.value,
+            (
+                DriftGovernanceCommandType.OPEN_URGENT_REVIEW.value,
+                DriftGovernanceCommandType.FREEZE_EXTERNAL_PUBLISH.value,
+                DriftGovernanceCommandType.FORCE_AUDIENCE_RECHECK.value,
+            )
+            if contexts
+            else ()
         ),
         proposal_lane=tuple(context.proposal_ref for context in contexts),
         bundles=drift_bundles,

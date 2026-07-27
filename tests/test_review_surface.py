@@ -4,7 +4,18 @@ import unittest
 
 from cygnus.domain import AudienceFilter, Visibility
 from cygnus.domain.objects import KnowledgeObjectType
-from cygnus.review import OwnerState, PriorityStackCard, ReviewCommandBrief, ReviewCommandSurface, ReviewRiskItem, ReviewRiskType, SituationFrame, build_review_command_brief
+from cygnus.review import (
+    ObservationState,
+    OwnerState,
+    PriorityStackCard,
+    ReviewCommandBrief,
+    ReviewCommandSurface,
+    ReviewRiskItem,
+    ReviewRiskType,
+    SituationFrame,
+    SurfaceObservation,
+    build_review_command_brief,
+)
 from cygnus.review.briefing import WhyNowFrame
 from cygnus.substrate import UrgencyLevel
 
@@ -34,6 +45,12 @@ class ReviewSurfaceTests(unittest.TestCase):
         surface = ReviewCommandSurface(
             surface_id="review-home",
             headline=brief.headline,
+            observation=SurfaceObservation(
+                state=ObservationState.READY,
+                observed_count=1,
+                reason="review_signals_observed",
+                covered_signals=("source_status", "review_assignment"),
+            ),
             situation_frame=SituationFrame(
                 briefing_note="Morning command brief before opening any draft detail.",
                 summary="1 governance risk is stacked for command attention.",
@@ -68,5 +85,6 @@ class ReviewSurfaceTests(unittest.TestCase):
         payload = surface.to_dict()
         self.assertEqual(payload["surface_id"], "review-home")
         self.assertIn("situation_frame", payload)
+        self.assertEqual(payload["observation"]["state"], "ready")
         self.assertEqual(payload["priority_stack"][0]["owner_state"], "unassigned")
         self.assertEqual(payload["command_brief"]["brief_id"], "brief-1")

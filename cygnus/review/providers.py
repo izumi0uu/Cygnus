@@ -6,7 +6,13 @@ from cygnus.domain.audience import AudienceFilter
 from cygnus.review.briefing import OwnerState, ReviewCommandBrief, ReviewRiskItem
 from cygnus.review.queries import build_review_command_brief
 from cygnus.review.service import ProposalBundle, build_review_risk_item, rank_review_item
-from cygnus.review.surface import PriorityStackCard, ReviewCommandSurface, SituationFrame
+from cygnus.review.surface import (
+    ObservationState,
+    PriorityStackCard,
+    ReviewCommandSurface,
+    SituationFrame,
+    SurfaceObservation,
+)
 from cygnus.substrate.compilation_plan import UrgencyLevel
 
 
@@ -15,12 +21,14 @@ def build_review_command_surface(
     surface_id: str,
     briefing_note: str,
     brief: ReviewCommandBrief,
+    observation: SurfaceObservation | None = None,
 ) -> ReviewCommandSurface:
     cards = tuple(_card_from_item(item) for item in brief.priority_items)
     situation_frame = _build_situation_frame(briefing_note=briefing_note, items=brief.priority_items)
     return ReviewCommandSurface(
         surface_id=surface_id,
         headline=brief.headline,
+        observation=observation or _ready_review_observation(len(cards)),
         situation_frame=situation_frame,
         priority_stack=cards,
         available_commands=_available_commands(cards),
@@ -34,8 +42,18 @@ def build_review_command_surface_from_bundles(
     headline: str,
     briefing_note: str,
     bundles: Iterable[ProposalBundle],
+    observation: SurfaceObservation | None = None,
 ) -> ReviewCommandSurface:
     items = tuple(sorted((build_review_risk_item(bundle) for bundle in bundles), key=rank_review_item))
+    if not items:
+        if observation is None:
+            raise ValueError("empty review command surfaces require an explicit observation")
+        return build_empty_review_command_surface(
+            surface_id=surface_id,
+            headline=headline,
+            briefing_note=briefing_note,
+            observation=observation,
+        )
     brief = build_review_command_brief(
         brief_id=f"{surface_id}:brief",
         headline=headline,
@@ -46,7 +64,60 @@ def build_review_command_surface_from_bundles(
         surface_id=surface_id,
         briefing_note=briefing_note,
         brief=brief,
+        observation=observation,
     )
+
+
+def build_empty_review_command_surface(
+    *,
+    surface_id: str,
+    headline: str,
+    briefing_note: str,
+    observation: SurfaceObservation,
+) -> ReviewCommandSurface:
+    summary = _observation_summary(observation.reason)
+    return ReviewCommandSurface(
+        surface_id=surface_id,
+        headline=headline,
+        observation=observation,
+        situation_frame=SituationFrame(
+            briefing_note=briefing_note,
+            summary=summary,
+            primary_tension=summary,
+            urgent_items=0,
+            owner_gaps=0,
+            affected_surfaces=(),
+            recommended_commands=(),
+        ),
+        priority_stack=(),
+        available_commands=(),
+        command_brief=None,
+    )
+
+
+def _ready_review_observation(observed_count: int) -> SurfaceObservation:
+    return SurfaceObservation(
+        state=ObservationState.READY,
+        observed_count=observed_count,
+        reason="review_signals_observed",
+        covered_signals=(
+            "ticket_pressure",
+            "release_delta",
+            "incident_delta",
+            "audience_conflict",
+            "review_assignment",
+            "source_impact",
+        ),
+    )
+
+
+def _observation_summary(reason: str) -> str:
+    summaries = {
+        "review_signal_coverage_partial": "Review signals are only partially observed.",
+        "drift_detectors_unavailable": "Release and incident drift detectors are not connected.",
+        "source_impact_coverage_partial": "Source failures are observable; downstream impact is not yet modeled.",
+    }
+    return summaries.get(reason, reason.replace("_", " ").capitalize())
 
 
 def _build_situation_frame(

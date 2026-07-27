@@ -6,10 +6,10 @@ from typing import Iterable
 from cygnus.domain.audience import Visibility
 from cygnus.review.briefing import OwnerState, ReviewRiskItem, ReviewRiskType
 from cygnus.review.fixtures import sample_review_bundles
-from cygnus.review.providers import build_review_command_surface
+from cygnus.review.providers import build_empty_review_command_surface, build_review_command_surface
 from cygnus.review.queries import build_review_command_brief
 from cygnus.review.service import ProposalBundle, build_review_risk_item, rank_review_item
-from cygnus.review.surface import ReviewCommandSurface
+from cygnus.review.surface import ReviewCommandSurface, SurfaceObservation
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -33,6 +33,7 @@ def get_review_home_surface(
     query: ReviewHomeQuery | None = None,
     *,
     bundles: Iterable[ProposalBundle] | None = None,
+    observation: SurfaceObservation | None = None,
 ) -> ReviewCommandSurface:
     query = query or ReviewHomeQuery()
     source_bundles = tuple(bundles) if bundles is not None else sample_review_bundles()
@@ -41,7 +42,14 @@ def get_review_home_surface(
     if query.max_items is not None:
         filtered_items = filtered_items[: query.max_items]
     if not filtered_items:
-        raise ValueError("review home query returned no matching governance risks")
+        if observation is None:
+            raise ValueError("empty review home surfaces require an explicit observation")
+        return build_empty_review_command_surface(
+            surface_id="review-home",
+            headline=_headline_for_query(query),
+            briefing_note=_briefing_note_for_query(query),
+            observation=observation,
+        )
 
     brief = build_review_command_brief(
         brief_id="review-home:brief",
@@ -53,6 +61,7 @@ def get_review_home_surface(
         surface_id="review-home",
         briefing_note=_briefing_note_for_query(query),
         brief=brief,
+        observation=observation,
     )
 
 

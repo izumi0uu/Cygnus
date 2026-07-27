@@ -528,3 +528,13 @@ Cygnus 域层已实现、但**尚未作为工具暴露**的能力：
 因此当前更准确的描述不是“Cygnus 已完成审批治理”，而是：
 - contract 已声明审批应属于 Cygnus
 - 代码尚未完整兑现这一治理真相
+
+### 13.5 已落地的 governed observation 边界（CYG-97）
+`/api/command-center`、`/api/review-intake`、`/api/drift` 与 `/api/source-blindness` 现在都从请求级、权限已过滤的 `GovernanceReadSnapshot` 读取；这些 runtime path 不得隐式调用 `sample_*` fixture。
+
+- 每个治理 risk surface 返回 `observation`：`ready` 表示覆盖完整，`partial` 表示同时列出已覆盖和缺失 detector，`unavailable` 表示 detector 尚未接入而不是“没有风险”。`reason` 和 signal 均为 machine code，由客户端 i18n 展示。
+- 没有完整 proposal bundle 时，审阅队列、drift 与 source-blindness contexts 必须为空且没有治理命令；不得从普通 `WikiPageDraft` 推导 owner、audience、surface 或风险。
+- `Source.status="error"` 只能投影为 `SourceFailureObservation` 事实：可返回权限内关联 refs，但 `impact_state` 固定为 `unknown`，不能生成 audience、surface、owner 或命令。
+- `/api/recovery/overview` 显式返回 `rehearsal: true`；该 read surface 不是持久化恢复真相。
+
+仍未接入的 durable provider（工单压力、发布/事故 drift、受众冲突、审阅分配、source impact）必须保持显式 follow-up，不能用空数组或绿色 UI 冒充健康状态。

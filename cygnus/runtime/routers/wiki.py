@@ -16,7 +16,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, field_validator
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.runtime.database import get_db
@@ -31,7 +31,7 @@ from cygnus.runtime.services.audit_service import log_audit
 from cygnus.runtime.services.auth_service import get_current_user, require_permission
 from cygnus.runtime.services.permission_engine import (
     _get_user_permissions,
-    get_scope_level,
+    build_wiki_scope_clause,
 )
 
 router = APIRouter()
@@ -157,34 +157,6 @@ def _detail(p: WikiPage, backlinks: list[str], outlinks: list[str]) -> WikiPageD
     )
 
 
-def _build_wiki_scope_filter(user: Employee):
-    """Build SQLAlchemy filter for wiki pages based on user permissions.
-
-    Returns None if user can see everything (admin / wiki:read:all).
-    Returns a filter clause otherwise.
-    """
-    if user.role == "admin":
-        return None  # No filter
-
-    perms = _get_user_permissions(user)
-    scope_level = get_scope_level(list(perms), "wiki", "read")
-
-    if scope_level == "all":
-        return None  # No filter
-
-    if scope_level == "own_dept":
-        # Show: global wiki + dept wiki for user's dept
-        return or_(
-            WikiPage.scope_type == "global",
-            and_(
-                WikiPage.scope_type == "department",
-                WikiPage.scope_id.in_(user.department_ids) if user.department_ids
-                else WikiPage.id == None,  # noqa: E711 — no depts → no dept-scoped wiki
-            ),
-        )
-
-    # No wiki:read permission at all — should have been caught by require_permission
-    return WikiPage.id == None  # noqa: E711 — empty result
 
 
 @router.get("/wiki/pages", response_model=list[WikiPageSummary])
@@ -227,7 +199,7 @@ async def list_wiki_pages(
     )
 
     # Apply user's permission-based scope filter (RBAC)
-    perm_filter = _build_wiki_scope_filter(user)
+    perm_filter = build_wiki_scope_clause(user)
     if perm_filter is not None:
         stmt = stmt.where(perm_filter)
 
@@ -640,7 +612,7 @@ async def get_wiki_graph(
     base_filter = WikiPage.slug.notin_([wiki_service.INDEX_SLUG, wiki_service.LOG_SLUG, wiki_service.HOT_SLUG])
 
     # Apply scope filter
-    scope_filter = _build_wiki_scope_filter(user)
+    scope_filter = build_wiki_scope_clause(user)
 
     # Total count
     count_stmt = select(sqlfunc.count()).select_from(WikiPage).where(base_filter)

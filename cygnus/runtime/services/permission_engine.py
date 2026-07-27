@@ -21,7 +21,7 @@ Workspace Realm:
 import uuid
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.runtime.database.models import (
@@ -29,6 +29,7 @@ from cygnus.runtime.database.models import (
     Skill,
     Source,
     SourceDepartment,
+    WikiPage,
 )
 
 # ---------------------------------------------------------------------------
@@ -131,29 +132,73 @@ async def can_access_document(
     return bool(user_dept_ids & source_dept_ids)
 
 
-def build_document_filter(user: Employee, action: str = "read"):
-    """Build SQLAlchemy filter clauses for listing documents based on user permissions.
+def build_wiki_scope_clause(user: Employee, action: str = "read"):
+    """Return the SQL clause limiting wiki rows to the user's governed scope.
 
-    Returns: (needs_filter: bool, allowed_dept_ids: list[UUID] | None)
-    - needs_filter=False → show all documents (admin or :all scope)
-    - allowed_dept_ids=[]  → show only global docs (user has :own_dept but
-      belongs to zero departments)
-    - allowed_dept_ids=None → no permission at all, empty result
+    ``None`` means the user may read every wiki row. A user with no matching
+    permission receives an always-false primary-key clause so callers can keep
+    the permission decision inside their SQL statement.
     """
     if user.role == "admin":
-        return False, []
+        return None
 
     permissions = _get_user_permissions(user)
+    scope_level = get_scope_level(list(permissions), "wiki", action)
+    if scope_level == "all":
+        return None
 
-    if f"doc:{action}:all" in permissions:
-        return False, []
+    if scope_level == "own_dept":
+        department_ids = list(user.department_ids)
+        department_clause = (
+            WikiPage.scope_id.in_(department_ids)
+            if department_ids
+            else WikiPage.id.is_(None)
+        )
+        return or_(
+            WikiPage.scope_type == "global",
+            and_(
+                WikiPage.scope_type == "department",
+                department_clause,
+            ),
+        )
 
-    if f"doc:{action}:own_dept" in permissions:
-        # Filter: source has no departments (global) OR overlaps user's dept set.
-        return True, list(user.department_ids)
+    return WikiPage.id.is_(None)
 
-    # No permission at all — empty result
-    return True, None
+
+def build_document_scope_clause(user: Employee, action: str = "read"):
+    """Return the SQL clause limiting source rows to the user's governed scope.
+
+    Sources without department links are global. ``None`` means unrestricted
+    access; a user with no matching permission receives an always-false clause.
+    """
+    if user.role == "admin":
+        return None
+
+    permissions = _get_user_permissions(user)
+    scope_level = get_scope_level(list(permissions), "doc", action)
+    if scope_level == "all":
+        return None
+
+    if scope_level == "own_dept":
+        global_clause = ~exists(
+            select(SourceDepartment.source_id).where(
+                SourceDepartment.source_id == Source.id,
+            )
+        )
+        department_ids = list(user.department_ids)
+        if not department_ids:
+            return global_clause
+        return or_(
+            global_clause,
+            exists(
+                select(SourceDepartment.source_id).where(
+                    SourceDepartment.source_id == Source.id,
+                    SourceDepartment.department_id.in_(department_ids),
+                )
+            ),
+        )
+
+    return Source.id.is_(None)
 
 
 # ---------------------------------------------------------------------------

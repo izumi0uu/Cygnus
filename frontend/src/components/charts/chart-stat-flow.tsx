@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable react-refresh/only-export-components -- The component's typed default format is part of its public API. */
 
 import NumberFlow from "@number-flow/react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";

@@ -95,6 +95,25 @@ export default function Overview() {
         </span>
       </div>
 
+      {data.rehearsal && (
+        <section
+          role="note"
+          className="bp-panel mb-5 overflow-hidden"
+          style={{ borderColor: 'color-mix(in srgb, var(--high) 58%, transparent)' }}
+        >
+          <div className="bp-dim flex items-center gap-2 px-4 py-2.5">
+            <span className="h-2 w-2 rotate-45" style={{ background: 'var(--high)' }} />
+            <span className="bp-tol bp-tol-high">REHEARSAL</span>
+            <span className="font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--high)' }}>
+              {t('observation.rehearsalTitle')}
+            </span>
+          </div>
+          <p className="px-4 py-3 font-mono text-[12px] leading-relaxed text-muted-foreground">
+            {t('observation.rehearsalBody')}
+          </p>
+        </section>
+      )}
+
       {/* Dimension line separator */}
       <div className="bp-dim mb-4" />
 

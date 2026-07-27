@@ -5,6 +5,7 @@ import tomllib
 
 
 BOUNDARY_FILES = [
+    ".gitignore",
     "docs/README.md",
     "docs/zh/arkon-full-port-migration-plan.md",
     "docs/en/arkon-full-port-migration-plan.md",
@@ -21,14 +22,21 @@ BOUNDARY_FILES = [
 
 def test_boundary_files_exist() -> None:
     for relative_path in BOUNDARY_FILES:
-        assert Path(relative_path).is_file(), f"missing boundary-freeze file: {relative_path}"
+        assert Path(relative_path).is_file(), (
+            f"missing boundary-freeze file: {relative_path}"
+        )
 
 
 def test_completion_states_remain_explicit() -> None:
     checks = {
+        ".gitignore": [
+            ".cursor/",
+            ".trellis/",
+        ],
         "docs/README.md": [
             "keep product-shell parity as a deferred non-roadmap lane by default",
             "classify `auth / admin / wiki` shell candidates before any shell-parity implementation",
+            "Jira is the sole delivery backlog and workflow-status source of truth",
         ],
         "docs/zh/arkon-full-port-migration-plan.md": [
             "Source parity completed",
@@ -106,6 +114,8 @@ def test_completion_states_remain_explicit() -> None:
             "support-relevant shell candidates",
             "generic-product shell candidates",
             "non-support pages",
+            "Jira is the sole delivery-state and Kanban source of truth",
+            "Trellis defaults to **specs-only** use",
         ],
         "docs/agent/zh/execution-context.md": [
             "状态语言契约",
@@ -118,6 +128,8 @@ def test_completion_states_remain_explicit() -> None:
             "不能把 cutover 叙事写成 shell parity 或 P3",
             "`scripts/external_checkout_preserve.py`",
             "`scripts/external_checkout_audit.py --fail-if-found`",
+            "工程执行控制权",
+            "Jira 是唯一的交付 backlog 与工作流状态真相",
         ],
         "docs/agent/en/execution-context.md": [
             "Status-language contract",
@@ -130,31 +142,42 @@ def test_completion_states_remain_explicit() -> None:
             "must not describe cutover as shell parity or P3",
             "before any destructive deletion proposal",
             "`scripts/external_checkout_audit.py --fail-if-found` remains the physical-deletion proof",
+            "Engineering execution control",
+            "Jira is the only delivery backlog and workflow-status source of truth",
         ],
     }
 
     for relative_path, expected_snippets in checks.items():
         text = Path(relative_path).read_text(encoding="utf-8")
         for snippet in expected_snippets:
-            assert snippet in text, f"missing boundary snippet `{snippet}` in {relative_path}"
+            assert snippet in text, (
+                f"missing boundary snippet `{snippet}` in {relative_path}"
+            )
 
 
 def test_mainline_has_no_direct_langgraph_or_langchain_dependencies() -> None:
     project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
-    dependencies = [dependency.lower() for dependency in project["project"]["dependencies"]]
+    dependencies = [
+        dependency.lower() for dependency in project["project"]["dependencies"]
+    ]
 
     assert not any(
         dependency.startswith("langgraph") or dependency.startswith("langchain")
         for dependency in dependencies
     )
-    assert not any(
-        dependency.startswith("content-core")
-        for dependency in dependencies
-    )
+    assert not any(dependency.startswith("content-core") for dependency in dependencies)
 
 
-def test_mainline_docs_code_and_skills_do_not_reintroduce_langgraph_or_langchain() -> None:
-    scan_roots = [Path("cygnus"), Path("docs"), Path("frontend"), Path("scripts"), Path(".codex/skills")]
+def test_mainline_docs_code_and_skills_do_not_reintroduce_langgraph_or_langchain() -> (
+    None
+):
+    scan_roots = [
+        Path("cygnus"),
+        Path("docs"),
+        Path("frontend"),
+        Path("scripts"),
+        Path(".codex/skills"),
+    ]
     allowed_suffixes = {".py", ".md", ".toml", ".tsx", ".ts", ".js", ".jsx", ".json"}
     forbidden_hits: list[str] = []
     allowed_boundary_mentions = {
@@ -192,13 +215,25 @@ def test_legacy_scope_seam_was_removed_from_current_mainline() -> None:
     assert not Path("cygnus/runtime/services/policy_engine.py").exists()
     assert "scopes.router" not in main_source
 
-    routers_baseline_source = Path("tests/test_routers_baseline_import.py").read_text(encoding="utf-8")
-    services_baseline_source = Path("tests/test_services_baseline_import.py").read_text(encoding="utf-8")
-    surface_baseline_source = Path("tests/test_surface_baseline_import.py").read_text(encoding="utf-8")
+    routers_baseline_source = Path("tests/test_routers_baseline_import.py").read_text(
+        encoding="utf-8"
+    )
+    services_baseline_source = Path("tests/test_services_baseline_import.py").read_text(
+        encoding="utf-8"
+    )
+    surface_baseline_source = Path("tests/test_surface_baseline_import.py").read_text(
+        encoding="utf-8"
+    )
 
     assert '    "cygnus/runtime/routers/scopes.py",\n' not in routers_baseline_source
-    assert '    "cygnus/runtime/services/policy_engine.py",\n' not in services_baseline_source
-    assert '    "cygnus.runtime.services.policy_engine": ["PolicyDecision", "PolicyEngine"],\n' not in services_baseline_source
+    assert (
+        '    "cygnus/runtime/services/policy_engine.py",\n'
+        not in services_baseline_source
+    )
+    assert (
+        '    "cygnus.runtime.services.policy_engine": ["PolicyDecision", "PolicyEngine"],\n'
+        not in services_baseline_source
+    )
     assert '    "cygnus/runtime/routers/scopes.py",\n' not in surface_baseline_source
 
 

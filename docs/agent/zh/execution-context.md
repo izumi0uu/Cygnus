@@ -73,6 +73,13 @@ Agent 必须保留以下纪律：
 - `SourceFailureObservation` 是来源失败事实，`impact_state="unknown"` 前不得推导风险、owner、audience、surface 或执行命令。
 - recovery overview 的 `rehearsal:true` 必须在任何客户端/agent summary 中保留；它不是持久化恢复真相。
 
+### 4.1.2 工程执行控制权
+- Jira 是唯一的交付 backlog 与工作流状态真相；priority、owner、blocker、进度和完成态都以 CYG issue 为准。
+- 会改代码或跨 session 的交付必须先绑定一张 CYG issue；一次性的只读调查可以不建票。
+- Trellis 默认只保留 specs 模式：可以使用 `.trellis/spec/`、`trellis-before-dev`、`trellis-check` 与 `trellis-update-spec`，但不得默认创建另一套 task lifecycle。
+- 复杂或高风险工作可以生成绑定 CYG issue 的 neutral local plan；plan 只约束实现，不拥有状态，也不能覆盖 Jira。
+- 完成证据来自 Git、tests、CI、smoke 与 review；转换 Jira 状态前必须把精简证据写回 issue。
+
 ## 4.2 Package owner contract
 当前 package 解释必须保持一致：
 

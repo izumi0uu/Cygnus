@@ -20,6 +20,12 @@ Current engineering strategy (status as of 2026-07):
 - keep product-shell parity as a deferred non-roadmap lane by default
 - classify `auth / admin / wiki` shell candidates before any shell-parity implementation, and keep non-support pages isolated unless they directly unblock support verticalization
 
+### Engineering execution control
+- Jira is the sole delivery backlog and workflow-status source of truth for Cygnus.
+- Trellis is used in specs-only mode by default: project specs and pre-development/check guidance remain useful, but Jira issues are not mirrored into Trellis task lifecycles.
+- Complex work may produce a neutral local plan keyed to its CYG issue; the plan has no independent status authority.
+- Git, tests, CI, smoke checks, and review provide implementation evidence, which is written back to Jira before completion.
+
 ## Documentation Tracks
 
 ### Human-facing docs

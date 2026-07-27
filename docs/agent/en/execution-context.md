@@ -73,6 +73,13 @@ Downstream agents must follow this contract in Jira comments, handoffs, logs, an
 - A `SourceFailureObservation` is a source-failure fact. Before `impact_state="unknown"` is resolved, do not infer a risk, owner, audience, surface, or executable command.
 - Preserve `rehearsal:true` from recovery overview in every client or agent summary; it is not durable recovery truth.
 
+### 4.1.2 Engineering execution control
+- Jira is the only delivery backlog and workflow-status source of truth; CYG issues own priority, owner, blockers, progress, and completion.
+- Code-changing or multi-session delivery must bind to one CYG issue before implementation; a one-turn read-only investigation may remain untracked.
+- Trellis defaults to specs-only mode: `.trellis/spec/`, `trellis-before-dev`, `trellis-check`, and `trellis-update-spec` remain available, but agents must not create a second task lifecycle by default.
+- Complex or high-risk work may produce a neutral local plan keyed to the CYG issue; the plan constrains implementation but owns no status and cannot override Jira.
+- Completion evidence comes from Git, tests, CI, smoke checks, and review; write concise evidence back before transitioning the Jira issue.
+
 ## 4.2 Package owner contract
 Current package interpretation must remain consistent:
 

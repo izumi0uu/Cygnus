@@ -3,6 +3,8 @@ AGENTS.md
 CLAUDE.md
 .codex/
 .claude/
+.cursor/
+.trellis/
 
 # Local test/runtime cache
 __pycache__/

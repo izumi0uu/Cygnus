@@ -161,7 +161,7 @@ export default function AudiencePublish() {
                 <div className="flex items-center gap-2">
                   {ap.recommended && <span className="bp-tol bp-tol-urgent">{t('pub.recommended')}</span>}
                   <span className="font-mono text-[11px] text-muted-foreground">{ap.command_key}</span>
-                  <CmdButton command={ap.command_key} className="ml-auto" />
+                  <CmdButton command={ap.command_key} objectRef={card?.object_ref} className="ml-auto" />
                 </div>
                 <p className="text-[12.5px] leading-relaxed text-muted-foreground">{ap.summary}</p>
                 <p className="font-mono text-[10.5px] leading-relaxed text-faint">{ap.consequence_hint}</p>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router-dom'
 import { fetchGovernanceOverview, type GovernanceOverviewSurface, type GovernanceOpenLoopRank } from '@/lib/api'
+import { ApiError } from '@/lib/authApi'
 import { Button } from '@/components/ui/button'
 import { PageSkeleton } from '@/components/Skeleton'
 import { DimensionLines, type DimensionLinesConfig } from '@/components/DimensionLines'
@@ -41,6 +42,7 @@ export default function Overview() {
   const [data, setData] = useState<GovernanceOverviewSurface | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [recoveryUnavailable, setRecoveryUnavailable] = useState(false)
   // Index of the hovered/focused SEC-A rank row, for DimensionLines. Null when
   // idle. Set by mouseenter/focus, cleared by mouseleave/blur.
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
@@ -49,10 +51,23 @@ export default function Overview() {
   const load = () => {
     setLoading(true)
     setError(null)
-    fetchGovernanceOverview().then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false))
+    setRecoveryUnavailable(false)
+    fetchGovernanceOverview()
+      .then(setData)
+      .catch((e: unknown) => {
+        if (e instanceof ApiError && e.status === 404) setRecoveryUnavailable(true)
+        else setError(String(e))
+      })
+      .finally(() => setLoading(false))
   }
   useEffect(() => {
-    fetchGovernanceOverview().then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false))
+    fetchGovernanceOverview()
+      .then(setData)
+      .catch((e: unknown) => {
+        if (e instanceof ApiError && e.status === 404) setRecoveryUnavailable(true)
+        else setError(String(e))
+      })
+      .finally(() => setLoading(false))
   }, [])
 
   const d = useMemo(() => {
@@ -80,6 +95,28 @@ export default function Overview() {
         <Button variant="ghost" className="mt-3" onClick={load}>{t('state.retry')}</Button>
       </div>
     )
+  if (recoveryUnavailable)
+    return (
+      <div className="min-h-full p-6 pb-10 pt-5">
+        <div className="mb-5 flex items-end gap-4">
+          <div>
+            <div className="bp-label mb-1">DWG-001 · GOVERNANCE OVERVIEW</div>
+            <h1 className="font-mono text-[22px] font-bold leading-none tracking-tight">{t('nav.overview')}</h1>
+          </div>
+          <span className="bp-stamp ml-auto">REV · UNAVAILABLE</span>
+        </div>
+        <section role="status" className="bp-panel overflow-hidden">
+          <div className="bp-dim flex items-center gap-2 px-4 py-2.5">
+            <span className="bp-label">SEC-A · {t('overview.openLoops')}</span>
+            <span className="bp-tol bp-tol-flat">{t('observation.state.unavailable')}</span>
+          </div>
+          <p className="px-4 py-5 font-mono text-[12px] leading-relaxed text-muted-foreground">
+            {t('state.recoveryUnavailable')}
+          </p>
+        </section>
+      </div>
+    )
+
   if (!data || !d) return null
 
   return (

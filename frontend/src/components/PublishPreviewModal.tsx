@@ -48,12 +48,21 @@ export default function PublishPreviewModal({
   const [applying, setApplying] = useState(false)
   const [applyError, setApplyError] = useState<string | null>(null)
 
+  // Production APPLY fires only with a durable envelope that matches the
+  // selected action. A preview without one is not durable-qualified, so the
+  // write path stays withheld rather than running a rehearsal that could be
+  // misread as persisted truth.
+  const selectedKey = actionKey ?? data?.selected_action ?? null
+  const durableCommand =
+    data?.durable_command && selectedKey && data.durable_command.action_key === selectedKey
+      ? data.durable_command
+      : null
+
   const runApply = () => {
-    const key = actionKey ?? data?.selected_action
-    if (!key) return
+    if (!durableCommand) return
     setApplying(true)
     setApplyError(null)
-    applyPublishAction(objectRef, key)
+    applyPublishAction(objectRef, durableCommand.action_key, durableCommand)
       .then((r) => {
         setApplyResult(r)
       })
@@ -85,8 +94,16 @@ export default function PublishPreviewModal({
 
   const gotoPropagation = () => {
     onClose()
-    const params = new URLSearchParams({ object_ref: objectRef })
-    if (actionKey) params.set('action_key', actionKey)
+    const params = new URLSearchParams()
+    if (applyResult?.persisted && applyResult.publication_record_id) {
+      // A persisted apply produced durable truth: open its publication ledger
+      // directly, never an action_key rehearsal projection.
+      params.set('publication_id', applyResult.publication_record_id)
+    } else {
+      // No durable receipt — object_ref resolves the latest durable
+      // publication server-side (explicit 404 when none exists).
+      params.set('object_ref', objectRef)
+    }
     navigate(`/console/propagation?${params.toString()}`)
   }
 
@@ -129,7 +146,7 @@ export default function PublishPreviewModal({
         {data && !loading && !error && (
           <PublishBody
             data={data}
-            canApply={!!(actionKey ?? data.selected_action)}
+            canApply={!!durableCommand}
             applying={applying}
             applyResult={applyResult}
             applyError={applyError}
@@ -306,7 +323,13 @@ function PublishBody({
                   ))}
                 </ul>
               )}
-              {!applyResult.persisted && (
+              {applyResult.persisted ? (
+                <p className="font-mono text-[10px] leading-relaxed" style={{ color: 'var(--ok)' }}>
+                  {t('publish.persisted')}
+                  {applyResult.command_id ? ` · ${applyResult.command_id}` : ''}
+                  {applyResult.replayed ? ` · ${t('publish.replayed')}` : ''}
+                </p>
+              ) : (
                 <p className="font-mono text-[10px] leading-relaxed text-faint">{t('publish.notPersisted')}</p>
               )}
             </div>
@@ -316,6 +339,11 @@ function PublishBody({
 
       {/* footer: apply (write path) + propagation link */}
       <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-3.5">
+        {!canApply && (
+          <span className="mr-auto font-mono text-[10px] leading-relaxed text-faint">
+            {t('publish.durableOnly')}
+          </span>
+        )}
         <button
           onClick={onApply}
           disabled={!canApply || applying}

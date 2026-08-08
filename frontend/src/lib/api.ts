@@ -251,6 +251,7 @@ export interface GovernanceOverviewSurface {
   surface_id: string
   headline: string
   summary: string
+  persisted: boolean
   rehearsal: boolean
   open_loops: GovernanceOpenLoop[]
   open_loop_ranks: GovernanceOpenLoopRank[]
@@ -393,6 +394,20 @@ export interface BlastRadiusPreview {
   warnings: string[]
 }
 
+// Durable publish envelope. Present on a preview only when the selected
+// action is qualified for durable publication (approved draft, ready sources,
+// explicit persisted audience bindings). When present, APPLY must send these
+// fields verbatim — they bind the write to one draft, one approval, and one
+// idempotent command_id.
+export interface DurablePublishCommandEnvelope {
+  draft_id: string
+  approval_ref: string
+  command_id: string
+  action_key: string
+  target_channels: string[]
+  reason: string | null
+}
+
 export interface PublishPreviewSurface {
   surface_id: string
   headline: string
@@ -409,6 +424,7 @@ export interface PublishPreviewSurface {
   action_presets: PublishActionPreset[]
   selected_action: string | null
   action_echo: PublishActionEcho | null
+  durable_command?: DurablePublishCommandEnvelope | null
 }
 
 export async function fetchPublishPreview(
@@ -423,11 +439,17 @@ export async function fetchPublishPreview(
 }
 
 // ============================================================
-// Publish apply — the write path. Runs the real governance
-// executor (POST /api/publish/apply) and returns the full
-// result: opened / removed / held bindings + action_log.
-// `persisted` is false because the store is fixture-backed; the
-// loop is real (the executor actually runs) but not durable.
+// Publish apply — the write path (POST /api/publish/apply). Two
+// explicitly distinguished paths:
+// - durable: the preview carried a durable_command envelope, so the
+//   SPA sends the full draft/approval/command/channel payload. The
+//   executor stages a real GovernancePublication; the response is
+//   persisted truth (persisted: true, rehearsal: false) with the
+//   durable receipt fields below.
+// - explicit rehearsal: object_ref + action_key only. The executor
+//   runs against the pressure-intake projection and returns
+//   rehearsal: true / persisted: false. It must never be presented
+//   as durable.
 // ============================================================
 
 export interface PublishApplyResult {
@@ -440,12 +462,39 @@ export interface PublishApplyResult {
   preview: BlastRadiusPreview
   rehearsal: boolean
   persisted: boolean
+  // Durable receipt — only present when persisted is true.
+  replayed?: boolean
+  publication_record_id?: string
+  ledger_event_id?: string
+  approval_ref?: string
+  command_id?: string
+  object_ref?: string
+  object_version?: number
+  published_at?: string
+  propagation?: {
+    summary: Record<string, number>
+    records: unknown[]
+  }
 }
 
 export async function applyPublishAction(
   objectRef: string | undefined,
   actionKey: string,
+  durableCommand?: DurablePublishCommandEnvelope | null,
 ): Promise<PublishApplyResult> {
+  if (durableCommand) {
+    return authApi<PublishApplyResult>('/api/publish/apply', {
+      method: 'POST',
+      body: {
+        draft_id: durableCommand.draft_id,
+        approval_ref: durableCommand.approval_ref,
+        command_id: durableCommand.command_id,
+        action_key: durableCommand.action_key,
+        target_channels: durableCommand.target_channels,
+        reason: durableCommand.reason,
+      },
+    })
+  }
   return authApi<PublishApplyResult>('/api/publish/apply', {
     method: 'POST',
     body: { object_ref: objectRef ?? null, action_key: actionKey },
@@ -495,6 +544,12 @@ export interface PublishPropagationSurface {
   headline: string
   summary: string
   selected_card: PriorityItem
+  // Durable provenance — present on the durable provider (persisted truth,
+  // never a rehearsal); absent only on legacy-shaped payloads.
+  persisted?: boolean
+  rehearsal?: boolean
+  publication_record_id?: string
+  command_id?: string
   propagation_ledger: PublishPropagationLedger
   status_lanes: PropagationStatusLane[]
   selected_position: number
@@ -509,11 +564,15 @@ export interface PublishPropagationSurface {
 
 export async function fetchPublishPropagation(
   objectRef?: string,
-  actionKey?: string,
+  publicationId?: string,
 ): Promise<PublishPropagationSurface> {
+  // Durable lookup: publication_id addresses one staged publication and wins
+  // when both are sent; object_ref alone resolves the latest durable
+  // publication for that object. The backend answers an explicit 404 when
+  // neither resolves — never a fixture projection.
   const params = new URLSearchParams()
+  if (publicationId) params.set('publication_id', publicationId)
   if (objectRef) params.set('object_ref', objectRef)
-  if (actionKey) params.set('action_key', actionKey)
   const qs = params.toString()
   return authApi<PublishPropagationSurface>(`/api/publish-propagation${qs ? `?${qs}` : ''}`)
 }

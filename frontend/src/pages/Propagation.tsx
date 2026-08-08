@@ -41,17 +41,20 @@ export default function Propagation() {
   const [error, setError] = useState<string | null>(null)
 
   const objectRef = searchParams.get('object_ref') || undefined
-  const actionKey = searchParams.get('action_key') || undefined
+  const publicationId = searchParams.get('publication_id') || undefined
 
   useEffect(() => {
-    fetchPublishPropagation(objectRef, actionKey)
+    fetchPublishPropagation(objectRef, publicationId)
       .then(setData)
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false))
-  }, [objectRef, actionKey])
+  }, [objectRef, publicationId])
 
+  // Prev/next walks objects, not publications: drop any publication_id so the
+  // new object_ref resolves its own latest durable publication instead of
+  // losing precedence to the previous object's publication.
   const gotoObject = (ref: string) =>
-    setSearchParams((p) => { const n = new URLSearchParams(p); n.set('object_ref', ref); return n }, { replace: true })
+    setSearchParams((p) => { const n = new URLSearchParams(p); n.set('object_ref', ref); n.delete('publication_id'); return n }, { replace: true })
 
   if (loading) return <PageSkeleton />
   if (error)
@@ -64,7 +67,7 @@ export default function Propagation() {
           onClick={() => {
             setLoading(true)
             setError(null)
-            fetchPublishPropagation(objectRef, actionKey)
+            fetchPublishPropagation(objectRef, publicationId)
               .then(setData)
               .catch((e) => setError(String(e)))
               .finally(() => setLoading(false))

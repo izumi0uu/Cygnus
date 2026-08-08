@@ -78,14 +78,29 @@ const SIGNAL_CHIP: Record<string, string> = {
 const PLANES_DIM_GEOMETRY = { side: 'left' as const, inset: 9, extReach: 20, stride: 0 }
 const PLANES_DIM_TOLERANCE = { floor: 0.05, cap: 0.1 }
 
+type WindowRequestState = {
+  commandId: string
+  window: RecoveryWindowSurface | null
+  error: string | null
+}
+
+type RealityRequestState = {
+  commandId: string
+  reality: DownstreamRealityCheckSurface | null
+}
+
 export default function RecoveryDetail() {
   const { commandId } = useParams<{ commandId: string }>()
   const { t } = useTranslation()
   const v = useVocab()
-  const [window, setWindow] = useState<RecoveryWindowSurface | null>(null)
-  const [reality, setReality] = useState<DownstreamRealityCheckSurface | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [windowRequest, setWindowRequest] = useState<WindowRequestState | null>(null)
+  const [realityRequest, setRealityRequest] = useState<RealityRequestState | null>(null)
+  const activeWindowRequest = windowRequest?.commandId === commandId ? windowRequest : null
+  const activeRealityRequest = realityRequest?.commandId === commandId ? realityRequest : null
+  const window = activeWindowRequest?.window ?? null
+  const error = activeWindowRequest?.error ?? null
+  const loading = Boolean(commandId) && activeWindowRequest === null
+  const reality = activeRealityRequest?.reality ?? null
   // Index of the hovered/focused alignment-plane row, for DimensionLines. Null
   // when idle. The caliper measures the after_score delta to the
   // strongest/weakest plane (rank-extrema) — surfacing the bottleneck plane.
@@ -111,13 +126,27 @@ export default function RecoveryDetail() {
 
   useEffect(() => {
     if (!commandId) return
-    Promise.all([
-      fetchRecoveryWindow(commandId).catch((e) => { throw new Error(`window: ${e}`) }),
-      fetchDownstreamRealityCheck(commandId).catch((e) => { throw new Error(`reality: ${e}`) }),
-    ])
-      .then(([w, r]) => { setWindow(w); setReality(r) })
-      .catch((e) => setError(String(e)))
-      .finally(() => setLoading(false))
+    let cancelled = false
+    // The recovery window is durable truth and loads independently from the
+    // optional downstream feedback. Keying each result by command prevents a
+    // previous route's data from appearing while the next request is pending.
+    void fetchRecoveryWindow(commandId)
+      .then((nextWindow) => {
+        if (!cancelled) setWindowRequest({ commandId, window: nextWindow, error: null })
+      })
+      .catch((nextError) => {
+        if (!cancelled) setWindowRequest({ commandId, window: null, error: String(nextError) })
+      })
+    void fetchDownstreamRealityCheck(commandId)
+      .then((nextReality) => {
+        if (!cancelled) setRealityRequest({ commandId, reality: nextReality })
+      })
+      .catch(() => {
+        if (!cancelled) setRealityRequest({ commandId, reality: null })
+      })
+    return () => {
+      cancelled = true
+    }
   }, [commandId])
 
   if (loading) return <PageSkeleton />

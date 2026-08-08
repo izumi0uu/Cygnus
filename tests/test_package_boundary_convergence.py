@@ -367,7 +367,8 @@ def test_recovery_proof_surface_lives_under_recovery_tree() -> None:
     assert "cygnus.recovery" not in publish_router_text
     assert "get_pressure_intake_recovery_proof_surface" not in publish_router_text
     assert "cygnus.recovery" in recovery_router_text
-    assert "get_pressure_intake_recovery_proof_surface" in recovery_router_text
+    assert "get_pressure_intake_recovery_proof_surface" not in recovery_router_text
+    assert "get_durable_recovery_proof" in recovery_router_text
 
     assert not Path("cygnus/publish/recovery.py").exists()
     assert Path("cygnus/recovery/proof.py").exists()

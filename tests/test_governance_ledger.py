@@ -16,10 +16,13 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from cygnus.domain import AudienceFilter, Visibility
 from cygnus.governance import (
+    AudienceBindingCreate,
     GovernanceEventType,
     GovernanceLedgerConflict,
     append_draft_event,
+    create_audience_binding,
     list_draft_events,
 )
 from cygnus.publish import (
@@ -38,6 +41,7 @@ from cygnus.runtime.services import wiki_service
 from cygnus.runtime.services.auth_service import require_admin
 from cygnus.runtime.database.models import (
     Employee,
+    GovernanceAudienceBinding,
     GovernanceLedgerEvent,
     GovernancePropagation,
     GovernancePublication,
@@ -319,6 +323,20 @@ class GovernanceLedgerPostgresTests(unittest.TestCase):
                     reviewer_note="evidence and audience checked",
                 )
                 page.source_ids = [source.id]
+                for channel in ("agent-copilot", "internal-search"):
+                    _ = await create_audience_binding(
+                        session,
+                        command=AudienceBindingCreate(
+                            page_id=page.id,
+                            object_ref=f"ko-{page.slug}",
+                            variant_ref="internal-governed",
+                            channel=channel,
+                            audience_filter=AudienceFilter(
+                                visibility=Visibility.INTERNAL,
+                            ),
+                        ),
+                        actor_id=actor.id,
+                    )
                 index_page = await wiki_service.regenerate_index(
                     session,
                     scope_type="project",
@@ -530,6 +548,22 @@ class GovernanceLedgerPostgresTests(unittest.TestCase):
                 await assert_rejected(suffix="non-ready-evidence")
                 persisted_source.status = "ready"
                 await session.flush()
+                active_bindings = tuple(
+                    (
+                        await session.execute(
+                            select(GovernanceAudienceBinding).where(
+                                GovernanceAudienceBinding.page_id == persisted_page.id
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                active_bindings[0].lifecycle_state = "held"
+                await session.flush()
+                await assert_rejected(suffix="missing-active-channel-binding")
+                active_bindings[0].lifecycle_state = "active"
+                await session.flush()
 
                 await assert_rejected(
                     action_key="unsupported-action",
@@ -548,6 +582,12 @@ class GovernanceLedgerPostgresTests(unittest.TestCase):
                         _ = await cleanup.execute(
                             delete(GovernancePublication).where(
                                 GovernancePublication.id == publication_id
+                            )
+                        )
+                    if page_id is not None:
+                        _ = await cleanup.execute(
+                            delete(GovernanceAudienceBinding).where(
+                                GovernanceAudienceBinding.page_id == page_id
                             )
                         )
                     _ = await cleanup.execute(

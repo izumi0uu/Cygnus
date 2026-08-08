@@ -16,6 +16,14 @@ from cygnus.recovery.fixtures import (
     sample_reality_check_command_ref,
     sample_reality_check_feedback,
 )
+from cygnus.recovery.durable import (
+    DurableRecoveryNotFound,
+    DurableRecoveryUnavailable,
+    get_durable_downstream_reality_check,
+    get_durable_governance_overview,
+    get_durable_recovery_proof,
+    get_durable_recovery_window,
+)
 from cygnus.recovery.providers import (
     build_downstream_reality_check,
     build_governance_overview,
@@ -72,6 +80,8 @@ __all__ = [
     "BeforeAfterAlignmentView",
     "ClosureJudge",
     "DownstreamFeedbackSignal",
+    "DurableRecoveryNotFound",
+    "DurableRecoveryUnavailable",
     "DownstreamRealityCheckQuery",
     "DownstreamRealityCheckSurface",
     "FeedbackSignalType",
@@ -84,6 +94,10 @@ __all__ = [
     "build_governance_overview_surface",
     "build_recovery_window",
     "build_recovery_window_surface",
+    "get_durable_downstream_reality_check",
+    "get_durable_governance_overview",
+    "get_durable_recovery_proof",
+    "get_durable_recovery_window",
     "get_downstream_reality_check_surface",
     "get_default_governance_overview_surface",
     "get_governance_overview_surface",

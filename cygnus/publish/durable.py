@@ -10,6 +10,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.domain.audience import AudienceFilter, Visibility
+from cygnus.governance.audience_bindings import (
+    AudienceBindingLifecycle,
+    list_audience_bindings,
+    publish_binding_from_record,
+    publish_conflicts_from_records,
+)
 from cygnus.governance.ledger import (
     GovernanceEventType,
     append_draft_event,
@@ -19,16 +25,13 @@ from cygnus.governance.ledger import (
     lock_draft_aggregate,
     lock_governance_command,
 )
-from cygnus.publish.actions import (
-    PublishGovernanceAction,
-    PublishGovernanceActionType,
-    PublishGovernanceResult,
-    apply_publish_governance_actions,
-)
+from cygnus.publish.actions import PublishGovernanceResult
 from cygnus.publish.preview import (
     PublishActionType,
     PublishBinding,
+    PublishConflict,
     PublishPreviewCandidate,
+    build_publish_blast_radius_preview,
 )
 from cygnus.publish.propagation import PropagationStatus
 from cygnus.retrieval.substrate_provider import wiki_page_to_knowledge_object
@@ -36,6 +39,7 @@ from cygnus.runtime.database.models import (
     GovernanceLedgerEvent,
     GovernancePropagation,
     GovernancePublication,
+    GovernanceSignal,
     Source,
     WikiPage,
     WikiPageDraft,
@@ -99,6 +103,185 @@ class DurablePublishCommand:
             "utf-8"
         )
         return hashlib.sha256(encoded).hexdigest()
+
+
+async def durable_publish_command_for_signal(
+    session: AsyncSession,
+    *,
+    signal: GovernanceSignal,
+    action_key: str | None = None,
+) -> dict[str, object] | None:
+    """Return an executable envelope only for fully qualified durable truth."""
+    if signal.page_id is None or signal.status != "active":
+        return None
+    page = await session.get(WikiPage, signal.page_id)
+    if page is None:
+        return None
+    knowledge_object = wiki_page_to_knowledge_object(page)
+    if knowledge_object is None or knowledge_object.object_id != signal.object_ref:
+        return None
+
+    source_ids = tuple(dict.fromkeys(page.source_ids or ()))
+    if not source_ids:
+        return None
+    ready_source_ids = set(
+        (
+            await session.execute(
+                select(Source.id).where(
+                    Source.id.in_(source_ids),
+                    Source.status == "ready",
+                )
+            )
+        ).scalars()
+    )
+    if any(source_id not in ready_source_ids for source_id in source_ids):
+        return None
+
+    draft = (
+        await session.execute(
+            select(WikiPageDraft)
+            .where(
+                WikiPageDraft.page_id == page.id,
+                WikiPageDraft.status == "approved",
+            )
+            .order_by(
+                WikiPageDraft.reviewed_at.desc().nullslast(),
+                WikiPageDraft.created_at.desc(),
+                WikiPageDraft.id,
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if draft is None:
+        return None
+    approval = (
+        await session.execute(
+            select(GovernanceLedgerEvent)
+            .where(
+                GovernanceLedgerEvent.draft_id == draft.id,
+                GovernanceLedgerEvent.to_state == "approved",
+                GovernanceLedgerEvent.event_type.in_(
+                    (
+                        GovernanceEventType.APPROVED.value,
+                        GovernanceEventType.STATE_IMPORTED.value,
+                    )
+                ),
+            )
+            .order_by(GovernanceLedgerEvent.sequence.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if approval is None:
+        return None
+
+    binding_rows = await list_audience_bindings(
+        session,
+        page_id=page.id,
+        object_ref=signal.object_ref,
+        lifecycle_state=AudienceBindingLifecycle.ACTIVE,
+    )
+    if not binding_rows:
+        return None
+    target_channels = tuple(dict.fromkeys(row.channel for row in binding_rows))
+    previous_publication = await latest_publication_for_object(
+        session, signal.object_ref
+    )
+    selected_action = (
+        action_key.strip()
+        if action_key is not None
+        else "republish"
+        if previous_publication is not None
+        else "publish"
+    )
+    if selected_action not in {
+        "publish",
+        "republish",
+        "restrict_publish",
+        "hold_external",
+        "republish_internal_only",
+    }:
+        return None
+    if previous_publication is None and selected_action != "publish":
+        return None
+
+    identity = {
+        "signal_id": str(signal.id),
+        "draft_id": str(draft.id),
+        "approval_ref": str(approval.id),
+        "action_key": selected_action,
+        "bindings": [
+            {"binding_key": row.binding_key, "version": row.version}
+            for row in binding_rows
+        ],
+    }
+    digest = hashlib.sha256(
+        json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return {
+        "draft_id": str(draft.id),
+        "approval_ref": str(approval.id),
+        "command_id": f"publish-preview:{digest}",
+        "action_key": selected_action,
+        "target_channels": list(target_channels),
+        "reason": signal.reason,
+    }
+async def persisted_publish_candidate_for_signal(
+    session: AsyncSession,
+    *,
+    signal: GovernanceSignal,
+) -> PublishPreviewCandidate | None:
+    """Project a preview candidate only from persisted page, binding, and publication truth."""
+    if signal.page_id is None or signal.status != "active":
+        return None
+    page = await session.get(WikiPage, signal.page_id)
+    if page is None:
+        return None
+    knowledge_object = wiki_page_to_knowledge_object(page)
+    if knowledge_object is None or knowledge_object.object_id != signal.object_ref:
+        return None
+
+    binding_rows = await list_audience_bindings(
+        session,
+        page_id=page.id,
+        object_ref=signal.object_ref,
+        lifecycle_state=AudienceBindingLifecycle.ACTIVE,
+    )
+    target_bindings = tuple(
+        dict.fromkeys(publish_binding_from_record(binding) for binding in binding_rows)
+    )
+    if not target_bindings:
+        return None
+
+    previous_publication = await latest_publication_for_object(
+        session,
+        signal.object_ref,
+    )
+    current_bindings = (
+        _bindings_from_candidate(previous_publication.candidate)
+        if previous_publication is not None
+        else ()
+    )
+    return PublishPreviewCandidate(
+        object_id=knowledge_object.object_id,
+        object_type=knowledge_object.object_type,
+        title=knowledge_object.title,
+        action_type=(
+            PublishActionType.REPUBLISH
+            if previous_publication is not None
+            else PublishActionType.PUBLISH
+        ),
+        target_audiences=tuple(
+            dict.fromkeys(binding.audience_filter for binding in target_bindings)
+        ),
+        target_channels=tuple(
+            dict.fromkeys(binding.channel for binding in target_bindings)
+        ),
+        target_bindings=target_bindings,
+        current_bindings=current_bindings,
+        blocked_bindings=publish_conflicts_from_records(binding_rows),
+    )
+
+
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -248,6 +431,40 @@ async def apply_durable_publish(
             "approved WikiPage must declare one supported knowledge object type"
         )
 
+    active_binding_rows = await list_audience_bindings(
+        session,
+        page_id=page.id,
+        object_ref=knowledge_object.object_id,
+        lifecycle_state=AudienceBindingLifecycle.ACTIVE,
+    )
+    if not active_binding_rows:
+        raise DurablePublishDenied(
+            "durable publish requires at least one explicit active audience binding"
+        )
+    active_channels = {binding.channel for binding in active_binding_rows}
+    missing_channels = tuple(
+        channel for channel in command.target_channels if channel not in active_channels
+    )
+    if missing_channels:
+        raise DurablePublishDenied(
+            "durable publish target channels have no active audience binding: "
+            + ", ".join(missing_channels)
+        )
+    requested_binding_rows = tuple(
+        binding
+        for binding in active_binding_rows
+        if binding.channel in command.target_channels
+    )
+    target_bindings = tuple(
+        dict.fromkeys(
+            publish_binding_from_record(binding) for binding in requested_binding_rows
+        )
+    )
+    if not target_bindings:
+        raise DurablePublishDenied(
+            "durable publish has no explicit binding for the requested channels"
+        )
+
     previous_publication = await latest_publication_for_object(
         session,
         knowledge_object.object_id,
@@ -266,20 +483,19 @@ async def apply_durable_publish(
         if previous_publication is None
         else PublishActionType.REPUBLISH
     )
-    target_bindings = tuple(
-        PublishBinding(audience_filter=audience, channel=channel)
-        for audience in knowledge_object.supported_audiences
-        for channel in command.target_channels
+    target_audiences = tuple(
+        dict.fromkeys(binding.audience_filter for binding in target_bindings)
     )
     candidate = PublishPreviewCandidate(
         object_id=knowledge_object.object_id,
         object_type=knowledge_object.object_type,
         title=knowledge_object.title,
         action_type=action_type,
-        target_audiences=knowledge_object.supported_audiences,
+        target_audiences=target_audiences,
         target_channels=command.target_channels,
         target_bindings=target_bindings,
         current_bindings=current_bindings,
+        blocked_bindings=publish_conflicts_from_records(requested_binding_rows),
     )
     result = execute_durable_publish_action(
         candidate,
@@ -340,21 +556,17 @@ async def apply_durable_publish(
         preview=result.preview.to_dict(),
         opened_bindings=[binding.to_dict() for binding in result.opened_bindings],
         removed_bindings=[binding.to_dict() for binding in result.removed_bindings],
-        held_bindings=[binding.to_dict() for binding in result.held_bindings],
+        held_bindings=[
+            binding.to_dict()
+            for binding in result.updated_candidate.blocked_bindings
+        ],
         action_log=list(result.action_log),
         published_by_id=actor_id,
     )
     session.add(publication)
     await session.flush()
 
-    affected_channels = dedupe_strings(
-        (
-            *command.target_channels,
-            *(binding.channel for binding in current_bindings),
-            *(binding.channel for binding in result.removed_bindings),
-        ),
-        label="affected channel",
-    )
+    affected_channels = command.target_channels
     new_propagations: list[GovernancePropagation] = []
     for channel in affected_channels:
         binding_refs = _binding_dicts_for_channel(result, channel)
@@ -387,7 +599,7 @@ def execute_durable_publish_action(
     *,
     reason: str | None = None,
 ) -> PublishGovernanceResult:
-    """Map a durable command key onto the existing governed publish kernel."""
+    """Apply a durable action without expanding the persisted binding matrix."""
     normalized = action_key.strip()
     reason_by_action = {
         "publish": "open the approved governed publish path",
@@ -398,37 +610,88 @@ def execute_durable_publish_action(
     }
     if normalized not in reason_by_action:
         raise DurablePublishDenied(f"unsupported durable action_key={normalized}")
-    if normalized == "hold_external" and not any(
-        audience.visibility is Visibility.EXTERNAL
-        for audience in candidate.target_audiences
-    ):
-        raise DurablePublishDenied(
-            "hold_external is unavailable because the persisted object has no external audience"
-        )
 
+    original_bindings = tuple(candidate.target_bindings or ())
+    blocked_by_key = {
+        blocked.key: blocked for blocked in candidate.blocked_bindings
+    }
     if normalized in {"publish", "republish"}:
-        action_type = PublishGovernanceActionType.PUBLISH
-        audiences: tuple[AudienceFilter, ...] = ()
+        updated_bindings = tuple(
+            binding
+            for binding in original_bindings
+            if binding.key not in blocked_by_key
+        )
     elif normalized == "restrict_publish":
-        action_type = PublishGovernanceActionType.RESTRICT
-        audiences = candidate.target_audiences
+        updated_bindings = ()
+        blocked_by_key = {}
     elif normalized == "hold_external":
-        action_type = PublishGovernanceActionType.HOLD_EXTERNAL
-        audiences = ()
+        external_bindings = tuple(
+            binding
+            for binding in original_bindings
+            if binding.audience_filter.visibility is Visibility.EXTERNAL
+        )
+        if not external_bindings:
+            raise DurablePublishDenied(
+                "hold_external is unavailable because persisted bindings have no external audience"
+            )
+        for binding in external_bindings:
+            blocked_by_key[binding.key] = PublishConflict(
+                audience_filter=binding.audience_filter,
+                channel=binding.channel,
+                reason=(
+                    "Held for gated external review: "
+                    + (reason or reason_by_action[normalized])
+                ),
+            )
+        updated_bindings = tuple(
+            binding
+            for binding in original_bindings
+            if binding.key not in blocked_by_key
+        )
     else:
-        action_type = PublishGovernanceActionType.REPUBLISH_INTERNAL_ONLY
-        audiences = ()
+        updated_bindings = tuple(
+            binding
+            for binding in original_bindings
+            if binding.audience_filter.visibility is Visibility.INTERNAL
+            and binding.key not in blocked_by_key
+        )
+        if not updated_bindings:
+            raise DurablePublishDenied(
+                "republish_internal_only requires an unblocked explicit internal binding"
+            )
+        updated_keys = {binding.key for binding in updated_bindings}
+        blocked_by_key = {
+            key: blocked
+            for key, blocked in blocked_by_key.items()
+            if key in updated_keys
+        }
 
-    return apply_publish_governance_actions(
-        candidate,
-        (
-            PublishGovernanceAction(
-                action_type=action_type,
-                audiences=audiences,
-                channels=candidate.target_channels,
-                reason=reason or reason_by_action[normalized],
-            ),
+    updated_candidate = PublishPreviewCandidate(
+        object_id=candidate.object_id,
+        object_type=candidate.object_type,
+        title=candidate.title,
+        action_type=candidate.action_type,
+        target_audiences=candidate.target_audiences,
+        target_channels=candidate.target_channels,
+        target_bindings=updated_bindings,
+        current_bindings=candidate.current_bindings,
+        blocked_bindings=tuple(blocked_by_key.values()),
+    )
+    current_keys = {binding.key for binding in candidate.current_bindings}
+    updated_keys = {binding.key for binding in updated_bindings}
+    return PublishGovernanceResult(
+        updated_candidate=updated_candidate,
+        preview=build_publish_blast_radius_preview(updated_candidate),
+        opened_bindings=tuple(
+            binding for binding in updated_bindings if binding.key not in current_keys
         ),
+        removed_bindings=tuple(
+            binding
+            for binding in candidate.current_bindings
+            if binding.key not in updated_keys
+        ),
+        held_bindings=tuple(blocked_by_key.values()),
+        action_log=(f"{normalized}:{reason or reason_by_action[normalized]}",),
     )
 
 

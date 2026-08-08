@@ -103,7 +103,6 @@ class PublishPreviewCandidate:
             "target_channels",
             _normalize_strings(self.target_channels, label="target channel"),
         )
-        object.__setattr__(self, "target_bindings", tuple(self.target_bindings))
         object.__setattr__(self, "current_bindings", tuple(self.current_bindings))
         object.__setattr__(self, "blocked_bindings", tuple(self.blocked_bindings))
         if not self.target_audiences:
@@ -120,6 +119,8 @@ class PublishPreviewCandidate:
                     for channel in self.target_channels
                 ),
             )
+        else:
+            object.__setattr__(self, "target_bindings", tuple(self.target_bindings))
         object.__setattr__(
             self,
             "target_audiences",

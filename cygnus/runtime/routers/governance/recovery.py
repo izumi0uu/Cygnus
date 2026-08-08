@@ -1,56 +1,115 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.recovery import (
-    DownstreamRealityCheckQuery,
-    get_pressure_intake_recovery_proof_surface,
-    RecoveryWindowQuery,
-    get_downstream_reality_check_surface,
-    get_default_governance_overview_surface,
-    get_recovery_window_surface,
+    DurableRecoveryNotFound,
+    DurableRecoveryUnavailable,
+    get_durable_governance_overview,
+    get_durable_downstream_reality_check,
+    get_durable_recovery_proof,
+    get_durable_recovery_window,
 )
+from cygnus.runtime.database import get_db
+from cygnus.runtime.database.models import Employee
 from cygnus.runtime.services.auth_service import get_current_user
+from cygnus.runtime.services.permission_engine import build_wiki_scope_clause
 
 router = APIRouter()
 
 
 @router.get("/api/recovery/downstream-reality-check/{command_id}")
-def downstream_reality_check(
+async def downstream_reality_check(
     command_id: str,
-    _current_user=Depends(get_current_user),
+    current_user: Employee = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
-    """Frontline recovery feedback for a specific governance command."""
-    return get_downstream_reality_check_surface(
-        DownstreamRealityCheckQuery(command_id=command_id)
-    ).to_dict()
+    """Frontline recovery feedback persisted after a governance command."""
+    try:
+        surface = await get_durable_downstream_reality_check(
+            db,
+            command_id=command_id,
+            page_scope_clause=build_wiki_scope_clause(current_user),
+        )
+    except (DurableRecoveryNotFound, DurableRecoveryUnavailable) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    return surface.to_dict() | {"persisted": True, "rehearsal": False}
 
 
 @router.get("/api/recovery/window/{command_id}")
-def recovery_window(
+async def recovery_window(
     command_id: str,
-    _current_user=Depends(get_current_user),
+    current_user: Employee = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
-    """Before/after recovery proof for a specific governance command."""
-    return get_recovery_window_surface(
-        RecoveryWindowQuery(command_id=command_id)
-    ).to_dict()
+    """Before/after recovery proof compiled from durable governance truth."""
+    try:
+        surface = await get_durable_recovery_window(
+            db,
+            command_id=command_id,
+            page_scope_clause=build_wiki_scope_clause(current_user),
+        )
+    except (DurableRecoveryNotFound, DurableRecoveryUnavailable) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    return surface.to_dict() | {"persisted": True, "rehearsal": False}
 
 
 @router.get("/api/recovery/overview")
-def governance_overview(_current_user=Depends(get_current_user)) -> dict[str, object]:
-    """Compare open loops to choose the next highest-leverage command."""
-    return get_default_governance_overview_surface().to_dict() | {"rehearsal": True}
+async def governance_overview(
+    current_user: Employee = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    """Compare persisted visible recovery loops by governance leverage."""
+    try:
+        surface = await get_durable_governance_overview(
+            db,
+            page_scope_clause=build_wiki_scope_clause(current_user),
+        )
+    except DurableRecoveryUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    return surface.to_dict() | {"persisted": True, "rehearsal": False}
+
+@router.get("/api/recovery/{command_id}")
+async def durable_recovery(
+    command_id: str,
+    current_user: Employee = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    """Canonical durable recovery lookup for one publication command."""
+    return await recovery_window(
+        command_id=command_id,
+        current_user=current_user,
+        db=db,
+    )
 
 
 @router.get("/api/recovery-proof")
-def recovery_proof(
+async def recovery_proof(
     object_ref: str | None = None,
     action_key: str | None = None,
-    _current_user=Depends(get_current_user),
+    current_user: Employee = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
-    """Frontline reality-check surface proving whether a governance command changed support behavior."""
-    return get_pressure_intake_recovery_proof_surface(
-        selected_object_ref=object_ref,
-        action_key=action_key,
-    ).to_dict()
+    """Resolve the latest durable recovery window for an object/action selection."""
+    try:
+        return await get_durable_recovery_proof(
+            db,
+            object_ref=object_ref,
+            action_key=action_key,
+            page_scope_clause=build_wiki_scope_clause(current_user),
+        )
+    except (DurableRecoveryNotFound, DurableRecoveryUnavailable) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc

@@ -315,8 +315,6 @@ class RecoveryWindowSurface:
         if not self.summary.strip():
             raise ValueError("summary must not be blank")
         object.__setattr__(self, "residual_risks", tuple(self.residual_risks))
-        if not self.residual_risks:
-            raise ValueError("residual_risks must not be empty")
         object.__setattr__(
             self,
             "continue_commands",
@@ -379,8 +377,6 @@ def build_recovery_window_surface(
     if not planes:
         raise ValueError("alignment_planes must not be empty")
     residuals = tuple(residual_risks)
-    if not residuals:
-        raise ValueError("residual_risks must not be empty")
 
     alignment_view = BeforeAfterAlignmentView(
         before_score=round(sum(item.before_score for item in planes) / len(planes), 3),

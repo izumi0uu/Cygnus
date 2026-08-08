@@ -5,9 +5,17 @@ from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cygnus.governance import event_to_dict, list_draft_events
+from cygnus.governance import (
+    GovernanceSignalStatus,
+    audience_filter_from_binding,
+    event_to_dict,
+    governance_signal_to_pressure_record,
+    list_draft_events,
+    list_governance_signals,
+)
 from cygnus.publish import (
     DurablePublishCommand,
     DurablePublishConflict,
@@ -17,18 +25,28 @@ from cygnus.publish import (
     PropagationUpdateCommand,
     apply_durable_publish,
     apply_pressure_intake_publish_action,
-    get_pressure_intake_publish_preview_surface,
-    get_pressure_intake_publish_propagation_surface,
+    durable_publish_command_for_signal,
+    persisted_publish_candidate_for_signal,
     get_publication,
     list_draft_publications,
     list_publication_propagations,
+    propagation_to_dict,
     publication_to_dict,
     remember_publish_projection,
     update_propagation,
 )
+from cygnus.publish.surface import get_pressure_intake_publish_preview_surface
+from cygnus.review import get_pressure_intake_review_brief_surface
 from cygnus.runtime.database import get_db
-from cygnus.runtime.database.models import Employee, WikiPageDraft
+from cygnus.runtime.database.models import (
+    Employee,
+    GovernanceAudienceBinding,
+    GovernancePublication,
+    WikiPage,
+    WikiPageDraft,
+)
 from cygnus.runtime.services.auth_service import get_current_user, require_admin
+from cygnus.runtime.services.permission_engine import build_wiki_scope_clause
 
 router = APIRouter()
 
@@ -52,16 +70,114 @@ class PropagationUpdateRequest(BaseModel):
 
 
 @router.get("/api/publish-preview")
-def publish_preview(
+async def publish_preview(
     object_ref: str | None = None,
     action_key: str | None = None,
-    _current_user: Employee = Depends(get_current_user),
+    current_user: Employee = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
-    """Blast-radius-first publish surface compiled from the same pressure intake bundle set."""
-    return get_pressure_intake_publish_preview_surface(
-        selected_object_ref=object_ref,
+    """Compile preview only from persisted, request-scoped governance signals."""
+    signals = await list_governance_signals(
+        db,
+        current_user=current_user,
+        status=GovernanceSignalStatus.ACTIVE,
+    )
+    wiki_scope = build_wiki_scope_clause(current_user)
+    records = []
+    record_signals = []
+    for signal in signals:
+        audience_override = None
+        if signal.audience_filter is None and signal.audience_binding_ref is not None:
+            binding_statement = select(GovernanceAudienceBinding).join(
+                WikiPage,
+                WikiPage.id == GovernanceAudienceBinding.page_id,
+            ).where(
+                GovernanceAudienceBinding.binding_key
+                == signal.audience_binding_ref,
+                GovernanceAudienceBinding.page_id == signal.page_id,
+                GovernanceAudienceBinding.object_ref == signal.object_ref,
+            )
+            if wiki_scope is not None:
+                binding_statement = binding_statement.where(wiki_scope)
+            binding = (await db.execute(binding_statement)).scalar_one_or_none()
+            if binding is None:
+                continue
+            audience_override = audience_filter_from_binding(binding)
+        records.append(
+            governance_signal_to_pressure_record(
+                signal,
+                audience_filter=audience_override,
+            )
+        )
+        record_signals.append(signal)
+    if not records:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="no persisted publish intake records are available in this scope",
+        )
+
+    queue_surface = get_pressure_intake_review_brief_surface(records=tuple(records))
+    selected_object_ref = (
+        object_ref
+        if object_ref is not None
+        else queue_surface.priority_stack[0].object_ref
+        if queue_surface.priority_stack
+        else None
+    )
+    selected_signal = next(
+        (
+            signal
+            for signal in record_signals
+            if signal.object_ref == selected_object_ref
+        ),
+        None,
+    )
+    if selected_signal is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"object_ref={selected_object_ref} has no persisted signal",
+        )
+    candidate = await persisted_publish_candidate_for_signal(
+        db,
+        signal=selected_signal,
+    )
+    if candidate is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"object_ref={selected_object_ref} has no explicit active audience "
+                "binding truth"
+            ),
+        )
+
+    try:
+        surface = get_pressure_intake_publish_preview_surface(
+            selected_object_ref=selected_object_ref,
+            records=tuple(records),
+            action_key=action_key,
+            candidate_override=candidate,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_400_BAD_REQUEST
+                if action_key is not None and "action" in str(exc).lower()
+                else status.HTTP_404_NOT_FOUND
+            ),
+            detail=str(exc),
+        ) from exc
+
+    payload = surface.to_dict()
+    payload["persisted"] = True
+    payload["rehearsal"] = False
+    durable_command = await durable_publish_command_for_signal(
+        db,
+        signal=selected_signal,
         action_key=action_key,
-    ).to_dict()
+    )
+    if durable_command is not None:
+        payload["durable_command"] = durable_command
+    return payload
 
 
 @router.post("/api/publish/apply")
@@ -158,16 +274,116 @@ async def publish_apply(
 
 
 @router.get("/api/publish-propagation")
-def publish_propagation(
+async def publish_propagation(
+    publication_id: uuid.UUID | None = None,
     object_ref: str | None = None,
-    action_key: str | None = None,
-    _current_user: Employee = Depends(get_current_user),
+    current_user: Employee = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
-    """Supporting-surface propagation theater compiled from the current publish command rehearsal."""
-    return get_pressure_intake_publish_propagation_surface(
-        selected_object_ref=object_ref,
-        action_key=action_key,
-    ).to_dict()
+    """Return durable publication and propagation truth; never synthesize rehearsal rows."""
+    if publication_id is None and object_ref is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="publication_id or object_ref is required for durable propagation",
+        )
+    wiki_scope = build_wiki_scope_clause(current_user)
+    statement = select(GovernancePublication).join(
+        WikiPage, WikiPage.id == GovernancePublication.page_id
+    )
+    if publication_id is not None:
+        statement = statement.where(GovernancePublication.id == publication_id)
+    else:
+        statement = statement.where(GovernancePublication.object_ref == object_ref)
+    if wiki_scope is not None:
+        statement = statement.where(wiki_scope)
+    statement = statement.order_by(
+        GovernancePublication.published_at.desc(),
+        GovernancePublication.id.desc(),
+    ).limit(1)
+    publication = (await db.execute(statement)).scalar_one_or_none()
+    if publication is None:
+        selector = (
+            f"publication_id={publication_id}"
+            if publication_id is not None
+            else f"object_ref={object_ref}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"{selector} has no visible durable publication",
+        )
+    propagations = await list_publication_propagations(db, publication.id)
+    records = [propagation_to_dict(record) for record in propagations]
+    summary = {item.value: 0 for item in PropagationStatus}
+    for record in propagations:
+        summary[record.status] = summary.get(record.status, 0) + 1
+    unresolved = [
+        record.surface_id
+        for record in propagations
+        if record.status != PropagationStatus.SYNCED.value
+    ]
+    continue_commands = list(
+        dict.fromkeys(
+            command
+            for record in propagations
+            if record.status != PropagationStatus.SYNCED.value
+            for command in record.follow_up_commands
+        )
+    )
+    title = str(publication.candidate.get("title") or publication.object_ref)
+    lane_notes = {
+        PropagationStatus.SYNCED: "Downstream confirmation is recorded.",
+        PropagationStatus.PENDING: "Downstream confirmation is still pending.",
+        PropagationStatus.FAILED: "The persisted propagation attempt failed.",
+        PropagationStatus.MANUAL_ACTION_REQUIRED: "A persisted manual action is required.",
+    }
+    status_lanes = [
+        {
+            "status": lane.value,
+            "headline": lane.value.replace("_", " ").title(),
+            "note": lane_notes[lane],
+            "count": summary[lane.value],
+            "surface_ids": [
+                record.surface_id
+                for record in propagations
+                if record.status == lane.value
+            ],
+        }
+        for lane in PropagationStatus
+    ]
+    return {
+        "surface_id": "publish-propagation",
+        "headline": f"Durable propagation for {title}",
+        "summary": "Persisted downstream propagation state for this publication.",
+        "propagation_ledger": {
+            "object_id": publication.object_ref,
+            "title": title,
+            "action_log": list(publication.action_log),
+            "summary": summary,
+            "records": records,
+            "unresolved_surfaces": unresolved,
+            "continue_commands": continue_commands,
+        },
+        "status_lanes": status_lanes,
+        "selected_position": 0,
+        "total_items": 1,
+        "action_presets": [],
+        "selected_action": publication.action_key,
+        "action_echo": {
+            "selected_action": publication.action_key,
+            "summary": "Persisted action result for this publication.",
+            "action_log": list(publication.action_log),
+            "opened_bindings": list(publication.opened_bindings),
+            "removed_bindings": list(publication.removed_bindings),
+            "held_bindings": list(publication.held_bindings),
+        },
+        "previous_object_ref": None,
+        "next_object_ref": None,
+        "context_notes": [],
+        "persisted": True,
+        "rehearsal": False,
+        "publication_record_id": str(publication.id),
+        "command_id": publication.command_id,
+    }
 
 
 @router.get("/api/governance-ledger/drafts/{draft_id}")

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
 from cygnus.runtime.main import app
+from cygnus.runtime.database import get_db
 from cygnus.runtime.services.auth_service import get_current_user, require_admin
 from cygnus.publish import clear_publish_projections
 from cygnus.retrieval import (
@@ -14,6 +15,7 @@ from cygnus.retrieval import (
     sample_knowledge_objects,
     sample_support_evidence,
 )
+from cygnus.review import compile_pressure_proposal_bundles, sample_pressure_intake_records
 from cygnus.review.source_blindness import SourceFailureObservation
 from cygnus.runtime.routers.governance.dependencies import (
     GovernanceReadSnapshot,
@@ -74,6 +76,7 @@ class CommandCenterApiTests(unittest.TestCase):
             "/api/drift",
             "/api/source-blindness",
             "/api/review-intake",
+            "/api/governance-signals",
             "/api/publish-preview",
             "/api/publish-propagation",
             "/api/recovery-proof",
@@ -96,9 +99,10 @@ class CommandCenterApiTests(unittest.TestCase):
         self.assertEqual(payload["situation_frame"]["urgent_items"], 0)
         self.assertEqual(payload["observation"]["state"], "partial")
         self.assertEqual(
-            payload["observation"]["reason"], "review_signal_coverage_partial"
+            payload["observation"]["reason"],
+            "persisted_governance_signal_provider_partial",
         )
-        self.assertIn("ticket_pressure", payload["observation"]["missing_signals"])
+        self.assertIn("ticket_cluster", payload["observation"]["covered_signals"])
 
     def test_review_intake_payload_shape(self) -> None:
         self.enable_auth()
@@ -119,14 +123,15 @@ class CommandCenterApiTests(unittest.TestCase):
         payload = self.client.get("/api/drift").json()
         self.assertEqual(payload["contexts"], [])
         self.assertEqual(payload["available_commands"], [])
-        self.assertEqual(payload["observation"]["state"], "unavailable")
+        self.assertEqual(payload["observation"]["state"], "ready")
         self.assertEqual(
-            payload["observation"]["reason"], "drift_detectors_unavailable"
+            payload["observation"]["reason"], "persisted_drift_provider_ready"
         )
-        self.assertEqual(
-            payload["observation"]["missing_signals"],
-            ["release_delta", "incident_delta", "ticket_pressure"],
-        )
+        self.assertEqual(payload["observation"]["covered_signals"], [
+            "release_delta",
+            "incident_delta",
+        ])
+        self.assertEqual(payload["observation"]["missing_signals"], [])
 
     def test_target_governance_routes_do_not_fall_back_to_sample_fixtures(self) -> None:
         self.enable_auth()
@@ -201,6 +206,14 @@ class CommandCenterApiTests(unittest.TestCase):
         )
 
     def test_review_queue_item_returns_intake_drilldown_surface(self) -> None:
+        self.snapshot = GovernanceReadSnapshot(
+            knowledge=self.snapshot.knowledge,
+            source_observations=(),
+            visible_source_count=0,
+            review_bundles=compile_pressure_proposal_bundles(
+                (sample_pressure_intake_records()[1],)
+            ),
+        )
         self.enable_auth()
         payload = self.client.get(
             "/api/review-queue/refund-enterprise-rewrite",
@@ -211,69 +224,131 @@ class CommandCenterApiTests(unittest.TestCase):
         )
         self.assertIn("queue_surface", payload)
 
-    def test_publish_preview_returns_blast_radius_surface(self) -> None:
+    def test_publish_preview_requires_persisted_intake(self) -> None:
         self.enable_auth()
-        payload = self.client.get("/api/publish-preview").json()
-        self.assertEqual(payload["surface_id"], "publish-preview")
-        self.assertIn("selected_preview", payload)
-        self.assertIn("situation_frame", payload)
+        app.dependency_overrides[get_db] = lambda: object()
+        with patch(
+            "cygnus.runtime.routers.governance.publish.list_governance_signals",
+            AsyncMock(return_value=[]),
+        ):
+            response = self.client.get("/api/publish-preview")
 
-    def test_publish_propagation_returns_supporting_surface_theater(self) -> None:
-        self.enable_auth()
-        payload = self.client.get(
-            "/api/publish-propagation",
-            params={
-                "object_ref": "refund-enterprise-rewrite",
-                "action_key": "hold_external",
-            },
-        ).json()
-        self.assertEqual(payload["surface_id"], "publish-propagation")
-        self.assertEqual(payload["selected_action"], "hold_external")
-        self.assertIn("propagation_ledger", payload)
-
-    def test_recovery_proof_returns_frontline_reality_check(self) -> None:
-        self.enable_auth()
-        payload = self.client.get(
-            "/api/recovery-proof",
-            params={"object_ref": "billing-verification-w25"},
-        ).json()
-        self.assertEqual(payload["surface_id"], "recovery-proof")
+        self.assertEqual(response.status_code, 404)
         self.assertEqual(
-            payload["selected_card"]["object_ref"], "billing-verification-w25"
+            response.json()["detail"],
+            "no persisted publish intake records are available in this scope",
         )
-        self.assertIn("recovery_window", payload)
-        self.assertIn("signals", payload)
 
-    def test_downstream_reality_check_payload_shape(self) -> None:
+    def test_publish_propagation_requires_durable_selector(self) -> None:
         self.enable_auth()
-        payload = self.client.get(
-            "/api/recovery/downstream-reality-check/cmd-publish-1",
-        ).json()
-        self.assertEqual(payload["surface_id"], "downstream-reality-check")
-        self.assertIn("reality_check_strip", payload)
-        self.assertIn("feedback_feed", payload)
-        self.assertIn("mismatch_by_audience", payload)
+        response = self.client.get("/api/publish-propagation")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(
+            response.json()["detail"],
+            "publication_id or object_ref is required for durable propagation",
+        )
 
-    def test_recovery_window_payload_shape(self) -> None:
+    def test_recovery_proof_returns_durable_selection(self) -> None:
         self.enable_auth()
-        payload = self.client.get(
-            "/api/recovery/window/cmd-publish-1",
-        ).json()
-        self.assertEqual(payload["surface_id"], "recovery-window")
-        self.assertIn("before_after_alignment_view", payload)
-        self.assertIn("rewrite_delta", payload)
-        self.assertIn("closure_judge", payload)
+        app.dependency_overrides[get_db] = lambda: object()
+        durable_payload = {
+            "surface_id": "recovery-proof",
+            "persisted": True,
+            "rehearsal": False,
+            "command_id": "durable-command-1",
+            "object_ref": "billing-verification-w25",
+            "recovery_window": {"surface_id": "recovery-window"},
+        }
+        with patch(
+            "cygnus.runtime.routers.governance.recovery.get_durable_recovery_proof",
+            AsyncMock(return_value=durable_payload),
+        ):
+            response = self.client.get(
+                "/api/recovery-proof",
+                params={"object_ref": "billing-verification-w25"},
+            )
 
-    def test_governance_overview_payload_shape(self) -> None:
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), durable_payload)
+
+    def test_downstream_reality_check_uses_durable_provider(self) -> None:
         self.enable_auth()
-        payload = self.client.get("/api/recovery/overview").json()
+        app.dependency_overrides[get_db] = lambda: object()
+        durable_surface = types.SimpleNamespace(
+            to_dict=lambda: {
+                "surface_id": "downstream-reality-check",
+                "reality_check_strip": {"command_id": "durable-command-1"},
+                "feedback_feed": [{"signal_id": "feedback-1"}],
+                "mismatch_by_audience": [],
+            }
+        )
+        with patch(
+            "cygnus.runtime.routers.governance.recovery.get_durable_downstream_reality_check",
+            AsyncMock(return_value=durable_surface),
+        ):
+            response = self.client.get(
+                "/api/recovery/downstream-reality-check/durable-command-1"
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["persisted"])
+        self.assertFalse(response.json()["rehearsal"])
+        self.assertEqual(response.json()["feedback_feed"][0]["signal_id"], "feedback-1")
+
+    def test_recovery_window_uses_durable_provider_and_alias(self) -> None:
+        self.enable_auth()
+        app.dependency_overrides[get_db] = lambda: object()
+        durable_surface = types.SimpleNamespace(
+            to_dict=lambda: {
+                "surface_id": "recovery-window",
+                "before_after_alignment_view": {},
+                "rewrite_delta": {"before_value": 2, "after_value": 1},
+                "closure_judge": {"closeable": False},
+            }
+        )
+        with patch(
+            "cygnus.runtime.routers.governance.recovery.get_durable_recovery_window",
+            AsyncMock(return_value=durable_surface),
+        ):
+            window_response = self.client.get(
+                "/api/recovery/window/durable-command-1"
+            )
+            canonical_response = self.client.get(
+                "/api/recovery/durable-command-1"
+            )
+
+        self.assertEqual(window_response.status_code, 200)
+        self.assertEqual(canonical_response.status_code, 200)
+        self.assertTrue(window_response.json()["persisted"])
+        self.assertFalse(window_response.json()["rehearsal"])
+        self.assertEqual(
+            canonical_response.json()["rewrite_delta"],
+            {"before_value": 2, "after_value": 1},
+        )
+
+    def test_governance_overview_uses_durable_provider(self) -> None:
+        self.enable_auth()
+        app.dependency_overrides[get_db] = lambda: object()
+        durable_surface = types.SimpleNamespace(
+            to_dict=lambda: {
+                "surface_id": "governance-overview",
+                "open_loops": [{"command_id": "durable-command-1"}],
+                "open_loop_ranks": [],
+                "highest_leverage_command": "durable-command-1",
+            }
+        )
+        with patch(
+            "cygnus.runtime.routers.governance.recovery.get_durable_governance_overview",
+            AsyncMock(return_value=durable_surface),
+        ):
+            response = self.client.get("/api/recovery/overview")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
         self.assertEqual(payload["surface_id"], "governance-overview")
-        self.assertIn("open_loops", payload)
-        self.assertIn("open_loop_ranks", payload)
-        self.assertIn("highest_leverage_command", payload)
-        self.assertEqual(len(payload["open_loops"]), 2)
-        self.assertEqual(payload["highest_leverage_command"], "cmd-restrict-2")
-        self.assertTrue(payload["rehearsal"])
+        self.assertEqual(payload["highest_leverage_command"], "durable-command-1")
+        self.assertTrue(payload["persisted"])
+        self.assertFalse(payload["rehearsal"])
 
     def test_knowledge_graph_payload_shape(self) -> None:
         self.enable_auth()

@@ -14,6 +14,7 @@ from typing import Optional
 from pgvector.sqlalchemy import HALFVEC, Vector
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -1098,6 +1099,195 @@ class AuditLog(Base):
 # ---------------------------------------------------------------------------
 # Governed write ledger and publication truth
 # ---------------------------------------------------------------------------
+
+class GovernanceSignal(Base):
+    """Durable, scoped input fact compiled into governance review surfaces."""
+
+    __tablename__ = "governance_signals"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    signal_ref: Mapped[str] = mapped_column(String(220), nullable=False, unique=True)
+    signal_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    object_ref: Mapped[str] = mapped_column(String(320), nullable=False)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    object_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    page_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("wiki_pages.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    source_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("sources.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    audience_binding_ref: Mapped[Optional[str]] = mapped_column(
+        String(220), nullable=True
+    )
+    audience_filter: Mapped[Optional[dict[str, object]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    affected_surfaces: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    trigger_signals: Mapped[list[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'::jsonb"),
+    )
+    evidence_source_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    freshness: Mapped[str] = mapped_column(String(20), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_excerpt: Mapped[str] = mapped_column(Text, nullable=False)
+    queue_owner: Mapped[Optional[str]] = mapped_column(String(220), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="active", server_default="active"
+    )
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_by_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("employees.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+    version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "signal_type IN ('ticket_cluster', 'human_rewrite', 'source_failure', "
+            "'release_delta', 'incident_delta')",
+            name="ck_governance_signals_type",
+        ),
+        CheckConstraint(
+            "status IN ('active', 'resolved', 'dismissed')",
+            name="ck_governance_signals_status",
+        ),
+        CheckConstraint(
+            "freshness IN ('fresh', 'stale', 'unknown')",
+            name="ck_governance_signals_freshness",
+        ),
+        CheckConstraint(
+            "audience_filter IS NOT NULL OR "
+            "(audience_binding_ref IS NOT NULL AND page_id IS NOT NULL)",
+            name="ck_governance_signals_audience",
+        ),
+        CheckConstraint(
+            "(status = 'active' AND resolved_at IS NULL) OR "
+            "(status <> 'active' AND resolved_at IS NOT NULL)",
+            name="ck_governance_signals_resolution",
+        ),
+        Index(
+            "ix_governance_signals_status_observed",
+            "status",
+            "observed_at",
+        ),
+        Index("ix_governance_signals_page", "page_id"),
+        Index("ix_governance_signals_source", "source_id"),
+        Index("ix_governance_signals_object", "object_ref"),
+    )
+
+
+class GovernanceAudienceBinding(Base):
+    """Explicit variant routing truth for one governed Wiki knowledge object."""
+
+    __tablename__ = "governance_audience_bindings"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    page_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("wiki_pages.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    object_ref: Mapped[str] = mapped_column(String(320), nullable=False)
+    variant_ref: Mapped[str] = mapped_column(String(220), nullable=False)
+    channel: Mapped[str] = mapped_column(String(120), nullable=False)
+    visibility: Mapped[str] = mapped_column(String(20), nullable=False)
+    brands: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    product_lines: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    plans: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    regions: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    languages: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    product_versions: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    lifecycle_state: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="active", server_default="active"
+    )
+    binding_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    created_by_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("employees.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+    version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "visibility IN ('internal', 'external')",
+            name="ck_governance_audience_bindings_visibility",
+        ),
+        CheckConstraint(
+            "lifecycle_state IN ('active', 'held', 'removed')",
+            name="ck_governance_audience_bindings_lifecycle",
+        ),
+        Index(
+            "ix_governance_audience_bindings_object_state",
+            "object_ref",
+            "lifecycle_state",
+        ),
+        Index(
+            "ix_governance_audience_bindings_page_state",
+            "page_id",
+            "lifecycle_state",
+        ),
+        Index(
+            "ix_governance_audience_bindings_conflict",
+            "object_ref",
+            "channel",
+            "visibility",
+            "lifecycle_state",
+        ),
+    )
 
 
 class GovernanceLedgerEvent(Base):

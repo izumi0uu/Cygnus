@@ -300,6 +300,7 @@ def get_pressure_intake_publish_preview_surface(
     *,
     records: Iterable[PressureIntakeRecord] | None = None,
     action_key: str | None = None,
+    candidate_override: PublishPreviewCandidate | None = None,
 ) -> PublishPreviewSurface:
     source_records = tuple(records) if records is not None else sample_pressure_intake_records()
     queue_surface = get_pressure_intake_review_brief_surface(records=source_records)
@@ -311,7 +312,12 @@ def get_pressure_intake_publish_preview_surface(
     selected_position = queue_cards.index(selected_card)
     intake_bundles = compile_pressure_intake_bundle(source_records)
     bundle = _require_intake_bundle(intake_bundles, selected_card.object_ref)
-    base_candidate = _build_candidate(bundle)
+    if (
+        candidate_override is not None
+        and candidate_override.object_id != selected_card.object_ref
+    ):
+        raise ValueError("candidate_override must match the selected publish object")
+    base_candidate = candidate_override or _build_candidate(bundle)
     base_preview = build_publish_blast_radius_preview(base_candidate)
     action_presets = _build_action_presets(bundle=bundle, candidate=base_candidate, preview=base_preview)
 
@@ -476,6 +482,8 @@ def _action_type(signal_type: PressureSignalType) -> PublishActionType:
         PressureSignalType.TICKET_CLUSTER: PublishActionType.PUBLISH,
         PressureSignalType.HUMAN_REWRITE: PublishActionType.REPUBLISH,
         PressureSignalType.SOURCE_FAILURE: PublishActionType.RESTRICT,
+        PressureSignalType.RELEASE_DELTA: PublishActionType.REPUBLISH,
+        PressureSignalType.INCIDENT_DELTA: PublishActionType.RESTRICT,
     }[signal_type]
 
 

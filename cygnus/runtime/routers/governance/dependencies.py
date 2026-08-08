@@ -5,6 +5,14 @@ from dataclasses import dataclass, field
 from fastapi import Depends
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from cygnus.governance.audience_bindings import (
+    audience_filter_from_binding,
+    load_audience_conflict_provider_data,
+)
+from cygnus.governance.signals import (
+    governance_signal_to_pressure_record,
+    list_governance_signals,
+)
 
 from cygnus.publish import (
     durable_publication_result,
@@ -15,13 +23,24 @@ from cygnus.retrieval.substrate_provider import (
     SubstrateKnowledgeSnapshot,
     build_substrate_snapshot,
 )
+from cygnus.review.intake import (
+    PressureIntakeRecord,
+    compile_pressure_proposal_bundles,
+)
 from cygnus.review.service import ProposalBundle
 from cygnus.review.source_blindness import (
     SourceFailureObservation,
     build_source_failure_observations,
 )
 from cygnus.runtime.database import get_db
-from cygnus.runtime.database.models import Employee, KnowledgeType, Source, WikiPage
+from cygnus.runtime.database.models import (
+    Employee,
+    GovernanceAudienceBinding,
+    GovernanceSignal,
+    KnowledgeType,
+    Source,
+    WikiPage,
+)
 from cygnus.runtime.services.auth_service import get_current_user
 from cygnus.runtime.services.permission_engine import (
     build_document_scope_clause,
@@ -37,6 +56,11 @@ class GovernanceReadSnapshot:
     source_observations: tuple[SourceFailureObservation, ...]
     visible_source_count: int
     review_bundles: tuple[ProposalBundle, ...] = field(default_factory=tuple)
+    pressure_records: tuple[PressureIntakeRecord, ...] = field(default_factory=tuple)
+    governance_signals: tuple[GovernanceSignal, ...] = field(default_factory=tuple)
+    uncompiled_signal_count: int = 0
+    uncompiled_signal_types: tuple[str, ...] = field(default_factory=tuple)
+    audience_conflict_count: int = 0
 
 
 async def get_governance_read_snapshot(
@@ -113,13 +137,76 @@ async def get_governance_read_snapshot(
             linked_page_stmt = linked_page_stmt.where(wiki_scope)
         linked_pages = tuple((await db.execute(linked_page_stmt)).scalars().all())
 
+    governance_signals = await list_governance_signals(
+        db,
+        current_user=current_user,
+    )
+    binding_refs = tuple(
+        signal.audience_binding_ref
+        for signal in governance_signals
+        if signal.audience_filter is None
+        and signal.audience_binding_ref is not None
+    )
+    binding_by_key = {}
+    if binding_refs:
+        binding_statement = select(GovernanceAudienceBinding).join(
+            WikiPage,
+            WikiPage.id == GovernanceAudienceBinding.page_id,
+        ).where(GovernanceAudienceBinding.binding_key.in_(binding_refs))
+        if wiki_scope is not None:
+            binding_statement = binding_statement.where(wiki_scope)
+        binding_rows = tuple(
+            (await db.execute(binding_statement)).scalars().all()
+        )
+        binding_by_key = {row.binding_key: row for row in binding_rows}
+
+    pressure_record_list: list[PressureIntakeRecord] = []
+    compiled_signals: list[GovernanceSignal] = []
+    for signal in governance_signals:
+        audience_override = None
+        if signal.audience_filter is None:
+            binding = binding_by_key.get(signal.audience_binding_ref or "")
+            if (
+                binding is None
+                or binding.page_id != signal.page_id
+                or binding.object_ref != signal.object_ref
+            ):
+                continue
+            audience_override = audience_filter_from_binding(binding)
+        pressure_record_list.append(
+            governance_signal_to_pressure_record(
+                signal,
+                audience_filter=audience_override,
+            )
+        )
+        compiled_signals.append(signal)
+    pressure_records = tuple(pressure_record_list)
+    review_bundles = compile_pressure_proposal_bundles(pressure_records)
+    compiled_signal_ids = {signal.id for signal in compiled_signals}
+    uncompiled_signal_types = tuple(
+        dict.fromkeys(
+            signal.signal_type
+            for signal in governance_signals
+            if signal.id not in compiled_signal_ids
+        )
+    )
+    audience_conflicts = await load_audience_conflict_provider_data(
+        db,
+        page_scope_clause=wiki_scope,
+    )
+
     return GovernanceReadSnapshot(
         knowledge=knowledge,
         source_observations=build_source_failure_observations(
             error_sources, linked_pages
         ),
         visible_source_count=visible_source_count,
-        review_bundles=(),
+        review_bundles=review_bundles,
+        pressure_records=pressure_records,
+        governance_signals=governance_signals,
+        uncompiled_signal_count=len(governance_signals) - len(compiled_signals),
+        uncompiled_signal_types=uncompiled_signal_types,
+        audience_conflict_count=len(audience_conflicts.conflicts),
     )
 
 

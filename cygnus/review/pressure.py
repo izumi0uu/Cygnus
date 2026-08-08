@@ -253,7 +253,11 @@ def apply_pressure_commands(
 
 def _is_frontline_pressure(bundle: ProposalBundle) -> bool:
     trigger_signals = set(bundle.signal.trigger_signals)
-    return "rewrite_cluster" in trigger_signals or "ticket_pressure" in trigger_signals
+    return (
+        bundle.signal.risk_type is ReviewRiskType.TICKET_PRESSURE
+        or "rewrite_cluster" in trigger_signals
+        or "ticket_pressure" in trigger_signals
+    )
 
 
 def _line_from_bundle(bundle: ProposalBundle) -> ReviewPressureLine:

@@ -101,6 +101,30 @@ class ReviewIntakeTests(unittest.TestCase):
         self.assertIn("route_to_review", refs["billing-verification-w25"]["command_actions"])
         self.assertIn("macro", refs["refund-enterprise-rewrite"]["affected_surfaces"])
 
+    def test_ticket_pressure_does_not_require_fixture_trigger_labels(self) -> None:
+        record = PressureIntakeRecord(
+            signal_type=PressureSignalType.TICKET_CLUSTER,
+            signal_ref="persisted-refund-cluster",
+            title="Persisted refund pressure",
+            summary="Repeated refund questions crossed the governance threshold.",
+            source_ref="source:persisted-refund-cluster",
+            source_type=EvidenceSourceType.RESOLVED_TICKET,
+            audience_filter=AudienceFilter(visibility=Visibility.INTERNAL),
+            object_type=KnowledgeObjectType.ANSWER_CARD,
+            affected_surfaces=("agent-copilot",),
+            trigger_signals=("refund-escalation",),
+            evidence_excerpt="Reviewers confirmed repeated refund questions.",
+        )
+
+        surface = build_review_pressure_surface(
+            compile_pressure_proposal_bundles((record,))
+        ).to_dict()
+
+        self.assertEqual(
+            surface["pressure_lines"][0]["proposal_ref"],
+            "persisted-refund-cluster",
+        )
+
     def test_source_failure_compiles_into_source_blindness_governance_context(self) -> None:
         record = PressureIntakeRecord(
             signal_type=PressureSignalType.SOURCE_FAILURE,

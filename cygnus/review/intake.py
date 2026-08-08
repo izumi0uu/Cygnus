@@ -25,6 +25,8 @@ class PressureSignalType(str, Enum):
     TICKET_CLUSTER = "ticket_cluster"
     HUMAN_REWRITE = "human_rewrite"
     SOURCE_FAILURE = "source_failure"
+    RELEASE_DELTA = "release_delta"
+    INCIDENT_DELTA = "incident_delta"
 
 
 def _normalize(values: Iterable[str] | None, *, label: str) -> tuple[str, ...]:
@@ -61,6 +63,7 @@ class PressureIntakeRecord:
     reason: str | None = None
     evidence_excerpt: str | None = None
     proposal_id: str | None = None
+    proposal_action: PlanAction | None = None
 
     def __post_init__(self) -> None:
         if not self.signal_ref.strip():
@@ -316,7 +319,9 @@ def sample_pressure_intake_records() -> tuple[PressureIntakeRecord, ...]:
 def _proposal_for_record(record: PressureIntakeRecord) -> CompilationProposal:
     proposal_id = record.proposal_id or record.signal_ref
     audience_note = _audience_note(record.audience_filter, record)
-    action = PlanAction.UPDATE if record.proposal_id else PlanAction.CREATE
+    action = record.proposal_action or (
+        PlanAction.UPDATE if record.proposal_id else PlanAction.CREATE
+    )
     return CompilationProposal(
         proposal_id=proposal_id,
         object_type=record.object_type,
@@ -325,7 +330,10 @@ def _proposal_for_record(record: PressureIntakeRecord) -> CompilationProposal:
         summary=record.summary,
         evidence_ids=(f"ev:{record.signal_type.value}:{record.signal_ref}",),
         urgency=_urgency_for_signal(record.signal_type, record.trigger_signals),
-        evidence_sufficiency=_evidence_sufficiency_for_signal(record.signal_type, record.evidence_excerpt),
+        evidence_sufficiency=_evidence_sufficiency_for_signal(
+            record.signal_type,
+            record.evidence_excerpt or record.summary,
+        ),
         review_owner=record.queue_owner or "support-ops",
         why_now=record.reason or _why_now_for_signal(record),
         audience_notes=(audience_note,) if audience_note else (),
@@ -369,12 +377,19 @@ def _risk_type_for_signal(signal_type: PressureSignalType) -> ReviewRiskType:
         PressureSignalType.TICKET_CLUSTER: ReviewRiskType.TICKET_PRESSURE,
         PressureSignalType.HUMAN_REWRITE: ReviewRiskType.TICKET_PRESSURE,
         PressureSignalType.SOURCE_FAILURE: ReviewRiskType.SOURCE_BLINDNESS,
+        PressureSignalType.RELEASE_DELTA: ReviewRiskType.DRIFT,
+        PressureSignalType.INCIDENT_DELTA: ReviewRiskType.DRIFT,
     }[signal_type]
 
 
 def _urgency_for_signal(signal_type: PressureSignalType, trigger_signals: tuple[str, ...]) -> UrgencyLevel:
     if signal_type is PressureSignalType.SOURCE_FAILURE:
         return UrgencyLevel.URGENT
+    if signal_type in (
+        PressureSignalType.RELEASE_DELTA,
+        PressureSignalType.INCIDENT_DELTA,
+    ):
+        return UrgencyLevel.HIGH
     if "urgent" in trigger_signals or "hot" in trigger_signals:
         return UrgencyLevel.HIGH
     return UrgencyLevel.MEDIUM
@@ -391,6 +406,11 @@ def _evidence_sufficiency_for_signal(signal_type: PressureSignalType, evidence_e
 def _recommended_actions_for_signal(signal_type: PressureSignalType, queue_owner: str | None) -> tuple[str, ...]:
     if signal_type is PressureSignalType.SOURCE_FAILURE:
         return ("open_review", "restrict_publish", "assign_owner")
+    if signal_type in (
+        PressureSignalType.RELEASE_DELTA,
+        PressureSignalType.INCIDENT_DELTA,
+    ):
+        return ("open_review", "restrict_publish", "force_audience_recheck")
     if queue_owner:
         return ("open_review", "assign_owner", "request_more_evidence")
     return ("open_review", "assign_owner")
@@ -401,6 +421,10 @@ def _why_now_for_signal(record: PressureIntakeRecord) -> str:
         return "Recurring ticket pressure is ready to enter review."
     if record.signal_type is PressureSignalType.HUMAN_REWRITE:
         return "Human rewrite pressure is indicating a reusable knowledge gap."
+    if record.signal_type is PressureSignalType.RELEASE_DELTA:
+        return "A release delta may have made published support guidance stale."
+    if record.signal_type is PressureSignalType.INCIDENT_DELTA:
+        return "An incident delta requires governed freshness review."
     return "Source failure is weakening confidence in support propagation."
 
 

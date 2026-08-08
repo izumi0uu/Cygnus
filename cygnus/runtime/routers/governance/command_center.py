@@ -14,38 +14,82 @@ from cygnus.runtime.routers.governance.dependencies import (
 router = APIRouter()
 
 def _review_observation(snapshot: GovernanceReadSnapshot) -> SurfaceObservation:
+    missing_signals = [
+        "review_assignment",
+        "source_impact",
+    ]
+    if snapshot.uncompiled_signal_count:
+        missing_signals.append("audience_binding_resolution")
     return SurfaceObservation(
         state=ObservationState.PARTIAL,
-        observed_count=snapshot.visible_source_count,
-        reason="review_signal_coverage_partial",
-        covered_signals=("source_status",),
-        missing_signals=(
-            "ticket_pressure",
+        observed_count=(
+            len(snapshot.governance_signals) + snapshot.audience_conflict_count
+        ),
+        reason="persisted_governance_signal_provider_partial",
+        covered_signals=(
+            "ticket_cluster",
+            "human_rewrite",
+            "source_failure",
             "release_delta",
             "incident_delta",
             "audience_conflict",
-            "review_assignment",
-            "source_impact",
         ),
+        missing_signals=tuple(missing_signals),
     )
 
 
-def _drift_observation() -> SurfaceObservation:
+def _drift_observation(snapshot: GovernanceReadSnapshot) -> SurfaceObservation:
+    drift_count = sum(
+        bundle.signal.risk_type.value == "drift"
+        for bundle in snapshot.review_bundles
+    )
+    missing_signals = (
+        ("audience_binding_resolution",)
+        if any(
+            signal_type in {"release_delta", "incident_delta"}
+            for signal_type in snapshot.uncompiled_signal_types
+        )
+        else ()
+    )
     return SurfaceObservation(
-        state=ObservationState.UNAVAILABLE,
-        observed_count=0,
-        reason="drift_detectors_unavailable",
-        missing_signals=("release_delta", "incident_delta", "ticket_pressure"),
+        state=(
+            ObservationState.PARTIAL
+            if missing_signals
+            else ObservationState.READY
+        ),
+        observed_count=drift_count,
+        reason=(
+            "persisted_drift_provider_partial"
+            if missing_signals
+            else "persisted_drift_provider_ready"
+        ),
+        covered_signals=("release_delta", "incident_delta"),
+        missing_signals=missing_signals,
     )
 
 
 def _source_observation(snapshot: GovernanceReadSnapshot) -> SurfaceObservation:
+    has_unresolved_source_facts = bool(snapshot.source_observations)
     return SurfaceObservation(
-        state=ObservationState.PARTIAL,
-        observed_count=snapshot.visible_source_count,
-        reason="source_impact_coverage_partial",
-        covered_signals=("source_status",),
-        missing_signals=("source_impact",),
+        state=(
+            ObservationState.PARTIAL
+            if has_unresolved_source_facts
+            else ObservationState.READY
+        ),
+        observed_count=(
+            len(snapshot.source_observations)
+            + sum(
+                bundle.signal.risk_type.value == "source_blindness"
+                for bundle in snapshot.review_bundles
+            )
+        ),
+        reason=(
+            "source_impact_coverage_partial"
+            if has_unresolved_source_facts
+            else "persisted_source_failure_provider_ready"
+        ),
+        covered_signals=("source_status", "source_failure"),
+        missing_signals=("source_impact",) if has_unresolved_source_facts else (),
     )
 
 
@@ -72,7 +116,7 @@ async def drift(
     """Release/incident detector coverage, never a fabricated no-risk result."""
     return build_drift_governance_surface(
         snapshot.review_bundles,
-        observation=_drift_observation(),
+        observation=_drift_observation(snapshot),
     ).to_dict()
 
 

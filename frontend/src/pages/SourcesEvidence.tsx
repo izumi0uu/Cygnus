@@ -126,7 +126,7 @@ function SourceCard({ ctx, command }: { ctx: SourceBlindnessContext; command: st
               <div key={ref} className="flex items-center gap-2 font-mono text-[10px]">
                 <span className="h-1.5 w-1.5 rotate-45" style={{ background: FRESH_COLOR[ctx.freshness_states[i] ?? 'unknown'] ?? 'var(--faint)' }} />
                 <span className="text-muted-foreground">{ref}</span>
-                <span className="text-faint">{ctx.source_types[i] ?? ''} · {ctx.freshness_states[i] ?? 'unknown'}</span>
+                <span className="text-faint">{v.evidenceSourceType(ctx.source_types[i] ?? '')} · {v.freshness(ctx.freshness_states[i] ?? 'unknown')}</span>
               </div>
             ))}
           </div>

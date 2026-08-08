@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next'
 
 export default function LangToggle() {
-  const { i18n } = useTranslation()
+  const { t, i18n } = useTranslation()
   const isEn = i18n.language.startsWith('en')
   const toggle = () => {
     const next = isEn ? 'zh' : 'en'
@@ -16,6 +16,7 @@ export default function LangToggle() {
         className="lang-tgl lang-tgl-skewed"
         checked={isEn}
         onChange={toggle}
+        aria-label={t(isEn ? 'lang.switchToZh' : 'lang.switchToEn')}
       />
       <label
         htmlFor="lang-toggle"

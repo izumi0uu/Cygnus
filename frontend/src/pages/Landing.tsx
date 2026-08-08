@@ -116,12 +116,12 @@ export default function Landing() {
     localStorage.setItem('cygnus-lang', next)
   }
 
-  const members = MEMBERS.map((m) => ({ name: m.en, glyph: m.glyph }))
+  const members = MEMBERS.map((m) => ({ name: isZh ? m.zh : m.en, glyph: m.glyph }))
 
   const features = [
-    { k: '01 / 编译', h: '把分散来源变成知识对象', p: '工单、release、SOP、incident —— 归一化、聚类，编译成结构化知识对象，而非匿名 chunk。' },
-    { k: '02 / 审阅 · 发布', h: '人在环的治理命令', p: '按风险重排审阅；发布前预览爆炸半径（受众 × 渠道），支持限制 / 拆分 / 暂停。' },
-    { k: '03 / 追溯', h: '每个答案都连着来源', p: '对象 → 证据 → 版本 → 发布记录，全链路可追溯；来源失效即治理失明。' },
+    { k: t('landing.features.compile.label'), h: t('landing.features.compile.title'), p: t('landing.features.compile.body') },
+    { k: t('landing.features.reviewPublish.label'), h: t('landing.features.reviewPublish.title'), p: t('landing.features.reviewPublish.body') },
+    { k: t('landing.features.trace.label'), h: t('landing.features.trace.title'), p: t('landing.features.trace.body') },
   ]
 
   return (
@@ -131,7 +131,11 @@ export default function Landing() {
           CYGNUS<span style={{ color: ACCENT }}>.</span>
         </span>
         <div className="ml-auto flex items-center gap-5 text-sm" style={{ color: '#8C867B' }}>
-          <button onClick={toggleLang} className="transition-colors hover:text-[#F2EEE6]">
+          <button
+            onClick={toggleLang}
+            aria-label={t(isZh ? 'lang.switchToEn' : 'lang.switchToZh')}
+            className="transition-colors hover:text-[#F2EEE6]"
+          >
             {isZh ? '中 / EN' : 'EN / 中'}
           </button>
           <Link
@@ -221,7 +225,7 @@ export default function Landing() {
         className="mx-auto flex max-w-[1100px] items-center justify-between border-t px-7 py-8 font-mono text-xs"
         style={{ borderColor: BORDER, color: '#8C867B' }}
       >
-        <span>CYGNUS · Arkon-enhanced support knowledge OS</span>
+        <span>{t('landing.footerTagline')}</span>
         <span>© 2026</span>
       </footer>
     </div>

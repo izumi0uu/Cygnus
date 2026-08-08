@@ -161,6 +161,7 @@ export function RevisionClouds({ zoom, panX, panY }: { zoom: number; panX: numbe
             </button>
             <button
               onClick={() => setSelectedId(null)}
+              aria-label={t('detail.close')}
               className="font-mono text-[10px] text-faint hover:text-foreground"
             >
               ✕
@@ -178,7 +179,7 @@ export function RevisionClouds({ zoom, panX, panY }: { zoom: number; panX: numbe
                 <div className="bp-cloud-panel-item-meta">
                   <span style={{ color: 'var(--faint)' }}>@{selectedCloud.notif.objectRef}</span>
                   {selectedCloud.notif.ownerGap && (
-                    <span style={{ color: 'var(--high)' }}>· owner gap</span>
+                    <span style={{ color: 'var(--high)' }}>· {t('owner.gap')}</span>
                   )}
                 </div>
                 <button

@@ -234,7 +234,7 @@ export default function AppShell() {
             title={t('auth.logout')}
             className="bp-dir-footer-btn"
           >
-            EXIT
+            {t('auth.logout')}
           </button>
         </div>
       </aside>
@@ -259,14 +259,14 @@ export default function AppShell() {
 
           {/* Zoom controls */}
           <div className="bp-zoom-ctrl ml-4">
-            <button className="bp-zoom-btn" onClick={zoomOut} aria-label="Zoom out" title="Zoom out (−)">
+            <button className="bp-zoom-btn" onClick={zoomOut} aria-label={t('coord.zoomOut')} title={`${t('coord.zoomOut')} (−)`}>
               <Minus size={13} />
             </button>
             <span className="bp-zoom-display">{(zoom * 100).toFixed(0)}%</span>
-            <button className="bp-zoom-btn" onClick={zoomIn} aria-label="Zoom in" title="Zoom in (+)">
+            <button className="bp-zoom-btn" onClick={zoomIn} aria-label={t('coord.zoomIn')} title={`${t('coord.zoomIn')} (+)`}>
               <Plus size={13} />
             </button>
-            <button className="bp-zoom-btn" onClick={zoomFit} aria-label="Fit to screen" title="Fit (⌘0)">
+            <button className="bp-zoom-btn" onClick={zoomFit} aria-label={t('coord.fitToScreen')} title={`${t('coord.fitToScreen')} (⌘0)`}>
               <Maximize2 size={12} />
             </button>
           </div>

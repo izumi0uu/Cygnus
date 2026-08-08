@@ -73,6 +73,30 @@ const OBJECT_TYPE: Record<string, Pair> = {
   audience_variant: { zh: '受众变体', en: 'Audience variant' },
 }
 
+const LIFECYCLE: Record<string, Pair> = {
+  draft: { zh: '草稿', en: 'Draft' },
+  in_review: { zh: '审阅中', en: 'In review' },
+  approved: { zh: '已批准', en: 'Approved' },
+  published: { zh: '已发布', en: 'Published' },
+  superseded: { zh: '已替代', en: 'Superseded' },
+  archived: { zh: '已归档', en: 'Archived' },
+}
+
+const FRESHNESS: Record<string, Pair> = {
+  fresh: { zh: '新鲜', en: 'Fresh' },
+  stale: { zh: '已过期', en: 'Stale' },
+  unknown: { zh: '未知', en: 'Unknown' },
+}
+
+const EVIDENCE_SOURCE_TYPE: Record<string, Pair> = {
+  help_center: { zh: '帮助中心', en: 'Help Center' },
+  internal_sop: { zh: '内部 SOP', en: 'Internal SOP' },
+  resolved_ticket: { zh: '已解决工单', en: 'Resolved ticket' },
+  release_note: { zh: '发布说明', en: 'Release note' },
+  incident_update: { zh: '事故更新', en: 'Incident update' },
+  chat_transcript: { zh: '聊天记录', en: 'Chat transcript' },
+}
+
 const VISIBILITY: Record<string, Pair> = {
   external: { zh: '对外', en: 'External' },
   internal: { zh: '对内', en: 'Internal' },
@@ -173,6 +197,9 @@ export function useVocab() {
     command: (k: string) => pick(COMMAND, k, zh),
     surface: (k: string) => pick(SURFACE, k, zh),
     objectType: (k: string) => pick(OBJECT_TYPE, k, zh),
+    lifecycle: (k: string) => pick(LIFECYCLE, k, zh),
+    freshness: (k: string) => pick(FRESHNESS, k, zh),
+    evidenceSourceType: (k: string) => pick(EVIDENCE_SOURCE_TYPE, k, zh),
     visibility: (k: string) => pick(VISIBILITY, k, zh),
     blastEffect: (k: string) => pick(BLAST_EFFECT, k, zh),
     propStatus: (k: string) => pick(PROP_STATUS, k, zh),

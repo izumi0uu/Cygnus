@@ -238,7 +238,7 @@ function Drawer({ node, edges, nodes, onClose }: { node: KnowledgeGraphNode; edg
       <aside ref={ref} role="dialog" aria-modal="true" aria-labelledby="ko-drawer-title" tabIndex={-1} className="bp-panel fixed right-0 top-0 z-50 flex h-full w-full max-w-[440px] flex-col overflow-y-auto p-5 outline-none">
         <div className="flex items-center gap-2">
           <span className="bp-tol bp-tol-flat">{v.objectType(node.object_type ?? '')}</span>
-          <span className={`bp-tol ${LC[node.lifecycle_state ?? ''] ?? 'bp-tol-flat'}`}>{node.lifecycle_state}</span>
+          <span className={`bp-tol ${LC[node.lifecycle_state ?? ''] ?? 'bp-tol-flat'}`}>{v.lifecycle(node.lifecycle_state ?? '')}</span>
           <button className="ml-auto flex h-8 w-8 items-center justify-center bp-panel text-muted-foreground hover:bg-muted" aria-label={t('detail.close')} onClick={onClose}><X size={15} /></button>
         </div>
         <h2 id="ko-drawer-title" className="mt-3 font-mono text-lg font-bold leading-tight">{node.label}</h2>
@@ -254,7 +254,7 @@ function Drawer({ node, edges, nodes, onClose }: { node: KnowledgeGraphNode; edg
                   <span className="mt-1 h-2 w-2 shrink-0 rotate-45" style={{ background: EV_COLOR[e.source_type ?? ''] ?? '#aab0bd' }} />
                   <div>
                     <div className="font-mono text-sm font-medium">{e.label}</div>
-                    <div className="font-mono text-[10px] text-faint">{e.source_type} · {e.freshness} · {e.source_ref}</div>
+                    <div className="font-mono text-[10px] text-faint">{v.evidenceSourceType(e.source_type ?? '')} · {v.freshness(e.freshness ?? '')} · {e.source_ref}</div>
                   </div>
                 </li>
               ))}
@@ -326,7 +326,7 @@ function TraceabilitySection({ objectId }: { objectId: string }) {
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="bp-label-inline">{t('trace.freshness')}</span>
             <span className={`bp-tol ${FRESH_TOL[trace.trace.freshness] ?? 'bp-tol-flat'}`} style={{ color: FRESH_COLOR[trace.trace.freshness] ?? 'var(--faint)' }}>
-              {trace.trace.freshness}
+              {v.freshness(trace.trace.freshness)}
             </span>
           </div>
           {trace.trace.blind_spots.length > 0 && (
@@ -364,7 +364,7 @@ function TraceabilitySection({ objectId }: { objectId: string }) {
                   <div className="min-w-0">
                     <div className="font-mono text-sm font-medium">{ref.title}</div>
                     <div className="font-mono text-[10px] text-faint">
-                      {v.surface(ref.source_type)} · {ref.freshness} · {t('trace.sourceRef')}: {ref.source_ref}
+                      {v.evidenceSourceType(ref.source_type)} · {v.freshness(ref.freshness)} · {t('trace.sourceRef')}: {ref.source_ref}
                     </div>
                     <div className="mt-0.5 font-mono text-[10px] leading-relaxed text-muted-foreground">{t('trace.excerpt')}: {ref.excerpt_ref}</div>
                   </div>
@@ -384,7 +384,7 @@ function TraceabilitySection({ objectId }: { objectId: string }) {
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="bp-label-inline">{t('trace.reviewHistory')}</span>
               {trace.trace.review_history_summary.map((h, i) => (
-                <span key={i} className="bp-tol bp-tol-flat">{h.stage}: {h.status}</span>
+                <span key={i} className="bp-tol bp-tol-flat">{h.stage}: {v.lifecycle(h.status)}</span>
               ))}
             </div>
           )}
@@ -427,17 +427,17 @@ function WhatIfProjection({
     <div className="bp-panel px-3 py-2.5">
       <div className="mb-2 flex flex-wrap items-center gap-1.5">
         <span className="bp-stamp" style={{ color: 'var(--high)', borderColor: 'color-mix(in srgb, var(--high) 45%, transparent)' }}>
-          {t('trace.projection')}
+          {persisted ? t('trace.executionResult') : t('trace.projection')}
         </span>
         <span className="bp-label-inline">{v.command(actionKey)}</span>
         <span className="bp-label-inline" style={{ color: 'var(--medium)', opacity: 0.7 }}>
           {persisted ? t('trace.persisted') : t('trace.notPersisted')}
         </span>
       </div>
-      <ProjectionGroup label={t('trace.wouldOpen')} bindings={opened} tol="bp-tol-high" dot="var(--high)" />
-      <ProjectionGroup label={t('trace.wouldRemove')} bindings={removed} tol="bp-tol-flat" dot="var(--medium)" />
-      <ProjectionGroup label={t('trace.wouldHold')} bindings={held} tol="bp-tol-urgent" dot="var(--urgent)" />
-      <p className="mt-2 font-mono text-[10px] leading-relaxed text-faint">{t('trace.projectionNote')}</p>
+      <ProjectionGroup label={persisted ? t('trace.didOpen') : t('trace.wouldOpen')} bindings={opened} tol="bp-tol-high" dot="var(--high)" />
+      <ProjectionGroup label={persisted ? t('trace.didRemove') : t('trace.wouldRemove')} bindings={removed} tol="bp-tol-flat" dot="var(--medium)" />
+      <ProjectionGroup label={persisted ? t('trace.didHold') : t('trace.wouldHold')} bindings={held} tol="bp-tol-urgent" dot="var(--urgent)" />
+      <p className="mt-2 font-mono text-[10px] leading-relaxed text-faint">{persisted ? t('trace.persistedResultNote') : t('trace.projectionNote')}</p>
     </div>
   )
 }

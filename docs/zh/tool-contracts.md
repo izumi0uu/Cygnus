@@ -379,12 +379,14 @@ Nanobot 只消费结果，不拥有检索真相。
 ### 风险级别
 `R3`
 
-### 输入
+### 当前持久化输入
 ```json
 {
   "draft_id": "string",
-  "target_channel": "internal_copilot|internal_mcp|external_help_center|future_customer_answer_engine",
-  "approval_ref": "optional-string"
+  "approval_ref": "string",
+  "command_id": "string",
+  "action_key": "publish|republish|restrict_publish|hold_external|republish_internal_only",
+  "target_channels": ["internal_copilot", "internal_mcp"]
 }
 ```
 
@@ -398,6 +400,14 @@ Nanobot 只消费结果，不拥有检索真相。
 - published object id / version
 - effective visibility
 - audit trace ref
+
+### 当前持久化边界
+- 只有已审批、已物化为 typed support object、且全部 evidence source 为 `ready` 的 `WikiPageDraft` 才能进入 durable publish。
+- `command_id` 是幂等键；同一请求重放返回原 publication，复用到不同 payload 会被拒绝。
+- durable transaction 同时写入 append-only governance event、immutable publication record 与每个目标 surface 的 propagation row。
+- propagation 初始状态必须为 `pending`；只有显式、带 `expected_version` 的后续更新才能写入 `synced`、`failed` 或 `manual_action_required`。
+- 仅提供 `object_ref` 的 fixture-backed 调用仍是演练，必须返回 `persisted:false`、`rehearsal:true`，不得被表述为生产发布。
+- 当前 durable write/read HTTP surface 仍为 admin-gated；更宽的 scoped write permission 不在此切片中推导。
 
 ## 8.3 `list_drift_alerts`
 ### 用途

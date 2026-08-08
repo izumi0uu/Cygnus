@@ -72,6 +72,8 @@ Downstream agents must follow this contract in Jira comments, handoffs, logs, an
 - `ready`, `partial`, and `unavailable` describe detector coverage, not swallowed failures. Empty arrays under `partial` or `unavailable` must never be summarized as “no risk.”
 - A `SourceFailureObservation` is a source-failure fact. Before `impact_state="unknown"` is resolved, do not infer a risk, owner, audience, surface, or executable command.
 - Preserve `rehearsal:true` from recovery overview in every client or agent summary; it is not durable recovery truth.
+- `persisted:true` is valid only when an approved typed `WikiPageDraft`, ready evidence, explicit channels, and durable IDs commit in one publish transaction; the fixture `object_ref` path must remain `persisted:false`, `rehearsal:true`.
+- New propagation is always `pending`; a successful publish request never implies downstream `synced`, which requires an explicit version-checked update.
 
 ### 4.1.2 Engineering execution control
 - Jira is the only delivery backlog and workflow-status source of truth; CYG issues own priority, owner, blockers, progress, and completion.

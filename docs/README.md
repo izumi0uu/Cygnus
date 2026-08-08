@@ -15,8 +15,8 @@ The intended relationship is:
 
 Current engineering strategy (status as of 2026-07):
 - ✅ the Arkon full-port baseline, runability recovery (compose stack), and the post-P2 internalization / upstream-cutover lane are **complete** (Jira CYG-23, CYG-24, CYG-69–91; the stop-line is enforced by the guard-test suite and `scripts/upstream_cutover_gate.py`)
-- ✅ the first P3 support-verticalization story wave (CYG-6–17) is closed — on typed fixture / rehearsal substrate, with durable-truth convergence still owed
-- ▶ the current mainline is the **Nanobot ↔ Cygnus governed session seam** (Jira CYG-92–96); its engineering prerequisite is switching the governed plane from `sample_*` fixtures to the internalized substrate truth
+- ✅ the first P3 support-verticalization story wave (CYG-6–17) is closed on typed rehearsal providers; the first durable governance write/publication ledger slice now lands real approved Wiki truth with append-only events, idempotent publications, and explicit pending propagation (CYG-98)
+- ▶ the current mainline continues the **Nanobot ↔ Cygnus governed session seam and provider convergence** (Jira CYG-92+): fixture-backed pressure/drift/recovery inputs must keep their rehearsal labels until their own durable providers land
 - keep product-shell parity as a deferred non-roadmap lane by default
 - classify `auth / admin / wiki` shell candidates before any shell-parity implementation, and keep non-support pages isolated unless they directly unblock support verticalization
 

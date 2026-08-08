@@ -379,12 +379,14 @@ Publish a draft to a target channel.
 ### Risk class
 `R3`
 
-### Input
+### Current durable input
 ```json
 {
   "draft_id": "string",
-  "target_channel": "internal_copilot|internal_mcp|external_help_center|future_customer_answer_engine",
-  "approval_ref": "optional-string"
+  "approval_ref": "string",
+  "command_id": "string",
+  "action_key": "publish|republish|restrict_publish|hold_external|republish_internal_only",
+  "target_channels": ["internal_copilot", "internal_mcp"]
 }
 ```
 
@@ -398,6 +400,14 @@ Publish a draft to a target channel.
 - published object id / version
 - effective visibility
 - audit trace ref
+
+### Current persistence boundary
+- Only an approved `WikiPageDraft` materialized as a typed support object, with every evidence source in `ready`, may enter durable publish.
+- `command_id` is the idempotency key: replay of the same request returns the original publication, while reuse with a different payload is rejected.
+- The durable transaction writes the append-only governance event, immutable publication record, and one propagation row per target surface together.
+- Propagation must begin as `pending`; only an explicit later update with `expected_version` may record `synced`, `failed`, or `manual_action_required`.
+- Fixture-backed calls that provide only `object_ref` remain rehearsals and must return `persisted:false`, `rehearsal:true`; they are not production publication.
+- Durable write/read HTTP surfaces remain admin-gated in the current slice; broader scoped write permissions are not inferred here.
 
 ## 8.3 `list_drift_alerts`
 ### Purpose

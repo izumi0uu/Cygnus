@@ -72,6 +72,8 @@ Agent 必须保留以下纪律：
 - `ready`、`partial`、`unavailable` 是 detector 覆盖状态，不是异常吞噬机制；`partial`/`unavailable` 的空数组不得写成“无风险”。
 - `SourceFailureObservation` 是来源失败事实，`impact_state="unknown"` 前不得推导风险、owner、audience、surface 或执行命令。
 - recovery overview 的 `rehearsal:true` 必须在任何客户端/agent summary 中保留；它不是持久化恢复真相。
+- `persisted:true` 只能来自已审批 typed `WikiPageDraft`、ready evidence、显式 channels 与 durable IDs 同事务落库的 publish；仅 `object_ref` 的 fixture 路径必须保持 `persisted:false`、`rehearsal:true`。
+- propagation 创建时只能是 `pending`；不得把 publish 请求成功推导成下游已 `synced`，后者必须来自显式、版本校验的更新。
 
 ### 4.1.2 工程执行控制权
 - Jira 是唯一的交付 backlog 与工作流状态真相；priority、owner、blocker、进度和完成态都以 CYG issue 为准。

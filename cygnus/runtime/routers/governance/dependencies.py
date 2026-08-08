@@ -6,6 +6,11 @@ from fastapi import Depends
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cygnus.publish import (
+    durable_publication_result,
+    latest_publication_for_object,
+    list_publication_propagations,
+)
 from cygnus.retrieval.substrate_provider import (
     SubstrateKnowledgeSnapshot,
     build_substrate_snapshot,
@@ -47,7 +52,9 @@ async def get_governance_read_snapshot(
         wiki_stmt = wiki_stmt.where(wiki_scope)
     visible_pages = tuple((await db.execute(wiki_stmt)).scalars().all())
 
-    ready_source_stmt = select(Source).where(Source.status == "ready").order_by(Source.id)
+    ready_source_stmt = (
+        select(Source).where(Source.status == "ready").order_by(Source.id)
+    )
     if document_scope is not None:
         ready_source_stmt = ready_source_stmt.where(document_scope)
     ready_sources = tuple((await db.execute(ready_source_stmt)).scalars().all())
@@ -61,7 +68,9 @@ async def get_governance_read_snapshot(
         knowledge_types = tuple(
             (
                 await db.execute(
-                    select(KnowledgeType).where(KnowledgeType.id.in_(knowledge_type_ids))
+                    select(KnowledgeType).where(
+                        KnowledgeType.id.in_(knowledge_type_ids)
+                    )
                 )
             )
             .scalars()
@@ -83,7 +92,9 @@ async def get_governance_read_snapshot(
         source_count_stmt = source_count_stmt.where(document_scope)
     visible_source_count = int((await db.execute(source_count_stmt)).scalar_one())
 
-    error_source_stmt = select(Source).where(Source.status == "error").order_by(Source.id)
+    error_source_stmt = (
+        select(Source).where(Source.status == "error").order_by(Source.id)
+    )
     if document_scope is not None:
         error_source_stmt = error_source_stmt.where(document_scope)
     error_sources = tuple((await db.execute(error_source_stmt)).scalars().all())
@@ -104,9 +115,27 @@ async def get_governance_read_snapshot(
 
     return GovernanceReadSnapshot(
         knowledge=knowledge,
-        source_observations=build_source_failure_observations(error_sources, linked_pages),
+        source_observations=build_source_failure_observations(
+            error_sources, linked_pages
+        ),
         visible_source_count=visible_source_count,
         review_bundles=(),
+    )
+
+
+async def get_durable_publish_projection(
+    object_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object] | None:
+    """Load restart-durable publish truth for one knowledge object."""
+    publication = await latest_publication_for_object(db, object_id)
+    if publication is None:
+        return None
+    propagations = await list_publication_propagations(db, publication.id)
+    return durable_publication_result(
+        publication,
+        propagations=propagations,
+        replayed=False,
     )
 
 

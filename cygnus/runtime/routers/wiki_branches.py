@@ -16,7 +16,6 @@ from cygnus.runtime.database.models import (
     Employee,
     WikiBranch,
     WikiPageDraft,
-    WikiPage,
 )
 from cygnus.runtime.services.audit_service import log_audit
 from cygnus.runtime.services.auth_service import get_current_user

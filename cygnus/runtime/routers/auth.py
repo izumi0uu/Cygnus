@@ -11,7 +11,6 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.runtime.database import get_db
@@ -110,7 +109,6 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
     )
 
     permissions = get_effective_permissions(employee)
-    workspace_memberships = await _get_workspace_memberships(db, employee.id)
 
     return LoginResponse(
         access_token=token,

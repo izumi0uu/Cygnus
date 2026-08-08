@@ -12,6 +12,8 @@ RUN apt-get update \
 
 COPY pyproject.toml README.md ./
 COPY cygnus ./cygnus
+COPY alembic.ini ./
+COPY migrations ./migrations
 
 RUN python -m pip install --upgrade pip \
     && pip install .

@@ -47,6 +47,7 @@ _WIKILINK_RE = re.compile(r"\[\[([^\]\|]+)(?:\|[^\]]*)?]]")
 # Scope filter helper
 # ---------------------------------------------------------------------------
 
+
 def _scope_filter(scope_type: str = "global", scope_id: Optional[uuid.UUID] = None):
     """Return SQLAlchemy WHERE clauses for exact scope filtering."""
     if scope_id:
@@ -64,7 +65,10 @@ def _scope_filter_with_dept(department_ids: Optional[list[uuid.UUID]] = None):
     if department_ids:
         return or_(
             and_(WikiPage.scope_type == "global", WikiPage.scope_id.is_(None)),
-            and_(WikiPage.scope_type == "department", WikiPage.scope_id.in_(department_ids)),
+            and_(
+                WikiPage.scope_type == "department",
+                WikiPage.scope_id.in_(department_ids),
+            ),
         )
     return _scope_filter("global")
 
@@ -87,7 +91,10 @@ def _scope_filter_for_identity(
     clauses = [and_(WikiPage.scope_type == "global", WikiPage.scope_id.is_(None))]
     if department_ids:
         clauses.append(
-            and_(WikiPage.scope_type == "department", WikiPage.scope_id.in_(department_ids))
+            and_(
+                WikiPage.scope_type == "department",
+                WikiPage.scope_id.in_(department_ids),
+            )
         )
     if project_ids:
         clauses.append(
@@ -112,7 +119,10 @@ def _inverse_scope_filter_for_identity(
         else WikiPage.scope_type == "project"
     )
     dept_clause = (
-        and_(WikiPage.scope_type == "department", WikiPage.scope_id.notin_(department_ids))
+        and_(
+            WikiPage.scope_type == "department",
+            WikiPage.scope_id.notin_(department_ids),
+        )
         if department_ids
         else WikiPage.scope_type == "department"
     )
@@ -122,6 +132,7 @@ def _inverse_scope_filter_for_identity(
 # ---------------------------------------------------------------------------
 # Wikilink parsing & graph maintenance
 # ---------------------------------------------------------------------------
+
 
 def extract_wikilinks(content_md: str) -> list[str]:
     """Return the list of slugs referenced by `[[slug]]` patterns, deduped."""
@@ -148,9 +159,7 @@ async def refresh_links(
     wikilinks parsed from its current `content_md`. Self-links (matching the
     page's own slug) are dropped to keep the graph sane.
     """
-    await session.execute(
-        delete(WikiLink).where(WikiLink.from_page_id == from_page_id)
-    )
+    await session.execute(delete(WikiLink).where(WikiLink.from_page_id == from_page_id))
     targets = [s for s in extract_wikilinks(content_md) if s != from_slug]
     if not targets:
         return
@@ -180,8 +189,11 @@ async def get_backlinks(
     if scope_type is not None:
         stmt = stmt.where(
             or_(
-                and_(WikiPage.scope_type == scope_type, WikiPage.scope_id == scope_id) if scope_id is not None
-                else and_(WikiPage.scope_type == scope_type, WikiPage.scope_id.is_(None)),
+                and_(WikiPage.scope_type == scope_type, WikiPage.scope_id == scope_id)
+                if scope_id is not None
+                else and_(
+                    WikiPage.scope_type == scope_type, WikiPage.scope_id.is_(None)
+                ),
                 and_(WikiPage.scope_type == "global", WikiPage.scope_id.is_(None)),
             )
         )
@@ -196,7 +208,9 @@ async def get_outlinks(
     scope_id: Optional[uuid.UUID] = None,
 ) -> list[str]:
     """Slugs that the page (`slug`, scope) links to."""
-    page = await get_page_by_slug(session, slug, scope_type=scope_type, scope_id=scope_id)
+    page = await get_page_by_slug(
+        session, slug, scope_type=scope_type, scope_id=scope_id
+    )
     if page is None:
         return []
     result = await session.execute(
@@ -249,8 +263,9 @@ async def get_neighborhood(
         return {"nodes": [], "edges": []}
 
     pages_result = await session.execute(
-        select(WikiPage.slug, WikiPage.title, WikiPage.page_type)
-        .where(WikiPage.slug.in_(slugs))
+        select(WikiPage.slug, WikiPage.title, WikiPage.page_type).where(
+            WikiPage.slug.in_(slugs)
+        )
     )
     nodes = [
         {"slug": r.slug, "title": r.title, "page_type": r.page_type}
@@ -268,6 +283,7 @@ async def get_neighborhood(
 # ---------------------------------------------------------------------------
 # Page CRUD
 # ---------------------------------------------------------------------------
+
 
 async def get_page_by_slug(
     session: AsyncSession,
@@ -372,9 +388,11 @@ async def list_pages(
     result = await session.execute(stmt)
     return list(result.scalars().all())
 
+
 # ---------------------------------------------------------------------------
 # Compiler ops application
 # ---------------------------------------------------------------------------
+
 
 async def apply_create(
     session: AsyncSession,
@@ -408,10 +426,14 @@ async def apply_create(
     session.add(page)
     await session.flush()
     await refresh_links(session, page.id, slug, content_md)
-    session.add(WikiPageRevision(
-        page_id=page.id, version=page.version,
-        content_md=content_md, change_type="agent_compile",
-    ))
+    session.add(
+        WikiPageRevision(
+            page_id=page.id,
+            version=page.version,
+            content_md=content_md,
+            change_type="agent_compile",
+        )
+    )
     return page
 
 
@@ -438,7 +460,9 @@ async def apply_update(
       - Bump version, refresh updated_at, refresh embedding if supplied.
     Returns None if the page does not exist.
     """
-    page = await get_page_by_slug(session, slug, scope_type=scope_type, scope_id=scope_id)
+    page = await get_page_by_slug(
+        session, slug, scope_type=scope_type, scope_id=scope_id
+    )
     if page is None:
         return None
 
@@ -449,10 +473,18 @@ async def apply_update(
         page.summary = summary
     if status is not None:
         page.status = status
-    if add_knowledge_type_slug and add_knowledge_type_slug not in (page.knowledge_type_slugs or []):
-        page.knowledge_type_slugs = [*(page.knowledge_type_slugs or []), add_knowledge_type_slug]
+    if add_knowledge_type_slug and add_knowledge_type_slug not in (
+        page.knowledge_type_slugs or []
+    ):
+        page.knowledge_type_slugs = [
+            *(page.knowledge_type_slugs or []),
+            add_knowledge_type_slug,
+        ]
     if add_source_id and add_source_id not in (page.source_ids or []):
-        page.source_ids = [*(source_id for source_id in (page.source_ids or [])), add_source_id]
+        page.source_ids = [
+            *(source_id for source_id in (page.source_ids or [])),
+            add_source_id,
+        ]
     # Embeddings are no longer stored on WikiPage; the compiler calls
     # _reembed_pages after this returns, which writes into the active
     # wiki_page_embeddings_<dim> table. The `embedding` parameter is accepted
@@ -461,10 +493,14 @@ async def apply_update(
     page.version = (page.version or 1) + 1
     await session.flush()
     await refresh_links(session, page.id, slug, new_content_md)
-    session.add(WikiPageRevision(
-        page_id=page.id, version=page.version,
-        content_md=new_content_md, change_type="agent_compile",
-    ))
+    session.add(
+        WikiPageRevision(
+            page_id=page.id,
+            version=page.version,
+            content_md=new_content_md,
+            change_type="agent_compile",
+        )
+    )
     return page
 
 
@@ -488,31 +524,48 @@ async def upsert_page(
     lock_query = select(func.pg_advisory_xact_lock(func.hashtext(slug)))
     await session.execute(lock_query)
 
-    existing = await get_page_by_slug(session, slug, scope_type=scope_type, scope_id=scope_id)
+    existing = await get_page_by_slug(
+        session, slug, scope_type=scope_type, scope_id=scope_id
+    )
     if existing is None:
         return await apply_create(
-            session, slug, title, page_type, content_md, summary,
-            knowledge_type_slugs, source_ids, embedding,
-            scope_type=scope_type, scope_id=scope_id,
+            session,
+            slug,
+            title,
+            page_type,
+            content_md,
+            summary,
+            knowledge_type_slugs,
+            source_ids,
+            embedding,
+            scope_type=scope_type,
+            scope_id=scope_id,
             status=status or "seed",
         )
-    return await apply_update(
-        session,
-        slug=slug,
-        new_content_md=content_md,
-        summary=summary,
-        title=title,
-        add_knowledge_type_slug=knowledge_type_slugs[0] if knowledge_type_slugs else None,
-        add_source_id=source_ids[0] if source_ids else None,
-        embedding=embedding,
-        scope_type=scope_type, scope_id=scope_id,
-        status=status,
-    ) or existing
+    return (
+        await apply_update(
+            session,
+            slug=slug,
+            new_content_md=content_md,
+            summary=summary,
+            title=title,
+            add_knowledge_type_slug=knowledge_type_slugs[0]
+            if knowledge_type_slugs
+            else None,
+            add_source_id=source_ids[0] if source_ids else None,
+            embedding=embedding,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            status=status,
+        )
+        or existing
+    )
 
 
 # ---------------------------------------------------------------------------
 # Reserved pages: _index and _log
 # ---------------------------------------------------------------------------
+
 
 async def regenerate_index(
     session: AsyncSession,
@@ -550,12 +603,13 @@ async def regenerate_index(
             lines.append("")
 
     new_md = "\n".join(lines).rstrip() + "\n"
-    page = await get_page_by_slug(session, INDEX_SLUG, scope_type=scope_type, scope_id=scope_id)
+    page = await get_page_by_slug(
+        session, INDEX_SLUG, scope_type=scope_type, scope_id=scope_id
+    )
     if page is None:
         page = WikiPage(
             slug=INDEX_SLUG,
             title="Wiki Index",
-            page_type="index",
             content_md=new_md,
             summary="Catalog of all wiki pages",
             knowledge_type_slugs=[],
@@ -582,12 +636,13 @@ async def append_log(
     """
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
     line = f"## [{ts}] {entry.strip()}"
-    page = await get_page_by_slug(session, LOG_SLUG, scope_type=scope_type, scope_id=scope_id)
+    page = await get_page_by_slug(
+        session, LOG_SLUG, scope_type=scope_type, scope_id=scope_id
+    )
     if page is None:
         page = WikiPage(
             slug=LOG_SLUG,
             title="Wiki Log",
-            page_type="log",
             content_md=f"# Wiki Log\n\n{line}\n",
             summary="Chronological activity log",
             knowledge_type_slugs=[],
@@ -609,6 +664,7 @@ async def append_log(
 # ---------------------------------------------------------------------------
 # Page deletion — cascade cleanup
 # ---------------------------------------------------------------------------
+
 
 async def delete_page_cascade(
     session: AsyncSession,
@@ -636,9 +692,7 @@ async def delete_page_cascade(
     if del_scope_type == "global":
         # Deleting a global page invalidates ALL [[slug]] references because
         # those links resolve to global by default. Clear all incoming edges.
-        await session.execute(
-            delete(WikiLink).where(WikiLink.to_slug == slug)
-        )
+        await session.execute(delete(WikiLink).where(WikiLink.to_slug == slug))
     else:
         same_scope_pages = select(WikiPage.id).where(
             WikiPage.scope_type == del_scope_type,
@@ -683,12 +737,15 @@ async def delete_page_cascade(
     await session.delete(page)
 
     await session.flush()
-    logger.info(f"delete_page_cascade({slug}): deleted page + cleaned {len(referring_pages)} references")
+    logger.info(
+        f"delete_page_cascade({slug}): deleted page + cleaned {len(referring_pages)} references"
+    )
 
 
 # ---------------------------------------------------------------------------
 # Source removal — used when deleting a source
 # ---------------------------------------------------------------------------
+
 
 async def detach_source_from_wiki(
     session: AsyncSession,
@@ -713,10 +770,10 @@ async def detach_source_from_wiki(
             page.source_ids = remaining
     await session.flush()
     if deleted_count:
-        logger.info(f"detach_source_from_wiki({source_id}): deleted {deleted_count} single-source pages")
+        logger.info(
+            f"detach_source_from_wiki({source_id}): deleted {deleted_count} single-source pages"
+        )
     return deleted_count
-
-
 
 
 async def direct_edit_page(
@@ -735,14 +792,16 @@ async def direct_edit_page(
     await session.flush()
     await refresh_links(session, page.id, page.slug, content_md)
 
-    session.add(WikiPageRevision(
-        page_id=page.id,
-        version=page.version,
-        content_md=content_md,
-        change_type="editor_edit",
-        changed_by_id=editor_id,
-        change_note=change_note,
-    ))
+    session.add(
+        WikiPageRevision(
+            page_id=page.id,
+            version=page.version,
+            content_md=content_md,
+            change_type="editor_edit",
+            changed_by_id=editor_id,
+            change_note=change_note,
+        )
+    )
     await session.flush()
     return page
 
@@ -757,12 +816,14 @@ async def rollback_to_revision(
     Restore a page to a previous revision snapshot.
     Creates a new revision recording the rollback.
     """
-    revision = (await session.execute(
-        select(WikiPageRevision).where(
-            WikiPageRevision.page_id == page.id,
-            WikiPageRevision.version == target_version,
+    revision = (
+        await session.execute(
+            select(WikiPageRevision).where(
+                WikiPageRevision.page_id == page.id,
+                WikiPageRevision.version == target_version,
+            )
         )
-    )).scalar_one_or_none()
+    ).scalar_one_or_none()
     if revision is None:
         raise ValueError(f"Revision v{target_version} not found for page {page.slug}")
 
@@ -771,14 +832,16 @@ async def rollback_to_revision(
     await session.flush()
     await refresh_links(session, page.id, page.slug, revision.content_md)
 
-    session.add(WikiPageRevision(
-        page_id=page.id,
-        version=page.version,
-        content_md=revision.content_md,
-        change_type="rollback",
-        changed_by_id=actor_id,
-        change_note=f"rollback to v{target_version}",
-    ))
+    session.add(
+        WikiPageRevision(
+            page_id=page.id,
+            version=page.version,
+            content_md=revision.content_md,
+            change_type="rollback",
+            changed_by_id=actor_id,
+            change_note=f"rollback to v{target_version}",
+        )
+    )
     await session.flush()
     return page
 
@@ -796,7 +859,6 @@ async def regenerate_hot_cache(
       - Any detected and unresolved contradictions (pages containing `[!contradiction]`).
     It calls the active LLM to compile this into a dense, high-value briefing.
     """
-    from cygnus.runtime.ai.registry import ProviderRegistry
 
     # 1. Fetch recent pages
     recent_stmt = (
@@ -809,7 +871,7 @@ async def regenerate_hot_cache(
         .limit(10)
     )
     recent_rows = (await session.execute(recent_stmt)).all()
-    
+
     # 2. Fetch seed pages
     seed_stmt = (
         select(WikiPage.slug, WikiPage.title)
@@ -836,18 +898,38 @@ async def regenerate_hot_cache(
     contradiction_rows = (await session.execute(contradiction_stmt)).all()
 
     # 4. Format context natively (Zero LLM cost fallback)
-    recent_prose = "\n".join(
-        f"- [[{r.slug}|{r.title}]] (Status: {r.status}, Updated: {r.updated_at.strftime('%Y-%m-%d %H:%M') if r.updated_at else 'N/A'})"
-        for r in recent_rows
-    ) if recent_rows else "- No recent updates."
-    seed_prose = "\n".join(f"- [[{r.slug}|{r.title}]]" for r in seed_rows) if seed_rows else "- No seed pages yet."
-    
+    recent_prose = (
+        "\n".join(
+            f"- [[{r.slug}|{r.title}]] (Status: {r.status}, Updated: {r.updated_at.strftime('%Y-%m-%d %H:%M') if r.updated_at else 'N/A'})"
+            for r in recent_rows
+        )
+        if recent_rows
+        else "- No recent updates."
+    )
+    seed_prose = (
+        "\n".join(f"- [[{r.slug}|{r.title}]]" for r in seed_rows)
+        if seed_rows
+        else "- No seed pages yet."
+    )
+
     contradiction_items = []
     for r in contradiction_rows:
-        match = re.search(r">\s*\[!contradiction]\s*(.*?)(?=\n[^>]|\n\n|$)", r.content_md, re.DOTALL | re.IGNORECASE)
-        callout_desc = match.group(1).replace(">", "").strip() if match else "A knowledge contradiction was detected."
+        match = re.search(
+            r">\s*\[!contradiction]\s*(.*?)(?=\n[^>]|\n\n|$)",
+            r.content_md,
+            re.DOTALL | re.IGNORECASE,
+        )
+        callout_desc = (
+            match.group(1).replace(">", "").strip()
+            if match
+            else "A knowledge contradiction was detected."
+        )
         contradiction_items.append(f"- [[{r.slug}|{r.title}]]: {callout_desc}")
-    contradiction_prose = "\n".join(contradiction_items) if contradiction_items else "- No knowledge contradictions detected."
+    contradiction_prose = (
+        "\n".join(contradiction_items)
+        if contradiction_items
+        else "- No knowledge contradictions detected."
+    )
 
     new_md = f"""# ⚡ Cygnus Hot Knowledge Briefing
 
@@ -863,7 +945,9 @@ async def regenerate_hot_cache(
 {seed_prose}
 """
 
-    page = await get_page_by_slug(session, HOT_SLUG, scope_type=scope_type, scope_id=scope_id)
+    page = await get_page_by_slug(
+        session, HOT_SLUG, scope_type=scope_type, scope_id=scope_id
+    )
     if page is None:
         page = WikiPage(
             slug=HOT_SLUG,
@@ -897,9 +981,9 @@ async def lint_wiki(
       - Contradiction nodes: pages containing '[!contradiction]' callouts.
     """
     # 1. Fetch all pages in the current scope
-    pages_stmt = select(WikiPage.slug, WikiPage.title, WikiPage.id, WikiPage.status).where(
-        _scope_filter(scope_type, scope_id)
-    )
+    pages_stmt = select(
+        WikiPage.slug, WikiPage.title, WikiPage.id, WikiPage.status
+    ).where(_scope_filter(scope_type, scope_id))
     pages_rows = (await session.execute(pages_stmt)).all()
     all_slugs = {r.slug for r in pages_rows}
     slug_to_title = {r.slug: r.title for r in pages_rows}
@@ -920,15 +1004,21 @@ async def lint_wiki(
         from_slug = id_to_slug.get(from_page_id)
         if not from_slug:
             continue
-        
-        is_exist = (to_slug in all_slugs)
-        
+
+        is_exist = to_slug in all_slugs
+
         if not is_exist:
             # Check global scope as fallback
             if scope_type != "global":
-                global_exists = (await session.execute(
-                    select(WikiPage.id).where(WikiPage.slug == to_slug, WikiPage.scope_type == "global", WikiPage.scope_id.is_(None))
-                )).scalar_one_or_none()
+                global_exists = (
+                    await session.execute(
+                        select(WikiPage.id).where(
+                            WikiPage.slug == to_slug,
+                            WikiPage.scope_type == "global",
+                            WikiPage.scope_id.is_(None),
+                        )
+                    )
+                ).scalar_one_or_none()
                 if global_exists:
                     is_exist = True
 
@@ -937,11 +1027,13 @@ async def lint_wiki(
                 backlink_counts[to_slug] += 1
         else:
             if to_slug not in (INDEX_SLUG, LOG_SLUG, HOT_SLUG):
-                dead_links.append({
-                    "from_slug": from_slug,
-                    "from_title": slug_to_title.get(from_slug, from_slug),
-                    "to_slug": to_slug
-                })
+                dead_links.append(
+                    {
+                        "from_slug": from_slug,
+                        "from_title": slug_to_title.get(from_slug, from_slug),
+                        "to_slug": to_slug,
+                    }
+                )
 
     # 4. Find orphan pages (0 incoming backlinks, excluding reserved pages)
     orphans = []
@@ -949,25 +1041,20 @@ async def lint_wiki(
         if r.slug in (INDEX_SLUG, LOG_SLUG, HOT_SLUG):
             continue
         if backlink_counts.get(r.slug, 0) == 0:
-            orphans.append({
-                "slug": r.slug,
-                "title": r.title,
-                "status": r.status
-            })
+            orphans.append({"slug": r.slug, "title": r.title, "status": r.status})
 
     # 5. Find pages carrying contradictions
     contradictions_stmt = select(WikiPage.slug, WikiPage.title).where(
         WikiPage.content_md.contains("[!contradiction]"),
-        _scope_filter(scope_type, scope_id)
+        _scope_filter(scope_type, scope_id),
     )
     contradictions_rows = (await session.execute(contradictions_stmt)).all()
     contradiction_nodes = [
-        {"slug": r.slug, "title": r.title}
-        for r in contradictions_rows
+        {"slug": r.slug, "title": r.title} for r in contradictions_rows
     ]
 
     return {
         "dead_links": dead_links,
         "orphans": orphans,
-        "contradictions": contradiction_nodes
+        "contradictions": contradiction_nodes,
     }

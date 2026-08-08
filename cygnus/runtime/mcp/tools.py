@@ -256,7 +256,6 @@ def register_tools(mcp: FastMCP):
         from cygnus.runtime.config import settings
         from cygnus.runtime.ai.registry import ProviderRegistry
         from cygnus.runtime.database import async_session_factory
-        from cygnus.runtime.services import wiki_service
         from cygnus.retrieval import semantic_search as wiki_search
         from cygnus.retrieval.source_chunks import search_source_chunks_semantic
 
@@ -416,7 +415,6 @@ def register_tools(mcp: FastMCP):
         from cygnus.runtime.database import async_session_factory
         from cygnus.runtime.services import wiki_service
 
-        import uuid as uuid_mod
         from sqlalchemy import select as sa_select
 
         from cygnus.runtime.database.models import Department, WikiPage
@@ -1039,6 +1037,8 @@ def register_tools(mcp: FastMCP):
         from cygnus.runtime.database import async_session_factory
         from cygnus.runtime.database.models import Employee, WikiPage
         from cygnus.runtime.services import wiki_service
+        from cygnus.review import contributions as contribution_service
+        from cygnus.review.contributions import wiki_draft_adapter
 
         identity, err = await _get_identity()
         if err:
@@ -1110,8 +1110,6 @@ def register_tools(mcp: FastMCP):
                 base_version=effective_base,
             )
             draft.page = page
-            from cygnus.review import contributions as contribution_service
-            from cygnus.review.contributions import wiki_draft_adapter
             await contribution_service.notify_submitted(
                 session, wiki_draft_adapter, draft, employee,
             )
@@ -1414,6 +1412,8 @@ def register_tools(mcp: FastMCP):
         from cygnus.runtime.database import async_session_factory
         from cygnus.runtime.database.models import Employee, WikiPageDraft
         from cygnus.runtime.services import wiki_service
+        from cygnus.review import contributions as contribution_service
+        from cygnus.review.contributions import wiki_draft_adapter
 
         identity, err = await _get_identity()
         if err:
@@ -1502,7 +1502,8 @@ def register_tools(mcp: FastMCP):
 
         from cygnus.runtime.database import async_session_factory
         from cygnus.runtime.database.models import Employee, WikiPageDraft
-        from cygnus.runtime.services import wiki_service
+        from cygnus.review import contributions as contribution_service
+        from cygnus.review.contributions import wiki_draft_adapter
 
         identity, err = await _get_identity()
         if err:
@@ -1540,8 +1541,6 @@ def register_tools(mcp: FastMCP):
                 return "Error: insufficient permission to reject drafts for this page."
 
             await contribution_service.reject_wiki_draft(session, draft, employee.id, reviewer_note.strip())
-            from cygnus.review import contributions as contribution_service
-            from cygnus.review.contributions import wiki_draft_adapter
             await contribution_service.notify_rejected(
                 session, wiki_draft_adapter, draft, employee, reason=reviewer_note.strip(),
             )
@@ -1950,7 +1949,7 @@ def register_tools(mcp: FastMCP):
                 if scope_type == "project" and sid:
                     role = await get_workspace_role(session, employee, sid)
                     if not role or not workspace_role_can(role, "editor"):
-                        return f"Error: requires editor role or above in this workspace."
+                        return "Error: requires editor role or above in this workspace."
                 else:
                     perms = _get_user_permissions(employee)
                     if "wiki:write:all" not in perms:

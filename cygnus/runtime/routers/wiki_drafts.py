@@ -627,7 +627,7 @@ async def list_all_drafts(
         # Exclude drafts that belong to unsubmitted branches
         from cygnus.runtime.database.models import WikiBranch
         stmt = stmt.outerjoin(WikiBranch, WikiBranch.id == WikiPageDraft.branch_id)
-        stmt = stmt.where(or_(WikiPageDraft.branch_id == None, WikiBranch.status == "pending_merge"))
+        stmt = stmt.where(or_(WikiPageDraft.branch_id.is_(None), WikiBranch.status == "pending_merge"))
 
         page_filter = _build_reviewable_page_filter(user)
         if page_filter is False:  # noqa: E712 — never true, kept for symmetry

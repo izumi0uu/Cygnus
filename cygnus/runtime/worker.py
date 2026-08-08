@@ -1122,7 +1122,7 @@ async def sweep_stuck_ai_review_cron(ctx: dict):
     """
     from datetime import datetime, timedelta, timezone
 
-    from sqlalchemy import or_, select, update
+    from sqlalchemy import or_, update
 
     from cygnus.runtime.database import async_session_factory
     from cygnus.runtime.database.models import WikiPageDraft

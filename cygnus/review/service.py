@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable, Mapping
+from typing import Iterable
 
 from cygnus.domain.audience import AudienceFilter
 from cygnus.evidence.records import FreshnessState, SupportEvidence

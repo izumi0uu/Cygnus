@@ -33,6 +33,12 @@ from typing import Optional, Protocol
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cygnus.governance import (
+    GovernanceEventType,
+    append_draft_event,
+    record_created_draft,
+)
+from cygnus.governance.ledger import transition_key
 from cygnus.runtime.database.models import (
     Employee,
     Skill,
@@ -59,8 +65,10 @@ async def _enqueue_ai_review(db, draft: WikiPageDraft) -> None:
     so the UI never gets stuck on a transient state.
     """
     from loguru import logger
+
     try:
         from cygnus.runtime.services.config_service import ConfigService
+
         cfg = ConfigService(db)
         enabled = await cfg.get("ai_pre_review_enabled")
         # Default ON. Only the literal string "false" disables it.
@@ -76,6 +84,7 @@ async def _enqueue_ai_review(db, draft: WikiPageDraft) -> None:
 
     try:
         from cygnus.runtime.worker import get_arq_pool
+
         pool = await get_arq_pool()
         # Pass revision_round so the worker can detect if the draft was
         # resubmitted (round bumped) while it was running and skip its
@@ -94,8 +103,10 @@ async def _enqueue_ai_review(db, draft: WikiPageDraft) -> None:
 # Wiki draft workflow owned by review governance
 # ---------------------------------------------------------------------------
 
+
 class DraftConflictError(Exception):
     """Raised when a draft's base_version is older than the current page version."""
+
     def __init__(self, current_version: int, base_version: int):
         self.current_version = current_version
         self.base_version = base_version
@@ -138,11 +149,13 @@ async def create_wiki_draft(
     )
     session.add(draft)
     await session.flush()
+    _ = await record_created_draft(session, draft)
     return draft
 
 
 class CreateDraftSlugConflict(Exception):
     """Raised when approving a create-draft whose slug already exists in scope."""
+
     def __init__(self, slug: str, scope_type: str, scope_id: Optional[uuid.UUID]):
         self.slug = slug
         self.scope_type = scope_type
@@ -192,10 +205,12 @@ async def approve_wiki_draft(
     if draft.draft_kind == "create":
         target_slug = (draft.suggested_metadata or {}).get("slug")
     else:
-        existing_page = await session.get(WikiPage, draft.page_id) if draft.page_id else None
+        existing_page = (
+            await session.get(WikiPage, draft.page_id) if draft.page_id else None
+        )
         target_slug = existing_page.slug if existing_page else None
     if target_slug:
-        await session.execute(
+        _ = await session.execute(
             select(func.pg_advisory_xact_lock(func.hashtext(target_slug)))
         )
         # The page row was loaded BEFORE the lock; another reviewer may have
@@ -209,7 +224,9 @@ async def approve_wiki_draft(
         overrides = metadata_overrides or {}
         slug = (overrides.get("final_slug") or meta.get("slug") or "").strip()
         title = (overrides.get("final_title") or meta.get("title") or "").strip()
-        page_type = overrides.get("final_page_type") or meta.get("page_type") or "concept"
+        page_type = (
+            overrides.get("final_page_type") or meta.get("page_type") or "concept"
+        )
         kt_slugs = (
             overrides.get("final_knowledge_type_slugs")
             if overrides.get("final_knowledge_type_slugs") is not None
@@ -218,7 +235,11 @@ async def approve_wiki_draft(
         scope_type = meta.get("scope_type") or "global"
         scope_id_raw = meta.get("scope_id")
         try:
-            scope_id = uuid.UUID(scope_id_raw) if isinstance(scope_id_raw, str) else scope_id_raw
+            scope_id = (
+                uuid.UUID(scope_id_raw)
+                if isinstance(scope_id_raw, str)
+                else scope_id_raw
+            )
         except (ValueError, TypeError):
             scope_id = None
         if scope_id is not None and not isinstance(scope_id, uuid.UUID):
@@ -226,32 +247,48 @@ async def approve_wiki_draft(
             # shouldn't propagate downstream. Treat as missing scope.
             scope_id = None
 
-        if not slug or slug in (INDEX_SLUG, LOG_SLUG, HOT_SLUG):
+        if not slug or slug in (
+            wiki_service.INDEX_SLUG,
+            wiki_service.LOG_SLUG,
+            wiki_service.HOT_SLUG,
+        ):
             raise ValueError(f"Invalid slug for new page: '{slug}'")
         if not title:
             raise ValueError("Title is required to materialise a new page")
 
-        existing = await wiki_service.get_page_by_slug(session, slug, scope_type=scope_type, scope_id=scope_id)
+        existing = await wiki_service.get_page_by_slug(
+            session, slug, scope_type=scope_type, scope_id=scope_id
+        )
         if existing is not None:
             raise CreateDraftSlugConflict(slug, scope_type, scope_id)
 
         page = await wiki_service.apply_create(
             session,
-            slug=slug, title=title, page_type=page_type,
-            content_md=final_content, summary="",
-            knowledge_type_slugs=list(kt_slugs), source_ids=[],
-            scope_type=scope_type, scope_id=scope_id,
-        )
-        # Tag the create-approval revision with reviewer context.
-        session.add(WikiPageRevision(
-            page_id=page.id,
-            version=page.version,
+            slug=slug,
+            title=title,
+            page_type=page_type,
             content_md=final_content,
-            change_type="draft_approved_create",
-            draft_id=draft.id,
-            changed_by_id=reviewer_id,
-            change_note=reviewer_note,
-        ))
+            summary="",
+            knowledge_type_slugs=list(kt_slugs),
+            source_ids=[],
+            scope_type=scope_type,
+            scope_id=scope_id,
+        )
+        # apply_create already stages version 1; enrich that same revision
+        # instead of violating the unique (page_id, version) invariant.
+        await session.flush()
+        revision = await session.scalar(
+            select(WikiPageRevision).where(
+                WikiPageRevision.page_id == page.id,
+                WikiPageRevision.version == page.version,
+            )
+        )
+        if revision is None:
+            raise RuntimeError("apply_create did not persist its initial revision")
+        revision.change_type = "draft_approved_create"
+        revision.draft_id = draft.id
+        revision.changed_by_id = reviewer_id
+        revision.change_note = reviewer_note
         # Backfill draft.page_id so subsequent UI reads can join cleanly.
         draft.page_id = page.id
     else:
@@ -273,21 +310,38 @@ async def approve_wiki_draft(
         await session.flush()
         await wiki_service.refresh_links(session, page.id, page.slug, final_content)
 
-        session.add(WikiPageRevision(
-            page_id=page.id,
-            version=page.version,
-            content_md=final_content,
-            change_type="draft_approved",
-            draft_id=draft.id,
-            changed_by_id=reviewer_id,
-            change_note=reviewer_note,
-        ))
+        session.add(
+            WikiPageRevision(
+                page_id=page.id,
+                version=page.version,
+                content_md=final_content,
+                change_type="draft_approved",
+                draft_id=draft.id,
+                changed_by_id=reviewer_id,
+                change_note=reviewer_note,
+            )
+        )
 
     draft.status = "approved"
     draft.reviewed_by_id = reviewer_id
     draft.reviewed_at = datetime.now(timezone.utc)
     draft.reviewer_note = reviewer_note
     await session.flush()
+    _ = await append_draft_event(
+        session,
+        draft_id=draft.id,
+        event_type=GovernanceEventType.APPROVED,
+        from_state="in_review",
+        to_state="approved",
+        actor_id=reviewer_id,
+        idempotency_key=transition_key(draft.id, GovernanceEventType.APPROVED),
+        reason=reviewer_note,
+        payload={
+            "page_id": str(page.id),
+            "page_version": page.version,
+            "revision_round": draft.revision_round,
+        },
+    )
     return page
 
 
@@ -303,6 +357,17 @@ async def reject_wiki_draft(
     draft.reviewed_at = datetime.now(timezone.utc)
     draft.reviewer_note = reviewer_note
     await session.flush()
+    _ = await append_draft_event(
+        session,
+        draft_id=draft.id,
+        event_type=GovernanceEventType.REJECTED,
+        from_state="in_review",
+        to_state="rejected",
+        actor_id=reviewer_id,
+        idempotency_key=transition_key(draft.id, GovernanceEventType.REJECTED),
+        reason=reviewer_note,
+        payload={"revision_round": draft.revision_round},
+    )
     return draft
 
 
@@ -313,6 +378,7 @@ class InvalidTransition(Exception):
 # ---------------------------------------------------------------------------
 # Adapter protocol
 # ---------------------------------------------------------------------------
+
 
 class ContributionAdapter(Protocol):
     artifact_type: str  # "wiki_draft" | "skill_contribution"
@@ -325,15 +391,22 @@ class ContributionAdapter(Protocol):
     def bump_revision_round(self, obj) -> None: ...
     def set_returned_note(self, obj, note: Optional[str]) -> None: ...
     async def reviewers(self, db: AsyncSession, obj) -> list[uuid.UUID]: ...
+
     # Notification type strings for the artifact type
     types: "_TypeBundle"
 
 
 class _TypeBundle:
     """Notification type strings per event for one artifact."""
+
     def __init__(
-        self, submitted: str, resubmitted: str, approved: str, rejected: str,
-        changes_requested: str, withdrawn: str,
+        self,
+        submitted: str,
+        resubmitted: str,
+        approved: str,
+        rejected: str,
+        changes_requested: str,
+        withdrawn: str,
     ):
         self.submitted = submitted
         self.resubmitted = resubmitted
@@ -346,6 +419,7 @@ class _TypeBundle:
 # ---------------------------------------------------------------------------
 # WikiPageDraft adapter
 # ---------------------------------------------------------------------------
+
 
 class WikiDraftAdapter:
     artifact_type = "wiki_draft"
@@ -385,15 +459,20 @@ class WikiDraftAdapter:
     async def reviewers(self, db: AsyncSession, obj: WikiPageDraft) -> list[uuid.UUID]:
         page: Optional[WikiPage] = obj.page
         if page is None:
-            return await notification_service.get_global_reviewers(db)
+            return await notification_service.get_reviewers_for_scope(
+                db, "global", None
+            )
         return await notification_service.get_reviewers_for_scope(
-            db, page.scope_type or "global", page.scope_id,
+            db,
+            page.scope_type or "global",
+            page.scope_id,
         )
 
 
 # ---------------------------------------------------------------------------
 # SkillContribution adapter
 # ---------------------------------------------------------------------------
+
 
 class SkillContributionAdapter:
     artifact_type = "skill_contribution"
@@ -427,9 +506,11 @@ class SkillContributionAdapter:
     def set_returned_note(self, obj: SkillContribution, note: Optional[str]) -> None:
         obj.last_returned_note = note
 
-    async def reviewers(self, db: AsyncSession, obj: SkillContribution) -> list[uuid.UUID]:
-        # Skill reviewers = admins for now (skill approval is admin-only path).
-        return await notification_service.get_global_reviewers(db)
+    async def reviewers(
+        self, db: AsyncSession, obj: SkillContribution
+    ) -> list[uuid.UUID]:
+        # Skill contributions currently use the global governance reviewer pool.
+        return await notification_service.get_reviewers_for_scope(db, "global", None)
 
 
 # Singleton instances — adapters are stateless.
@@ -440,6 +521,7 @@ skill_contribution_adapter = SkillContributionAdapter()
 # ---------------------------------------------------------------------------
 # State transition helpers
 # ---------------------------------------------------------------------------
+
 
 def _assert_status(adapter: ContributionAdapter, obj, allowed: tuple[str, ...]) -> None:
     current = adapter.status(obj)
@@ -489,13 +571,34 @@ async def request_changes(
     adapter.set_status(obj, "needs_revision")
     adapter.set_returned_note(obj, note.strip())
     await log_audit(
-        db, reviewer, "request_changes", adapter.artifact_type, str(obj.id),
+        db,
+        reviewer,
+        "request_changes",
+        adapter.artifact_type,
+        str(obj.id),
         reason=note.strip(),
     )
+    if isinstance(obj, WikiPageDraft):
+        _ = await append_draft_event(
+            db,
+            draft_id=obj.id,
+            event_type=GovernanceEventType.CHANGES_REQUESTED,
+            from_state="in_review",
+            to_state="needs_revision",
+            actor_id=reviewer.id,
+            idempotency_key=transition_key(
+                obj.id,
+                GovernanceEventType.CHANGES_REQUESTED,
+                revision_round=obj.revision_round,
+            ),
+            reason=note,
+            payload={"revision_round": obj.revision_round},
+        )
     author_id = adapter.author_id(obj)
     if author_id:
         await notification_service.notify(
-            db, recipient_id=author_id,
+            db,
+            recipient_id=author_id,
             type=adapter.types.changes_requested,
             subject=f"Changes requested on {adapter.display_name(obj)}",
             body=note.strip(),
@@ -525,15 +628,17 @@ async def resubmit_wiki_draft(
 
     # Snapshot the state being replaced — including the AI verdict so the
     # reviewer can compare AI checks across rounds.
-    db.add(WikiDraftRound(
-        draft_id=draft.id,
-        round_no=draft.revision_round or 0,
-        content_md=draft.content_md,
-        author_note=draft.note,
-        reviewer_return_note=draft.last_returned_note,
-        ai_check_results=draft.ai_check_results,
-        submitted_at=datetime.now(timezone.utc),
-    ))
+    db.add(
+        WikiDraftRound(
+            draft_id=draft.id,
+            round_no=draft.revision_round or 0,
+            content_md=draft.content_md,
+            author_note=draft.note,
+            reviewer_return_note=draft.last_returned_note,
+            ai_check_results=draft.ai_check_results,
+            submitted_at=datetime.now(timezone.utc),
+        )
+    )
 
     draft.content_md = new_content_md
     if author_note is not None:
@@ -548,12 +653,32 @@ async def resubmit_wiki_draft(
     await _enqueue_ai_review(db, draft)
 
     await log_audit(
-        db, author, "resubmit", adapter.artifact_type, str(draft.id),
+        db,
+        author,
+        "resubmit",
+        adapter.artifact_type,
+        str(draft.id),
         reason=f"round {draft.revision_round}",
+    )
+    _ = await append_draft_event(
+        db,
+        draft_id=draft.id,
+        event_type=GovernanceEventType.REVIEW_RESUBMITTED,
+        from_state="needs_revision",
+        to_state="in_review",
+        actor_id=author.id,
+        idempotency_key=transition_key(
+            draft.id,
+            GovernanceEventType.REVIEW_RESUBMITTED,
+            revision_round=draft.revision_round,
+        ),
+        reason=author_note,
+        payload={"revision_round": draft.revision_round},
     )
     recipients = await adapter.reviewers(db, draft)
     await notification_service.notify_many(
-        db, recipient_ids=recipients,
+        db,
+        recipient_ids=recipients,
         type=adapter.types.resubmitted,
         subject=f"Resubmitted: {adapter.display_name(draft)} (round {draft.revision_round})",
         body=author_note or "",
@@ -584,12 +709,17 @@ async def resubmit_skill_contribution(
     adapter.set_status(contribution, SkillContributionStatus.PENDING.value)
 
     await log_audit(
-        db, author, "resubmit", adapter.artifact_type, str(contribution.id),
+        db,
+        author,
+        "resubmit",
+        adapter.artifact_type,
+        str(contribution.id),
         reason=f"round {contribution.revision_round}",
     )
     recipients = await adapter.reviewers(db, contribution)
     await notification_service.notify_many(
-        db, recipient_ids=recipients,
+        db,
+        recipient_ids=recipients,
         type=adapter.types.resubmitted,
         subject=f"Resubmitted: {adapter.display_name(contribution)} (round {contribution.revision_round})",
         target_type=adapter.artifact_type,
@@ -614,11 +744,17 @@ async def submit_skill_contribution(
         ),
     )
     if contribution.contributor_id != author.id:
-        raise InvalidTransition("Only the original contributor can submit this contribution.")
+        raise InvalidTransition(
+            "Only the original contributor can submit this contribution."
+        )
 
     adapter.set_status(contribution, SkillContributionStatus.PENDING.value)
     await log_audit(
-        db, author, "submit", adapter.artifact_type, str(contribution.id),
+        db,
+        author,
+        "submit",
+        adapter.artifact_type,
+        str(contribution.id),
     )
 
 
@@ -648,7 +784,11 @@ async def approve_skill_contribution(
     adapter.set_status(contribution, SkillContributionStatus.APPROVED.value)
     contribution.skill_id = skill.id
     await log_audit(
-        db, reviewer, "approve", adapter.artifact_type, str(contribution.id),
+        db,
+        reviewer,
+        "approve",
+        adapter.artifact_type,
+        str(contribution.id),
         reason=f"skill:{skill.id}:v{skill.current_version}",
     )
     return skill
@@ -664,7 +804,11 @@ async def reject_skill_contribution(
     _assert_status(adapter, contribution, (SkillContributionStatus.PENDING.value,))
     adapter.set_status(contribution, SkillContributionStatus.REJECTED.value)
     await log_audit(
-        db, reviewer, "reject", adapter.artifact_type, str(contribution.id),
+        db,
+        reviewer,
+        "reject",
+        adapter.artifact_type,
+        str(contribution.id),
     )
 
 
@@ -676,20 +820,39 @@ async def withdraw(
 ) -> None:
     """pending|needs_revision → withdrawn. Author-only (admin override caller-side)."""
     _assert_status(adapter, obj, ("pending", "needs_revision"))
+    previous_state = adapter.status(obj)
     if (
         adapter.author_id(obj) is not None
         and adapter.author_id(obj) != author.id
         and author.role != "admin"
     ):
-        raise InvalidTransition("Only the original author can withdraw this contribution.")
+        raise InvalidTransition(
+            "Only the original author can withdraw this contribution."
+        )
 
     adapter.set_status(obj, "withdrawn")
     await log_audit(
-        db, author, "withdraw", adapter.artifact_type, str(obj.id),
+        db,
+        author,
+        "withdraw",
+        adapter.artifact_type,
+        str(obj.id),
     )
+    if isinstance(obj, WikiPageDraft):
+        _ = await append_draft_event(
+            db,
+            draft_id=obj.id,
+            event_type=GovernanceEventType.WITHDRAWN,
+            from_state=("in_review" if previous_state == "pending" else previous_state),
+            to_state="withdrawn",
+            actor_id=author.id,
+            idempotency_key=transition_key(obj.id, GovernanceEventType.WITHDRAWN),
+            payload={"revision_round": obj.revision_round},
+        )
     recipients = await adapter.reviewers(db, obj)
     await notification_service.notify_many(
-        db, recipient_ids=recipients,
+        db,
+        recipient_ids=recipients,
         type=adapter.types.withdrawn,
         subject=f"Withdrawn: {adapter.display_name(obj)}",
         target_type=adapter.artifact_type,
@@ -701,6 +864,7 @@ async def withdraw(
 # ---------------------------------------------------------------------------
 # Notification-only helpers for existing approve / reject paths
 # ---------------------------------------------------------------------------
+
 
 async def notify_approved(
     db: AsyncSession,
@@ -720,7 +884,8 @@ async def notify_approved(
         return
     suffix = f" ({version_label})" if version_label else ""
     await notification_service.notify(
-        db, recipient_id=author_id,
+        db,
+        recipient_id=author_id,
         type=adapter.types.approved,
         subject=f"Your contribution was approved: {adapter.display_name(obj)}{suffix}",
         body=f"Approved by {reviewer.name or reviewer.email}",
@@ -732,9 +897,9 @@ async def notify_approved(
     # Cross-author awareness for wiki drafts only.
     if isinstance(obj, WikiPageDraft) and obj.page_id is not None:
         from sqlalchemy import select as _select
+
         sibling_rows = await db.execute(
-            _select(WikiPageDraft.author_id, WikiPageDraft.id)
-            .where(
+            _select(WikiPageDraft.author_id, WikiPageDraft.id).where(
                 WikiPageDraft.page_id == obj.page_id,
                 WikiPageDraft.status == "pending",
                 WikiPageDraft.id != obj.id,
@@ -759,15 +924,18 @@ async def notify_approved(
             if sibling_author_id in seen_authors:
                 continue
             seen_authors.add(sibling_author_id)
-            items.append({
-                "recipient_id": sibling_author_id,
-                "subject": subject_text,
-                "body": body_text,
-                "target_id": str(sibling_id),
-            })
+            items.append(
+                {
+                    "recipient_id": sibling_author_id,
+                    "subject": subject_text,
+                    "body": body_text,
+                    "target_id": str(sibling_id),
+                }
+            )
         if items:
             await notification_service.notify_each(
-                db, items=items,
+                db,
+                items=items,
                 type=adapter.types.approved,
                 target_type=adapter.artifact_type,
                 actor_id=reviewer.id,
@@ -786,7 +954,8 @@ async def notify_rejected(
     if not author_id:
         return
     await notification_service.notify(
-        db, recipient_id=author_id,
+        db,
+        recipient_id=author_id,
         type=adapter.types.rejected,
         subject=f"Your contribution was rejected: {adapter.display_name(obj)}",
         body=reason or "",

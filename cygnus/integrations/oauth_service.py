@@ -8,7 +8,6 @@ Ownership:
 import hashlib
 import secrets
 import uuid
-from base64 import urlsafe_b64decode
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 

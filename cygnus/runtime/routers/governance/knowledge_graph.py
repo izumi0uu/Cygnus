@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+from typing import cast
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from cygnus.domain.objects import TroubleshootingFlow
 from cygnus.publish import get_publish_projection
 from cygnus.retrieval import SourceTraceResolver, SubstrateKnowledgeSnapshot
 from cygnus.runtime.routers.governance.dependencies import (
+    get_durable_publish_projection,
     get_governance_knowledge_snapshot,
 )
+
 router = APIRouter()
-
-
 
 
 @router.get("/api/knowledge-graph")
@@ -45,7 +47,10 @@ async def knowledge_graph(
             "languages",
             "product_versions",
         ):
-            parts.extend(str(v) for v in audience_dict.get(facet, []))
+            values = audience_dict.get(facet, [])
+            if isinstance(values, (list, tuple)):
+                typed_values = cast(list[object] | tuple[object, ...], values)
+                parts.extend(str(value) for value in typed_values)
         key = ":".join(parts) if parts else "global"
         if key not in audience_node_ids:
             audience_node_ids[key] = f"aud:{len(audience_node_ids)}"
@@ -112,6 +117,9 @@ async def knowledge_graph(
 async def traceability(
     object_id: str,
     snapshot: SubstrateKnowledgeSnapshot = Depends(get_governance_knowledge_snapshot),
+    durable_projection: dict[str, object] | None = Depends(
+        get_durable_publish_projection
+    ),
 ) -> dict[str, object]:
     """Full evidence→source→freshness traceability chain for one knowledge object."""
     resolver = SourceTraceResolver(objects=snapshot.objects, evidence=snapshot.evidence)
@@ -125,6 +133,20 @@ async def traceability(
 
     trace = resolver.build_trace_for_object(selected)
     object_dict = selected.to_dict()
+    if durable_projection is not None:
+        projection = durable_projection
+    else:
+        rehearsal_projection = get_publish_projection(selected.object_id)
+        projection = (
+            rehearsal_projection.result.to_dict()
+            | {
+                "selected_action": rehearsal_projection.selected_action,
+                "persisted": False,
+                "rehearsal": True,
+            }
+            if rehearsal_projection is not None
+            else None
+        )
     return {
         "surface_id": "traceability-chain",
         "object": {
@@ -137,16 +159,5 @@ async def traceability(
             "publish_targets": object_dict.get("publish_targets", []),
         },
         "trace": trace.to_dict(),
-        "projection": (
-            (
-                snapshot.result.to_dict()
-                | {
-                    "selected_action": snapshot.selected_action,
-                    "persisted": False,
-                    "rehearsal": True,
-                }
-            )
-            if (snapshot := get_publish_projection(selected.object_id)) is not None
-            else None
-        ),
+        "projection": projection,
     }

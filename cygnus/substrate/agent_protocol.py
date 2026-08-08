@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """Cygnus-owned provider-neutral agent/tool protocol.
 
 Canonical owner for multi-turn tool-calling message shapes and provider-specific
 projection helpers. Runtime AI code should import this module directly; the
 runtime `agent_protocol` path remains only as a compatibility shim.
 """
+
+from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field

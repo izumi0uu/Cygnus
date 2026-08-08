@@ -8,7 +8,6 @@ from cygnus.review import (
     ObservationState,
     OwnerState,
     PriorityStackCard,
-    ReviewCommandBrief,
     ReviewCommandSurface,
     ReviewRiskItem,
     ReviewRiskType,

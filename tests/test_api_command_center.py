@@ -17,6 +17,7 @@ from cygnus.retrieval import (
 from cygnus.review.source_blindness import SourceFailureObservation
 from cygnus.runtime.routers.governance.dependencies import (
     GovernanceReadSnapshot,
+    get_durable_publish_projection,
     get_governance_read_snapshot,
 )
 
@@ -26,7 +27,9 @@ class CommandCenterApiTests(unittest.TestCase):
         clear_publish_projections()
         self.fake_user = types.SimpleNamespace(id="test-admin", role="admin")
         self.patches = [
-            patch("cygnus.runtime.main.seed_default_admin", AsyncMock(return_value=None)),
+            patch(
+                "cygnus.runtime.main.seed_default_admin", AsyncMock(return_value=None)
+            ),
             patch(
                 "cygnus.runtime.services.storage_service.storage_service.ensure_bucket",
                 AsyncMock(return_value=None),
@@ -48,6 +51,7 @@ class CommandCenterApiTests(unittest.TestCase):
             visible_source_count=0,
         )
         app.dependency_overrides[get_governance_read_snapshot] = lambda: self.snapshot
+        app.dependency_overrides[get_durable_publish_projection] = lambda: None
 
     def tearDown(self) -> None:
         self.client.close()
@@ -91,7 +95,9 @@ class CommandCenterApiTests(unittest.TestCase):
         self.assertEqual(payload["priority_stack"], [])
         self.assertEqual(payload["situation_frame"]["urgent_items"], 0)
         self.assertEqual(payload["observation"]["state"], "partial")
-        self.assertEqual(payload["observation"]["reason"], "review_signal_coverage_partial")
+        self.assertEqual(
+            payload["observation"]["reason"], "review_signal_coverage_partial"
+        )
         self.assertIn("ticket_pressure", payload["observation"]["missing_signals"])
 
     def test_review_intake_payload_shape(self) -> None:
@@ -102,7 +108,9 @@ class CommandCenterApiTests(unittest.TestCase):
         self.assertIn("source_blindness_surface", payload)
         self.assertEqual(payload["review_home"]["surface_id"], "review-home")
         self.assertIsNone(payload["pressure_surface"])
-        self.assertEqual(payload["source_blindness_surface"]["surface_id"], "source-health")
+        self.assertEqual(
+            payload["source_blindness_surface"]["surface_id"], "source-health"
+        )
         self.assertEqual(payload["source_blindness_surface"]["contexts"], [])
         self.assertEqual(payload["source_blindness_surface"]["source_observations"], [])
 
@@ -112,7 +120,9 @@ class CommandCenterApiTests(unittest.TestCase):
         self.assertEqual(payload["contexts"], [])
         self.assertEqual(payload["available_commands"], [])
         self.assertEqual(payload["observation"]["state"], "unavailable")
-        self.assertEqual(payload["observation"]["reason"], "drift_detectors_unavailable")
+        self.assertEqual(
+            payload["observation"]["reason"], "drift_detectors_unavailable"
+        )
         self.assertEqual(
             payload["observation"]["missing_signals"],
             ["release_delta", "incident_delta", "ticket_pressure"],
@@ -121,16 +131,33 @@ class CommandCenterApiTests(unittest.TestCase):
     def test_target_governance_routes_do_not_fall_back_to_sample_fixtures(self) -> None:
         self.enable_auth()
         with (
-            patch("cygnus.review.home.sample_review_bundles", side_effect=AssertionError),
-            patch("cygnus.review.drift.sample_review_bundles", side_effect=AssertionError),
-            patch("cygnus.review.source_blindness.sample_review_bundles", side_effect=AssertionError),
-            patch("cygnus.review.intake.sample_pressure_intake_records", side_effect=AssertionError),
+            patch(
+                "cygnus.review.home.sample_review_bundles", side_effect=AssertionError
+            ),
+            patch(
+                "cygnus.review.drift.sample_review_bundles", side_effect=AssertionError
+            ),
+            patch(
+                "cygnus.review.source_blindness.sample_review_bundles",
+                side_effect=AssertionError,
+            ),
+            patch(
+                "cygnus.review.intake.sample_pressure_intake_records",
+                side_effect=AssertionError,
+            ),
         ):
-            for path in ("/api/command-center", "/api/drift", "/api/source-blindness", "/api/review-intake"):
+            for path in (
+                "/api/command-center",
+                "/api/drift",
+                "/api/source-blindness",
+                "/api/review-intake",
+            ):
                 with self.subTest(path=path):
                     self.assertEqual(self.client.get(path).status_code, 200)
 
-    def test_source_failure_remains_fact_without_fabricated_impact_or_command(self) -> None:
+    def test_source_failure_remains_fact_without_fabricated_impact_or_command(
+        self,
+    ) -> None:
         self.snapshot = GovernanceReadSnapshot(
             knowledge=self.snapshot.knowledge,
             source_observations=(
@@ -153,15 +180,23 @@ class CommandCenterApiTests(unittest.TestCase):
         self.assertEqual(source_payload["contexts"], [])
         self.assertEqual(source_payload["available_commands"], [])
         self.assertEqual(source_payload["observation"]["state"], "partial")
-        self.assertEqual(source_payload["observation"]["missing_signals"], ["source_impact"])
-        self.assertEqual(source_payload["source_observations"][0]["source_id"], "source-failed")
-        self.assertEqual(source_payload["source_observations"][0]["impact_state"], "unknown")
+        self.assertEqual(
+            source_payload["observation"]["missing_signals"], ["source_impact"]
+        )
+        self.assertEqual(
+            source_payload["source_observations"][0]["source_id"], "source-failed"
+        )
+        self.assertEqual(
+            source_payload["source_observations"][0]["impact_state"], "unknown"
+        )
 
         intake_payload = self.client.get("/api/review-intake").json()
         self.assertEqual(intake_payload["review_home"]["priority_stack"], [])
         self.assertIsNone(intake_payload["pressure_surface"])
         self.assertEqual(
-            intake_payload["source_blindness_surface"]["source_observations"][0]["source_id"],
+            intake_payload["source_blindness_surface"]["source_observations"][0][
+                "source_id"
+            ],
             "source-failed",
         )
 
@@ -171,7 +206,9 @@ class CommandCenterApiTests(unittest.TestCase):
             "/api/review-queue/refund-enterprise-rewrite",
         ).json()
         self.assertEqual(payload["surface_id"], "review-queue-drilldown")
-        self.assertEqual(payload["selected_card"]["object_ref"], "refund-enterprise-rewrite")
+        self.assertEqual(
+            payload["selected_card"]["object_ref"], "refund-enterprise-rewrite"
+        )
         self.assertIn("queue_surface", payload)
 
     def test_publish_preview_returns_blast_radius_surface(self) -> None:
@@ -185,7 +222,10 @@ class CommandCenterApiTests(unittest.TestCase):
         self.enable_auth()
         payload = self.client.get(
             "/api/publish-propagation",
-            params={"object_ref": "refund-enterprise-rewrite", "action_key": "hold_external"},
+            params={
+                "object_ref": "refund-enterprise-rewrite",
+                "action_key": "hold_external",
+            },
         ).json()
         self.assertEqual(payload["surface_id"], "publish-propagation")
         self.assertEqual(payload["selected_action"], "hold_external")
@@ -198,7 +238,9 @@ class CommandCenterApiTests(unittest.TestCase):
             params={"object_ref": "billing-verification-w25"},
         ).json()
         self.assertEqual(payload["surface_id"], "recovery-proof")
-        self.assertEqual(payload["selected_card"]["object_ref"], "billing-verification-w25")
+        self.assertEqual(
+            payload["selected_card"]["object_ref"], "billing-verification-w25"
+        )
         self.assertIn("recovery_window", payload)
         self.assertIn("signals", payload)
 
@@ -250,7 +292,10 @@ class CommandCenterApiTests(unittest.TestCase):
     def test_publish_apply_requires_admin_auth(self) -> None:
         unauth = self.client.post(
             "/api/publish/apply",
-            json={"object_ref": "refund-enterprise-rewrite", "action_key": "hold_external"},
+            json={
+                "object_ref": "refund-enterprise-rewrite",
+                "action_key": "hold_external",
+            },
         )
         self.assertEqual(unauth.status_code, 401)
 
@@ -258,10 +303,15 @@ class CommandCenterApiTests(unittest.TestCase):
         self.enable_auth()
         payload = self.client.post(
             "/api/publish/apply",
-            json={"object_ref": "refund-enterprise-rewrite", "action_key": "hold_external"},
+            json={
+                "object_ref": "refund-enterprise-rewrite",
+                "action_key": "hold_external",
+            },
         ).json()
         self.assertTrue(payload["action_log"])
-        self.assertTrue(any("hold_external" in entry for entry in payload["action_log"]))
+        self.assertTrue(
+            any("hold_external" in entry for entry in payload["action_log"])
+        )
         self.assertIn("opened_bindings", payload)
         self.assertIn("removed_bindings", payload)
         self.assertIn("held_bindings", payload)
@@ -275,7 +325,10 @@ class CommandCenterApiTests(unittest.TestCase):
         self.enable_auth()
         response = self.client.post(
             "/api/publish/apply",
-            json={"object_ref": "refund-enterprise-rewrite", "action_key": "not-a-real-command"},
+            json={
+                "object_ref": "refund-enterprise-rewrite",
+                "action_key": "not-a-real-command",
+            },
         )
         self.assertEqual(response.status_code, 400)
 
@@ -304,6 +357,33 @@ class CommandCenterApiTests(unittest.TestCase):
         self.assertEqual(projection["selected_action"], "republish")
         self.assertFalse(projection["persisted"])
         self.assertTrue(projection["rehearsal"])
+
+    def test_traceability_prefers_restart_durable_projection(self) -> None:
+        self.enable_auth()
+        rehearsal = self.client.post(
+            "/api/publish/apply",
+            json={
+                "object_ref": "ko-billing-refund-policy",
+                "action_key": "republish",
+            },
+        )
+        self.assertEqual(rehearsal.status_code, 200)
+        clear_publish_projections()
+
+        durable_projection = {
+            "selected_action": "publish",
+            "persisted": True,
+            "rehearsal": False,
+            "publication_record_id": "publication-after-restart",
+        }
+        app.dependency_overrides[get_durable_publish_projection] = lambda: (
+            durable_projection
+        )
+
+        payload = self.client.get(
+            "/api/traceability/ko-billing-refund-policy",
+        ).json()
+        self.assertEqual(payload["projection"], durable_projection)
 
     def test_traceability_rejects_unknown_object(self) -> None:
         self.enable_auth()

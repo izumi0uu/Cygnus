@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cygnus.runtime.ai.registry import ProviderRegistry
 from cygnus.runtime.database.models import Source, SourceImage, WikiPage
 from cygnus.retrieval import semantic_search as wiki_search
+from cygnus.runtime.services import wiki_service
 
 # Match `image://<uuid>` references inside markdown image markers.
 _IMAGE_MARKER_RE = re.compile(r"!\[[^\]]*\]\(image://([0-9a-fA-F-]{36})\)")

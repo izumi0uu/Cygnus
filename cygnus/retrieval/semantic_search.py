@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.runtime.ai.embedding_catalog import get_spec
 from cygnus.runtime.ai.registry import ProviderRegistry
-from cygnus.retrieval.source_chunks import search_source_chunks_semantic
 from cygnus.runtime.database.models import WikiPage, get_embedding_model_for_dim
 from cygnus.runtime.services.wiki_service import (
     HOT_SLUG,

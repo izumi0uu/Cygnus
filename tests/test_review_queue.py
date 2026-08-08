@@ -6,8 +6,6 @@ from cygnus.review import (
     QueueCommand,
     QueueCommandType,
     ReviewHomeQuery,
-    build_review_queue_surface,
-    get_review_home_surface,
     get_review_queue_surface,
     apply_queue_commands,
 )

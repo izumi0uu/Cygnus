@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.runtime.database.models import Source, SourceImage
 from cygnus.retrieval import semantic_search as wiki_search
+from cygnus.runtime.services import wiki_service
 
 _IMAGE_MARKER_RE = re.compile(r"!\[[^\]]*\]\(image://([0-9a-fA-F-]{36})\)")
 

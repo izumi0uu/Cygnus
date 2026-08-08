@@ -4,7 +4,6 @@ from fastapi import APIRouter, Depends
 
 from cygnus.recovery import (
     DownstreamRealityCheckQuery,
-    GovernanceOverviewQuery,
     get_pressure_intake_recovery_proof_surface,
     RecoveryWindowQuery,
     get_downstream_reality_check_surface,

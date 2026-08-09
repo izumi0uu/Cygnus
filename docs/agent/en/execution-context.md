@@ -74,6 +74,9 @@ Downstream agents must follow this contract in Jira comments, handoffs, logs, an
 - Preserve `rehearsal:true` from recovery overview in every client or agent summary; it is not durable recovery truth.
 - `persisted:true` on a publish response or publish projection is valid only when an approved typed `WikiPageDraft`, ready evidence, explicit channels, and durable IDs commit in one transaction; the fixture `object_ref` path must remain `persisted:false`, `rehearsal:true`.
 - `persisted:true` on a governance audit record proves only that the append-only ledger event committed; it does not claim publication or completed propagation. Audit reads must filter in SQL inside Wiki read scope and return the same `404` for missing and hidden events.
+- `/api/notifications` is a durable recipient-scoped inbox: `read_at` projects only to `unread|read`, and every read/transition query is SQL-scoped to the current recipient; the frontend must not derive notifications from command-center fixtures or localStorage.
+- Notification external fan-out may reload only committed IDs; a staged record from a rolled-back transaction must not be sent.
+
 - New propagation is always `pending`; a successful publish request never implies downstream `synced`, which requires an explicit version-checked update.
 
 

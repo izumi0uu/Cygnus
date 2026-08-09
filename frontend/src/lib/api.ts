@@ -725,3 +725,45 @@ export interface DownstreamRealityCheckSurface {
 export async function fetchDownstreamRealityCheck(commandId: string): Promise<DownstreamRealityCheckSurface> {
   return authApi<DownstreamRealityCheckSurface>(`/api/recovery/downstream-reality-check/${encodeURIComponent(commandId)}`)
 }
+
+// ============================================================
+// Durable recipient-scoped governance notifications
+// ============================================================
+
+export type NotificationLifecycleState = 'unread' | 'read'
+
+export interface PersistedNotification {
+  id: string
+  trace_ref: string
+  type: string
+  subject: string
+  body: string
+  target_type: string
+  target_id: string
+  actor_id: string | null
+  lifecycle_state: NotificationLifecycleState
+  read_at: string | null
+  created_at: string
+  persisted: true
+}
+
+export async function fetchNotifications(
+  lifecycleState?: NotificationLifecycleState,
+): Promise<PersistedNotification[]> {
+  const query = lifecycleState ? `?lifecycle_state=${lifecycleState}` : ''
+  return authApi<PersistedNotification[]>(`/api/notifications${query}`)
+}
+
+export async function markNotificationRead(id: string): Promise<PersistedNotification> {
+  return authApi<PersistedNotification>(`/api/notifications/${encodeURIComponent(id)}/read`, {
+    method: 'POST',
+  })
+}
+
+export async function markAllNotificationsRead(): Promise<{
+  updated: number
+  lifecycle_state: 'read'
+  persisted: true
+}> {
+  return authApi('/api/notifications/read-all', { method: 'POST' })
+}

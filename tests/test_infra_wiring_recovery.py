@@ -3,11 +3,14 @@ from __future__ import annotations
 import hashlib
 import hmac
 import unittest
+import uuid
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.runtime.config import Settings
+from cygnus.runtime.database.models import Notification
 
 
 class DatabaseWiringRecoveryTests(unittest.IsolatedAsyncioTestCase):
@@ -103,8 +106,30 @@ class OAuthAndNotificationWiringRecoveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_notification_dispatch_pending_uses_database_session_provider(self) -> None:
         import cygnus.runtime.services.notification_service as notification_service
 
-        staged = [object()]
-        fake_session = object()
+        notification_id = uuid.uuid4()
+        staged = [
+            Notification(
+                id=notification_id,
+                recipient_id=uuid.uuid4(),
+                type="wiki_draft.submitted",
+                subject="staged",
+                body="staged",
+                target_type="wiki_draft",
+                target_id=str(uuid.uuid4()),
+                created_at=datetime.now(timezone.utc),
+            )
+        ]
+        persisted = staged[0]
+        fake_session = AsyncMock()
+
+        class _ScalarRows:
+            def scalars(self):
+                return self
+
+            def all(self):
+                return [persisted]
+
+        fake_session.execute.return_value = _ScalarRows()
 
         class _SessionScope:
             async def __aenter__(self):
@@ -124,7 +149,54 @@ class OAuthAndNotificationWiringRecoveryTests(unittest.IsolatedAsyncioTestCase):
         ):
             await notification_service.dispatch_pending()
 
-        dispatch_external.assert_awaited_once_with(fake_session, staged)
+        dispatch_external.assert_awaited_once_with(fake_session, [persisted])
+        fake_session.execute.assert_awaited_once()
+
+    async def test_notification_dispatch_drops_rolled_back_records(self) -> None:
+        import cygnus.runtime.services.notification_service as notification_service
+
+        staged = [
+            Notification(
+                id=uuid.uuid4(),
+                recipient_id=uuid.uuid4(),
+                type="wiki_draft.submitted",
+                subject="rolled back",
+                body="rolled back",
+                target_type="wiki_draft",
+                target_id=str(uuid.uuid4()),
+                created_at=datetime.now(timezone.utc),
+            )
+        ]
+        fake_session = AsyncMock()
+
+        class _ScalarRows:
+            def scalars(self):
+                return self
+
+            def all(self):
+                return []
+
+        fake_session.execute.return_value = _ScalarRows()
+
+        class _SessionScope:
+            async def __aenter__(self):
+                return fake_session
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        class _SessionFactory:
+            def __call__(self):
+                return _SessionScope()
+
+        with (
+            patch.object(notification_service, "take_pending_dispatch", return_value=staged),
+            patch("cygnus.runtime.database.get_async_session_factory", return_value=_SessionFactory()),
+            patch("cygnus.integrations.notification_dispatch.dispatch_external", AsyncMock()) as dispatch_external,
+        ):
+            await notification_service.dispatch_pending()
+
+        dispatch_external.assert_not_awaited()
 
     async def test_app_state_exposes_recovered_infra_wiring_contract(self) -> None:
         from cygnus.runtime.database import get_async_session_factory

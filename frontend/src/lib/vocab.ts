@@ -12,6 +12,11 @@ const RISK_TYPE: Record<string, Pair> = {
   ticket_pressure: { zh: '工单压力', en: 'Ticket pressure' },
   policy_conflict: { zh: '策略冲突', en: 'Policy conflict' },
   owner_gap: { zh: '责任缺口', en: 'Owner gap' },
+  review_assignment: { zh: '审阅分配', en: 'Review assignment' },
+  review_feedback: { zh: '审阅反馈', en: 'Review feedback' },
+  review_approved: { zh: '审阅通过', en: 'Review approved' },
+  review_withdrawn: { zh: '审阅撤回', en: 'Review withdrawn' },
+  governance_notification: { zh: '治理通知', en: 'Governance notification' },
 }
 
 const COMMAND: Record<string, Pair> = {

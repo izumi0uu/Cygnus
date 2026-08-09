@@ -190,20 +190,42 @@ def take_pending_dispatch(db: Optional[AsyncSession] = None) -> list[Notificatio
     return _SESSION_STAGED.pop(id(db), [])
 
 
-async def dispatch_pending(db: Optional[AsyncSession] = None) -> None:
-    """Pop staged notifications and run external dispatch.
+async def _load_persisted_dispatch_records(
+    db: AsyncSession,
+    staged: list[Notification],
+) -> list[Notification]:
+    """Reload only notification IDs that committed before external fan-out."""
+    staged_ids = tuple(
+        notification_id
+        for notification in staged
+        if (notification_id := getattr(notification, "id", None)) is not None
+    )
+    if not staged_ids:
+        return []
+    rows = (
+        await db.execute(select(Notification).where(Notification.id.in_(staged_ids)))
+    ).scalars().all()
+    by_id = {notification.id: notification for notification in rows}
+    return [
+        by_id[notification_id]
+        for notification in staged
+        if (notification_id := getattr(notification, "id", None)) in by_id
+    ]
 
-    Opens a fresh session for external lookups because the request's session
-    may already be closed by the time middleware runs us.
-    """
+
+async def dispatch_pending(db: Optional[AsyncSession] = None) -> None:
+    """Dispatch committed notifications only; rolled-back writes stay silent."""
     staged = take_pending_dispatch(db)
     if not staged:
         return
     from cygnus.integrations.notification_dispatch import dispatch_external
     from cygnus.runtime.database import get_async_session_factory
+
     async_session_factory = get_async_session_factory()
     async with async_session_factory() as fresh:
-        await dispatch_external(fresh, staged)
+        persisted = await _load_persisted_dispatch_records(fresh, staged)
+        if persisted:
+            await dispatch_external(fresh, persisted)
 
 
 # ---------------------------------------------------------------------------

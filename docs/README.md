@@ -18,7 +18,8 @@ Current engineering strategy (status as of 2026-08):
 - ✅ the first P3 support-verticalization story wave (CYG-6–17) is closed on typed rehearsal providers; the first durable governance write/publication ledger slice now lands real approved Wiki truth with append-only events, idempotent publications, and explicit pending propagation (CYG-98)
 - ✅ the Nanobot ↔ Cygnus governed session seam (CYG-92–96) is implemented: request-scoped query handoff, four truthful R0 governed retrieval tools, structured governance fallback, and continuity revalidation all keep session memory outside the knowledge-truth boundary
 - ✅ the governed audit read surface now exposes durable, permission-scoped review / approval / publish / recovery transitions with stable trace refs and truthful empty observations (CYG-99)
-- ▶ the current mainline moves to notification/ownership durability and the remaining provider convergence (CYG-100, CYG-104); fixture-backed pressure/drift/recovery inputs keep their rehearsal labels until their own durable providers land
+- ✅ governance notifications now use migration-owned, recipient-scoped durable records with explicit unread/read lifecycle and committed-only external fan-out (CYG-100)
+- ▶ the current mainline moves to durable review ownership and the remaining provider convergence (CYG-104); fixture-backed pressure/drift/recovery inputs keep their rehearsal labels until their own durable providers land
 - keep product-shell parity as a deferred non-roadmap lane by default
 - classify `auth / admin / wiki` shell candidates before any shell-parity implementation, and keep non-support pages isolated unless they directly unblock support verticalization
 
@@ -152,6 +153,6 @@ Cygnus is no longer only a documentation package. It now combines:
 - Arkon internalization / upstream-cutover planning
 - early governance/control-plane prototype surfaces
 
-So downstream readers should not treat this repo as docs-only, and should not assume the visual/product-story pack is the current engineering entry point. The migration mainline and first support-verticalization wave are complete; the governed session seam (CYG-92–96) now sits on request-scoped substrate truth, and the governance audit lane (CYG-99) now reads durable ledger truth inside Wiki permission scope. The next delivery lane is notification/ownership durability plus the remaining provider convergence.
+So downstream readers should not treat this repo as docs-only, and should not assume the visual/product-story pack is the current engineering entry point. The migration mainline and first support-verticalization wave are complete; the governed session seam (CYG-92–96) sits on request-scoped substrate truth, the governance audit lane (CYG-99) reads durable ledger truth inside Wiki permission scope, and notifications (CYG-100) now read committed recipient-scoped records. The next delivery lane is durable review ownership plus the remaining provider convergence.
 
-The governed plane currently exposes sparse, request-scoped truth: governance ledger transitions and source errors are observable facts, while ticket pressure, release/incident drift, audience conflict, review assignment, and source-impact inference remain explicitly partial or unavailable rather than fixture-backed claims.
+The governed plane currently exposes sparse, request-scoped truth: governance ledger transitions, committed notification records, and source errors are observable facts, while ticket pressure, release/incident drift, audience conflict, review assignment, and source-impact inference remain explicitly partial or unavailable rather than fixture-backed claims.

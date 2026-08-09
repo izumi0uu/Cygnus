@@ -485,6 +485,24 @@ Read durable review, approval, publish, and recovery transitions from append-onl
 - Data comes only from the durable governance ledger; never fall back to runtime `AuditLog`, `sample_*` fixtures, or session memory.
 - `persisted:true` / `rehearsal:false` on an audit item or list proves that the ledger event itself is durable. It does not claim the knowledge object is published or propagation is complete.
 - No matching in-scope events still yields a `ready` observation with `observed_count:0`; this is a truthful empty query, not `unavailable`.
+## 8.6 Durable recipient notification inbox
+### Purpose
+Read in-app notifications produced by governance lifecycles and advance unread → read state inside the current recipient scope.
+
+### Current HTTP surface
+- `GET /api/notifications?lifecycle_state=unread|read`: paginated durable records for the current user.
+- `GET /api/notifications/unread-count`: the current user's durable unread count.
+- `POST /api/notifications/{notification_id}/read`: idempotently advances a record owned by the current user to `read`.
+- `POST /api/notifications/read-all`: advances only the current user's unread records.
+
+### Truth and lifecycle
+- The `Notification` table is migration-owned by Alembic revision `20260809_01`; local `create_all` is only a compatibility aid for an already-existing development schema.
+- `read_at IS NULL` projects to `lifecycle_state=unread`; a non-null value projects to `read`. This slice has no implicit dismiss or unread reversal.
+- Every response includes `trace_ref=notification:{id}` and `persisted:true`. That proves the notification record is durable, not that external email/webhook delivery succeeded.
+- External fan-out must run after the response transaction commits and reload the still-existing notification IDs in a fresh session; rolled-back records must not be sent.
+- Every list / count / transition query includes `recipient_id=current_user.id`; absent and another-user records share `404`, preventing cross-user ID disclosure.
+- This is a runtime HTTP inbox and does not expand Nanobot's four current R0 governed retrieval tools.
+
 
 
 ## 9. First-pass approval and permission matrix (target-state guidance, not proof of full implementation)

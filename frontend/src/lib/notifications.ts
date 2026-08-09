@@ -1,29 +1,37 @@
-import { fetchCommandCenter, type CommandCenterSurface, type PriorityItem } from '@/lib/api'
+import {
+  fetchNotifications,
+  markAllNotificationsRead,
+  markNotificationRead,
+  type PersistedNotification,
+} from '@/lib/api'
 
 export type NotifSeverity = 'urgent' | 'high' | 'medium' | 'low'
 
 export type CygnusNotification = {
   id: string
-  kind: string // risk_type
+  kind: string
   severity: NotifSeverity
   title: string
   body: string
   objectRef: string
-  to: string // console route to open
-  navKey: string // i18n nav.* key for the target section
+  to: string
+  navKey: string
   ownerGap: boolean
   read: boolean
 }
 
-// Swappable boundary: a derived (read-only) source today; an app.main /api/notifications
-// persisted source can implement the same interface later without touching the UI.
 export interface NotificationSource {
   list(): Promise<CygnusNotification[]>
   markRead(id: string): Promise<void>
   markAllRead(): Promise<void>
 }
 
-const SEV_RANK: Record<NotifSeverity, number> = { urgent: 3, high: 2, medium: 1, low: 0 }
+const SEV_RANK: Record<NotifSeverity, number> = {
+  urgent: 3,
+  high: 2,
+  medium: 1,
+  low: 0,
+}
 
 const ROUTE_BY_RISK: Record<string, { to: string; navKey: string }> = {
   source_blindness: { to: '/console/sources', navKey: 'sources' },
@@ -32,69 +40,64 @@ const ROUTE_BY_RISK: Record<string, { to: string; navKey: string }> = {
   ticket_pressure: { to: '/console/queue', navKey: 'reviewQueue' },
   policy_conflict: { to: '/console/queue', navKey: 'reviewQueue' },
   owner_gap: { to: '/console/queue', navKey: 'reviewQueue' },
+  review_assignment: { to: '/console/queue', navKey: 'reviewQueue' },
+  review_feedback: { to: '/console/queue', navKey: 'reviewQueue' },
+  review_approved: { to: '/console/queue', navKey: 'reviewQueue' },
+  review_withdrawn: { to: '/console/queue', navKey: 'reviewQueue' },
 }
 const FALLBACK_ROUTE = { to: '/console/queue', navKey: 'reviewQueue' }
+
+const EVENT_META: Record<string, { kind: string; severity: NotifSeverity }> = {
+  submitted: { kind: 'review_assignment', severity: 'medium' },
+  resubmitted: { kind: 'review_assignment', severity: 'high' },
+  changes_requested: { kind: 'review_feedback', severity: 'high' },
+  rejected: { kind: 'review_feedback', severity: 'high' },
+  approved: { kind: 'review_approved', severity: 'low' },
+  withdrawn: { kind: 'review_withdrawn', severity: 'low' },
+}
 
 export function routeForRisk(riskType: string): { to: string; navKey: string } {
   return ROUTE_BY_RISK[riskType] ?? FALLBACK_ROUTE
 }
 
-const READ_KEY = 'cygnus-notif-read'
-
-function readSet(): Set<string> {
-  try {
-    const raw = localStorage.getItem(READ_KEY)
-    return new Set(raw ? (JSON.parse(raw) as string[]) : [])
-  } catch {
-    return new Set()
+function toNotification(record: PersistedNotification): CygnusNotification {
+  const event = record.type.split('.').at(-1) ?? ''
+  const meta = EVENT_META[event] ?? {
+    kind: 'governance_notification',
+    severity: 'medium' as const,
   }
-}
-function writeSet(set: Set<string>) {
-  localStorage.setItem(READ_KEY, JSON.stringify([...set]))
-}
-
-function toNotification(it: PriorityItem, read: Set<string>): CygnusNotification {
-  const route = ROUTE_BY_RISK[it.risk_type] ?? FALLBACK_ROUTE
+  const route = routeForRisk(meta.kind)
   return {
-    id: it.risk_id,
-    kind: it.risk_type,
-    severity: (it.urgency as NotifSeverity) ?? 'low',
-    title: it.title,
-    body: it.why_now_summary,
-    objectRef: it.object_ref,
+    id: record.id,
+    kind: meta.kind,
+    severity: meta.severity,
+    title: record.subject,
+    body: record.body,
+    objectRef: record.target_id,
     to: route.to,
     navKey: route.navKey,
-    ownerGap: it.owner_state === 'unassigned',
-    read: read.has(it.risk_id),
+    ownerGap: meta.kind === 'owner_gap',
+    read: record.lifecycle_state === 'read',
   }
 }
 
-function derive(surface: CommandCenterSurface, read: Set<string>): CygnusNotification[] {
-  return surface.priority_stack
-    .map((it) => toNotification(it, read))
-    .sort((a, b) => Number(a.read) - Number(b.read) || SEV_RANK[b.severity] - SEV_RANK[a.severity])
-}
-
-// Default source: derive alerts from the command-center feed; read state in localStorage.
-export const commandCenterSource: NotificationSource = {
+export const persistedNotificationSource: NotificationSource = {
   async list() {
-    const surface = await fetchCommandCenter()
-    return derive(surface, readSet())
+    const records = await fetchNotifications()
+    return records
+      .map(toNotification)
+      .sort(
+        (left, right) =>
+          Number(left.read) - Number(right.read) ||
+          SEV_RANK[right.severity] - SEV_RANK[left.severity],
+      )
   },
   async markRead(id) {
-    const set = readSet()
-    set.add(id)
-    writeSet(set)
+    await markNotificationRead(id)
   },
   async markAllRead() {
-    const surface = await fetchCommandCenter()
-    const set = readSet()
-    surface.priority_stack.forEach((it) => set.add(it.risk_id))
-    writeSet(set)
+    await markAllNotificationsRead()
   },
 }
 
-// Active source: derive alerts from the command-center feed; read state in localStorage.
-// When a Cygnus-native notifications endpoint is added, implement a new NotificationSource
-// and swap it in here.
-export const notificationSource: NotificationSource = commandCenterSource
+export const notificationSource: NotificationSource = persistedNotificationSource

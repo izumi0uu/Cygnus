@@ -74,6 +74,9 @@ Agent 必须保留以下纪律：
 - recovery overview 的 `rehearsal:true` 必须在任何客户端/agent summary 中保留；它不是持久化恢复真相。
 - publish response / publish projection 的 `persisted:true` 只能来自已审批 typed `WikiPageDraft`、ready evidence、显式 channels 与 durable IDs 同事务落库；仅 `object_ref` 的 fixture 路径必须保持 `persisted:false`、`rehearsal:true`。
 - governance audit 的 `persisted:true` 只证明 append-only ledger event 已落库，不代表知识对象已发布或 propagation 已完成；audit read 必须在 SQL 内按 Wiki read scope 过滤，并对不存在与越权的 event 统一返回 `404`。
+- `/api/notifications` 是 durable recipient-scoped inbox：`read_at` 只投影为 `unread|read`，所有读取与状态迁移都在 SQL 内限制当前 recipient；前端不得从 command-center fixture 或 localStorage 派生通知。
+- notification external fan-out 只能重新读取已提交的 IDs；事务回滚的 staged record 不得发送。
+
 - propagation 创建时只能是 `pending`；不得把 publish 请求成功推导成下游已 `synced`，后者必须来自显式、版本校验的更新。
 
 

@@ -485,6 +485,24 @@ Nanobot 只消费结果，不拥有检索真相。
 - 数据只能来自 durable governance ledger，不得回退到 runtime `AuditLog`、`sample_*` fixture 或 session memory。
 - audit item 与 list 的 `persisted:true` / `rehearsal:false` 只证明 ledger 事件本身已持久化，不代表对应知识对象已发布或下游 propagation 已完成。
 - 作用域内无匹配事件时 observation 仍为 `ready`、`observed_count:0`；这表示真实查询为空，不是 `unavailable`。
+## 8.6 Durable recipient notification inbox
+### 用途
+读取治理生命周期产生的 in-app notification，并在当前收件人作用域内推进未读 → 已读状态。
+
+### 当前 HTTP surface
+- `GET /api/notifications?lifecycle_state=unread|read`：分页读取当前用户的 durable records。
+- `GET /api/notifications/unread-count`：读取当前用户的未读数量。
+- `POST /api/notifications/{notification_id}/read`：幂等地将当前用户拥有的记录推进为 `read`。
+- `POST /api/notifications/read-all`：只推进当前用户的未读记录。
+
+### 真相与生命周期
+- `Notification` 表由 Alembic migration `20260809_01` 管理；local `create_all` 只能作为兼容已存在 schema 的开发辅助。
+- `read_at IS NULL` 投影为 `lifecycle_state=unread`，非空投影为 `read`；当前切片没有隐式 dismiss 或恢复未读状态。
+- 每条响应包含 `trace_ref=notification:{id}` 与 `persisted:true`；这只证明 notification record 已落库，不代表外部 email/webhook 已送达。
+- 外部 fan-out 必须在响应事务提交后，以新 session 重新读取仍存在的 notification IDs；回滚记录不得被发送。
+- 所有 list / count / transition SQL 都包含 `recipient_id=current_user.id`；缺失记录与他人记录统一 `404`，不泄露跨用户 ID。
+- 这是 runtime HTTP inbox，不会扩张 Nanobot 当前四个 R0 governed retrieval tools。
+
 
 
 ## 9. 审批与权限矩阵（目标态建议，不等于当前全部已实现）

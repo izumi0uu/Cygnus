@@ -65,6 +65,7 @@ class DurablePublishCommand:
     command_id: str
     action_key: str
     target_channels: tuple[str, ...]
+    expected_version: int | None = None
     reason: str | None = None
 
     def __post_init__(self) -> None:
@@ -79,6 +80,8 @@ class DurablePublishCommand:
             raise ValueError("action_key must not be blank")
         if reason == "":
             raise ValueError("reason must not be blank when provided")
+        if self.expected_version is not None and self.expected_version < 1:
+            raise ValueError("expected_version must be positive")
         object.__setattr__(self, "command_id", command_id)
         object.__setattr__(self, "action_key", action_key)
         object.__setattr__(self, "reason", reason)
@@ -92,13 +95,17 @@ class DurablePublishCommand:
 
     @property
     def request_fingerprint(self) -> str:
-        payload = {
+        payload: dict[str, object] = {
             "draft_id": str(self.draft_id),
             "approval_ref": str(self.approval_ref),
             "action_key": self.action_key,
             "target_channels": list(self.target_channels),
             "reason": self.reason,
         }
+        # Keep the legacy fingerprint stable for callers that do not send the
+        # optional concurrency guard; new guarded commands include it.
+        if self.expected_version is not None:
+            payload["expected_version"] = self.expected_version
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(
             "utf-8"
         )
@@ -224,7 +231,10 @@ async def durable_publish_command_for_signal(
         "action_key": selected_action,
         "target_channels": list(target_channels),
         "reason": signal.reason,
+        "expected_version": page.version,
     }
+
+
 async def persisted_publish_candidate_for_signal(
     session: AsyncSession,
     *,
@@ -280,8 +290,6 @@ async def persisted_publish_candidate_for_signal(
         current_bindings=current_bindings,
         blocked_bindings=publish_conflicts_from_records(binding_rows),
     )
-
-
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -396,6 +404,14 @@ async def apply_durable_publish(
     ).scalar_one_or_none()
     if page is None:
         raise DurablePublishDenied("approved draft has no materialized WikiPage")
+    if (
+        command.expected_version is not None
+        and page.version != command.expected_version
+    ):
+        raise DurablePublishConflict(
+            "object version conflict: "
+            f"expected {command.expected_version}, current {page.version}"
+        )
 
     source_ids = tuple(dict.fromkeys(page.source_ids or ()))
     if not source_ids:
@@ -557,8 +573,7 @@ async def apply_durable_publish(
         opened_bindings=[binding.to_dict() for binding in result.opened_bindings],
         removed_bindings=[binding.to_dict() for binding in result.removed_bindings],
         held_bindings=[
-            binding.to_dict()
-            for binding in result.updated_candidate.blocked_bindings
+            binding.to_dict() for binding in result.updated_candidate.blocked_bindings
         ],
         action_log=list(result.action_log),
         published_by_id=actor_id,
@@ -612,9 +627,7 @@ def execute_durable_publish_action(
         raise DurablePublishDenied(f"unsupported durable action_key={normalized}")
 
     original_bindings = tuple(candidate.target_bindings or ())
-    blocked_by_key = {
-        blocked.key: blocked for blocked in candidate.blocked_bindings
-    }
+    blocked_by_key = {blocked.key: blocked for blocked in candidate.blocked_bindings}
     if normalized in {"publish", "republish"}:
         updated_bindings = tuple(
             binding

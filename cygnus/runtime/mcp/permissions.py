@@ -31,6 +31,7 @@ class ToolRequirement:
     The label is surfaced in logs and in the unauthenticated-listing hint so
     operators can tell at a glance why a tool was hidden.
     """
+
     predicate: Callable[[ResolvedIdentity], bool]
     label: str
 
@@ -47,21 +48,22 @@ ANY_AUTHENTICATED = ToolRequirement(
     label="any authenticated identity",
 )
 
+ADMIN_ONLY = ToolRequirement(
+    predicate=lambda identity: identity.is_admin,
+    label="administrator",
+)
+
 
 def _can_contribute(identity: ResolvedIdentity) -> bool:
     """Author-tier: can propose drafts somewhere, or hold a wiki:write:*."""
-    return (
-        identity.is_admin
-        or identity.has_any_permission("wiki:write:own_dept", "wiki:write:all")
+    return identity.is_admin or identity.has_any_permission(
+        "wiki:write:own_dept", "wiki:write:all"
     )
 
 
 def _can_review(identity: ResolvedIdentity) -> bool:
     """Reviewer-tier: org-wide wiki:write:all."""
-    return (
-        identity.is_admin
-        or identity.has_permission("wiki:write:all")
-    )
+    return identity.is_admin or identity.has_permission("wiki:write:all")
 
 
 CAN_CONTRIBUTE_WIKI = ToolRequirement(
@@ -83,6 +85,7 @@ CAN_CREATE_WIKI_DIRECT = CAN_REVIEW_WIKI
 # Decorator
 # ---------------------------------------------------------------------------
 
+
 def kb_tool(mcp, *, requires: ToolRequirement = ANY_AUTHENTICATED, **fastmcp_kwargs):
     """Replacement for `@mcp.tool()` that attaches a visibility requirement.
 
@@ -97,9 +100,11 @@ def kb_tool(mcp, *, requires: ToolRequirement = ANY_AUTHENTICATED, **fastmcp_kwa
     delegate to FastMCP's own `mcp.tool(...)` so all native behaviour
     (schema generation, logging, name inference) keeps working.
     """
+
     def decorator(fn):
         setattr(fn, REQUIRES_ATTR, requires)
         return mcp.tool(**fastmcp_kwargs)(fn)
+
     return decorator
 
 

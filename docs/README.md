@@ -138,6 +138,7 @@ This package is intentionally focused on:
 - human/AI shared source of truth
 - request-scoped governed reads whose explicit observation coverage prevents empty risk arrays from being interpreted as healthy truth
 - a governed Nanobot ↔ Cygnus session seam that revalidates substrate truth on every turn and never treats session memory as knowledge truth
+- a governed Nanobot ↔ Cygnus write seam for policy validation and approval-backed durable publication, with explicit idempotency and propagation state
 
 This package intentionally does **not** expand into:
 - GTM / pricing / sales collateral

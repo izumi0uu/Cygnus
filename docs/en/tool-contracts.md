@@ -386,20 +386,23 @@ Publish a draft to a target channel.
   "approval_ref": "string",
   "command_id": "string",
   "action_key": "publish|republish|restrict_publish|hold_external|republish_internal_only",
-  "target_channels": ["internal_copilot", "internal_mcp"]
+  "target_channels": ["internal_copilot", "internal_mcp"],
+  "expected_version": 7
 }
 ```
 
+`expected_version` is the object-level optimistic-concurrency guard; publish checks it again against the locked current `WikiPage`. A replay with an already committed `command_id` still returns the original publication first.
+
 ### Permission rule
-- low-risk internal publication may be auto-allowed by policy
-- external publication should default to `approval_required`
-- policy-rule or regulated-topic publication should require stricter approval
+- `validate_publish_policy` is a request-scoped read-only check; callers only receive draft/object results inside their governed scope.
+- `publish_knowledge_object` is administrator-only and requires a real approval ledger event.
+- External and policy/regulated publication remains subject to stricter audience bindings and approval rules; the adapter never widens them.
 
 ### Output highlights
-- publication record id
-- published object id / version
-- effective visibility
-- audit trace ref
+- `persisted:true`, `rehearsal:false`
+- publication record id, ledger event id, approval ref, and command id
+- published object/version and effective bindings
+- explicit propagation state for every target surface
 
 ### Current persistence boundary
 - Only an approved `WikiPageDraft` materialized as a typed support object, with every evidence source in `ready`, may enter durable publish.
@@ -551,7 +554,7 @@ It is successful if:
 - later workflow orchestration, eval, and UI work can grow on top of the same contract surface
 
 ## 13. Current implementation status (reconciled with code)
-This section reconciles the current implementation in `cygnus/integrations/nanobot_tools.py` and explicitly separates:
+This section reconciles the current implementations in `cygnus/integrations/nanobot_tools.py` and `cygnus/integrations/governed_publish_tools.py` and explicitly separates:
 - the **target contract**
 - the **currently callable interface**
 - the **governance semantics not yet fulfilled**
@@ -559,32 +562,25 @@ This section reconciles the current implementation in `cygnus/integrations/nanob
 The goal is to avoid reading the target contract above as if the code were already complete.
 
 ### 13.1 Capabilities actually fulfilled today
-- **Group A — Retrieval (4/4):** `search_knowledge_objects` / `read_knowledge_object` / `search_support_evidence` / `get_source_trace`, wired to real indexes (`object_index` / `evidence_index` / `source_trace`); since CYG-97 the index data comes from substrate truth — the runtime must install it via `configure_governed_knowledge_from_substrate(session)` (wiki pages + ready sources projected by `cygnus/retrieval/substrate_provider.py`), and sample fixtures exist only as test injection with no implicit fallback. `/api/knowledge-graph` and `/api/traceability/{id}` read the same DB-backed snapshot. This remains the part closest to real product semantics today.
-- **Group B — Draft/Review (2/4):** only `propose_knowledge_object` and `request_review` are callable, and both are currently **placeholder stubs** (correct return shape, but no persistence and no queue insertion). So they fulfill interface shape, not durable governance-state changes.
-- **Group C — Governance (3/4):** `validate_publish_policy` and `publish_knowledge_object` are callable but still **placeholder stubs** (approval = an internal/external check on the `target_channel` string); `list_drift_alerts` is wired to the real drift governance surface (its bundle data still defaults to sample fixtures until the CYG-97 review-bundle plane switch).
+- **Group A — Retrieval (4/4):** `search_knowledge_objects`, `read_knowledge_object`, `search_support_evidence`, and `get_source_trace` use the substrate-backed, request-scoped governed retrieval surface.
+- **Group B — Draft/Review (2/4):** `propose_knowledge_object` and `request_review` still provide interface shape only; real draft/review writes are not exposed through the governed session seam.
+- **Group C — Governance (3/4):** `validate_publish_policy` and `publish_knowledge_object` now use `cygnus/integrations/governed_publish_tools.py` and the durable draft, approval, audience-binding, and publication services; `list_drift_alerts` remains the existing drift read surface; `record_feedback_signal` is not wired.
 
 ### 13.2 Target interfaces not yet fulfilled
 - `update_draft_object` (Group B, R1)
 - `read_review_feedback` (Group B, R0)
 - `record_feedback_signal` (Group C, R1)
 
-These names are already part of the target contract, but the current code does not yet implement them.
+These names are part of the target contract, but the current code does not provide a governed session adapter for them.
 
-### 13.3 Key gap: the governance kernel and the tool contract are still disconnected
-Capabilities implemented in the Cygnus domain layer but **not yet exposed as tools**:
-- blast-radius preview (`cygnus/publish/preview.py`)
-- publish governance actions (`cygnus/publish/actions.py`: `publish` / `restrict` / `split_variant` / `hold_external` / `republish_internal_only`)
-- propagation status (`cygnus/publish/propagation.py`: `synced` / `pending` / `failed` / `manual_action_required`)
-
-The current `publish_knowledge_object` write path does **not** call this governance kernel.
-That means the externally callable publish contract does not yet equal the real blast-radius / propagation / governance-action path.
+### 13.3 Implemented durable publish seam
+- `validate_publish_policy` is a request-scoped read adapter. It reloads the current draft, typed object, approval ledger, ready sources, active audience bindings, and optional audience/version conditions; out-of-scope objects are returned as structured `not_found`.
+- `publish_knowledge_object` only constructs `DurablePublishCommand` and delegates to `cygnus/publish/durable.py`; the existing governance kernel remains authoritative for admin and approval gates, source readiness, bindings, locks, idempotency, ledger, publication, and propagation.
+- Success and replay preserve `persisted:true`, `rehearsal:false`, publication/ledger/approval/command IDs, and propagation records. Publish success never implies downstream sync; initial propagation remains `pending`.
+- `expected_version` is checked in both the adapter and the locked durable core to prevent stale writes. Reusing a `command_id` returns the original publication; changing the payload returns a conflict.
 
 ### 13.4 Boundary reminder
-§2.1 requires approval truth to live in Cygnus, but approval is currently decided only by the `target_channel` string, with **no real approval-record store** yet. Until that store exists, approval truth is not yet substantiated by code.
-
-So the accurate current statement is not “Cygnus has finished approval governance,” but rather:
-- the contract says approval should belong to Cygnus
-- the code has not yet fully substantiated that governance truth
+This slice substantiates the durable publish boundary for approval truth without turning Cygnus into a second session loop. Nanobot still owns the session and general tool loop; Cygnus exposes typed domain adapters only. Unimplemented draft/review/feedback interfaces must not be described as ready.
 
 ### 13.5 Implemented governed-observation boundary (CYG-97, CYG-101–104, CYG-108)
 `/api/command-center`, `/api/review-intake`, `/api/drift`, and `/api/source-blindness` now read from a request-scoped, permission-filtered `GovernanceReadSnapshot`; those runtime paths must not implicitly call `sample_*` fixtures.
@@ -599,8 +595,8 @@ CYG-101–104 and CYG-108 connect ticket/rewrite pressure, release/incident drif
 ### 13.6 Implemented governed session seam (CYG-92–96)
 Nanobot can now hand `request_ref`, optional `session_ref`, the support query, `audience_context`, and an optional prior `governance_context` to Cygnus through `POST /api/session-bridge/query`. Cygnus reloads the substrate-backed knowledge snapshot inside the request permission scope and returns one envelope containing `answer`, `source_trace`, `tool_trace`, `governance`, `continuity`, and the next portable `governance_context`.
 
-- `GET /api/session-bridge/capabilities` marks only the four fulfilled R0 tools as ready: `search_knowledge_objects`, `read_knowledge_object`, `search_support_evidence`, and `get_source_trace`. Publish/review tools without a real governance write path remain under `not_exposed`.
-- Runtime MCP registers the same request-scoped governed retrieval tools by default; it must not fall back to generic chat history, sample fixtures, or an unscoped global index.
+- `GET /api/session-bridge/capabilities` now marks six fulfilled governed tools as ready: the four R0 retrieval tools plus request-scoped read-only `validate_publish_policy` and the administrator/approval-gated `publish_knowledge_object`; remaining draft/review/feedback tools stay `not_exposed`.
+- Runtime MCP registers the same durable publish adapter contract. `publish_knowledge_object` is hidden from non-admins by the visibility gate, while its server-side permission check remains authoritative. It must not fall back to generic chat history, sample fixtures, or an unscoped global index.
 - Audience mismatch, pending review, stale or unknown freshness, source blindness, and no match all return structured governance states. They converge to `restricted`, `escalate`, or `fallback` rather than fabricating an externally usable answer.
 - Continuity re-queries Cygnus truth on every turn. An audience, object, version, trace, or freshness change invalidates the prior context; an unchanged context is only `revalidated`, and the response always carries `session_memory_used_as_truth:false`.
 

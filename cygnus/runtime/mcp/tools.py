@@ -18,8 +18,11 @@ from fastmcp import FastMCP
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.runtime.mcp.logging import current_identity, logged_tool
+from cygnus.integrations.governed_publish_tools import GovernedPublishTools
+from cygnus.integrations.mcp_auth import ResolvedIdentity
 from cygnus.integrations.nanobot_tools import GovernedKnowledgeTools
 from cygnus.runtime.mcp.permissions import (
+    ADMIN_ONLY,
     ANY_AUTHENTICATED,
     CAN_CONTRIBUTE_WIKI,
     CAN_CREATE_WIKI_DIRECT,
@@ -68,6 +71,24 @@ async def _get_identity():
     return identity, None
 
 
+async def _load_identity_employee(
+    identity: ResolvedIdentity,
+    session: AsyncSession,
+):
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from cygnus.runtime.database.models import Employee
+
+    return (
+        await session.execute(
+            select(Employee)
+            .where(Employee.id == identity.employee_id)
+            .options(selectinload(Employee.employee_departments))
+        )
+    ).scalar_one_or_none()
+
+
 async def _get_governed_knowledge_tools() -> tuple[
     GovernedKnowledgeTools | None, str | None
 ]:
@@ -77,27 +98,40 @@ async def _get_governed_knowledge_tools() -> tuple[
         return None, error
     assert identity is not None
 
-    from sqlalchemy import select
-    from sqlalchemy.orm import selectinload
-
     from cygnus.runtime.database import async_session_factory
-    from cygnus.runtime.database.models import Employee
     from cygnus.runtime.routers.governance.dependencies import (
         load_governance_knowledge_snapshot,
     )
 
     async with async_session_factory() as session:
-        employee = (
-            await session.execute(
-                select(Employee)
-                .where(Employee.id == identity.employee_id)
-                .options(selectinload(Employee.employee_departments))
-            )
-        ).scalar_one_or_none()
+        employee = await _load_identity_employee(identity, session)
         if employee is None:
             return None, "Authenticated employee no longer exists."
         snapshot = await load_governance_knowledge_snapshot(employee, session)
     return GovernedKnowledgeTools(snapshot), None
+
+
+async def _get_governed_publish_tools(
+    identity: ResolvedIdentity,
+    session: AsyncSession,
+) -> tuple[GovernedPublishTools | None, str | None]:
+    from cygnus.runtime.routers.governance.dependencies import (
+        load_governance_knowledge_snapshot,
+    )
+
+    employee = await _load_identity_employee(identity, session)
+    if employee is None:
+        return None, "Authenticated employee no longer exists."
+    snapshot = await load_governance_knowledge_snapshot(employee, session)
+    return (
+        GovernedPublishTools(
+            session,
+            actor_id=identity.employee_id,
+            is_admin=identity.is_admin,
+            visible_object_ids=(item.object_id for item in snapshot.objects),
+        ),
+        None,
+    )
 
 
 def _structured_tool_error(summary: str, *, code: str = "scope_denied") -> str:
@@ -352,6 +386,72 @@ def register_tools(mcp: FastMCP):
         if tools is None:
             return _structured_tool_error(error or "Governed retrieval is unavailable.")
         return _serialize_tool_result(tools.get_source_trace(object_id=object_id))
+
+    @kb_tool(mcp, requires=ANY_AUTHENTICATED)
+    @logged_tool("validate_publish_policy", query_arg="draft_id")
+    async def validate_publish_policy(
+        draft_id: str,
+        target_channel: str,
+        audience_context: dict[str, Any] | None = None,
+        expected_version: int | None = None,
+    ) -> str:
+        """Validate current persisted publish truth without mutating it."""
+        identity, error = await _get_identity()
+        if identity is None:
+            return _structured_tool_error(error or "Authentication required.")
+
+        from cygnus.runtime.database import async_session_factory
+
+        async with async_session_factory() as session:
+            tools, error = await _get_governed_publish_tools(identity, session)
+            if tools is None:
+                return _structured_tool_error(
+                    error or "Governed publication is unavailable."
+                )
+            payload = await tools.validate_publish_policy(
+                draft_id=draft_id,
+                target_channel=target_channel,
+                audience_context=audience_context,
+                expected_version=expected_version,
+            )
+        return _serialize_tool_result(payload)
+
+    @kb_tool(mcp, requires=ADMIN_ONLY)
+    @logged_tool("publish_knowledge_object", query_arg="draft_id")
+    async def publish_knowledge_object(
+        draft_id: str,
+        approval_ref: str,
+        command_id: str,
+        action_key: str,
+        target_channels: list[str],
+        expected_version: int,
+        reason: str | None = None,
+    ) -> str:
+        """Commit one approved, idempotent durable publication."""
+        identity, error = await _get_identity()
+        if identity is None:
+            return _structured_tool_error(error or "Authentication required.")
+
+        from cygnus.runtime.database import async_session_factory
+
+        async with async_session_factory() as session:
+            tools, error = await _get_governed_publish_tools(identity, session)
+            if tools is None:
+                return _structured_tool_error(
+                    error or "Governed publication is unavailable."
+                )
+            payload = await tools.publish_knowledge_object(
+                draft_id=draft_id,
+                approval_ref=approval_ref,
+                command_id=command_id,
+                action_key=action_key,
+                target_channels=target_channels,
+                expected_version=expected_version,
+                reason=reason,
+            )
+            if payload.get("persisted") is True:
+                await session.commit()
+        return _serialize_tool_result(payload)
 
     # =========================================================================
     # Wiki layer — synthesized markdown pages compiled from sources

@@ -241,12 +241,14 @@ class GovernedSessionBridgeTests(unittest.TestCase):
                 "read_knowledge_object",
                 "search_support_evidence",
                 "get_source_trace",
+                "validate_publish_policy",
+                "publish_knowledge_object",
             },
         )
-        self.assertIn(
-            "publish_knowledge_object",
-            {tool["name"] for tool in not_exposed},
-        )
+        unavailable_names = {tool["name"] for tool in not_exposed}
+        self.assertNotIn("validate_publish_policy", unavailable_names)
+        self.assertNotIn("publish_knowledge_object", unavailable_names)
+        self.assertIn("request_review", unavailable_names)
         self.assertFalse(query_handoff["session_memory_is_truth"])
 
     def test_http_query_handoff_serializes_the_same_contract(self) -> None:

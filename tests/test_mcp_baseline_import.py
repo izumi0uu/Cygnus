@@ -19,7 +19,7 @@ MCP_BASELINE_MODULES = {
     "cygnus.runtime.mcp.middleware": ["ScopedToolsMiddleware"],
     "cygnus.runtime.mcp.permissions": [
         "ToolRequirement",
-        "ANY_AUTHENTICATED",
+        "ADMIN_ONLY",
         "CAN_CONTRIBUTE_WIKI",
         "CAN_REVIEW_WIKI",
         "CAN_CREATE_WIKI_DIRECT",
@@ -39,12 +39,28 @@ MCP_BASELINE_MODULES = {
 }
 
 REQUIRED_MCP_SURFACE_TOKENS = {
-    "cygnus/runtime/mcp/server.py": ["FastMCP", "register_tools(mcp)", "register_resources(mcp)", "ScopedToolsMiddleware"],
+    "cygnus/runtime/mcp/server.py": [
+        "FastMCP",
+        "register_tools(mcp)",
+        "register_resources(mcp)",
+        "ScopedToolsMiddleware",
+    ],
     "cygnus/runtime/mcp/resources.py": ["cygnus://about", "cygnus://knowledge-index"],
-    "cygnus/runtime/mcp/permissions.py": ["ToolRequirement", "ANY_AUTHENTICATED", "CAN_REVIEW_WIKI", "kb_tool"],
-    "cygnus/runtime/mcp/middleware.py": ["ScopedToolsMiddleware", "on_list_tools", "requirement_for"],
+    "cygnus/runtime/mcp/permissions.py": [
+        "ToolRequirement",
+        "ANY_AUTHENTICATED",
+        "CAN_REVIEW_WIKI",
+        "kb_tool",
+    ],
+    "cygnus/runtime/mcp/middleware.py": [
+        "ScopedToolsMiddleware",
+        "on_list_tools",
+        "requirement_for",
+    ],
     "cygnus/runtime/mcp/logging.py": ["logged_tool", "MCPQueryLog", "_classify_status"],
     "cygnus/runtime/mcp/tools.py": [
+        "validate_publish_policy",
+        "publish_knowledge_object",
         "search_wiki",
         "read_wiki_index",
         "read_wiki_page",
@@ -74,7 +90,10 @@ REQUIRED_MCP_SURFACE_TOKENS = {
 class MCPBaselineImportTests(unittest.TestCase):
     def test_mcp_baseline_files_exist(self) -> None:
         for relative_path in MCP_BASELINE_FILES:
-            self.assertTrue(Path(relative_path).is_file(), f"missing mirrored MCP file: {relative_path}")
+            self.assertTrue(
+                Path(relative_path).is_file(),
+                f"missing mirrored MCP file: {relative_path}",
+            )
 
     def test_mcp_baseline_files_are_syntax_valid(self) -> None:
         for relative_path in MCP_BASELINE_FILES:
@@ -82,7 +101,9 @@ class MCPBaselineImportTests(unittest.TestCase):
             compile(source, relative_path, "exec")
 
     def test_mcp_baseline_topology_is_exactly_the_upstream_module_family(self) -> None:
-        expected = {Path(path).relative_to("cygnus/runtime/mcp") for path in MCP_BASELINE_FILES}
+        expected = {
+            Path(path).relative_to("cygnus/runtime/mcp") for path in MCP_BASELINE_FILES
+        }
         actual = {
             path.relative_to("cygnus/runtime/mcp")
             for path in Path("cygnus/runtime/mcp").rglob("*.py")
@@ -104,16 +125,24 @@ class MCPBaselineImportTests(unittest.TestCase):
 
             for symbol in symbols:
                 value = getattr(module, symbol, None)
-                self.assertIsNotNone(value, f"{module_name} missing upstream MCP symbol: {symbol}")
+                self.assertIsNotNone(
+                    value, f"{module_name} missing upstream MCP symbol: {symbol}"
+                )
 
     def test_mcp_baseline_preserves_key_tool_and_resource_surfaces(self) -> None:
         for relative_path, tokens in REQUIRED_MCP_SURFACE_TOKENS.items():
             source = Path(relative_path).read_text(encoding="utf-8")
 
             for token in tokens:
-                self.assertIn(token, source, f"{relative_path} lost upstream MCP surface token: {token}")
+                self.assertIn(
+                    token,
+                    source,
+                    f"{relative_path} lost upstream MCP surface token: {token}",
+                )
 
-    def test_mcp_server_factory_creates_fastmcp_instance_with_registered_surface(self) -> None:
+    def test_mcp_server_factory_creates_fastmcp_instance_with_registered_surface(
+        self,
+    ) -> None:
         from cygnus.runtime.mcp.server import create_mcp_server
 
         mcp = create_mcp_server()

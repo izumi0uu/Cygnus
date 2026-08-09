@@ -15,6 +15,11 @@ from cygnus.retrieval import (
 )
 from cygnus.substrate.agent_protocol import ToolCall
 from cygnus.substrate.tool_runtime import dispatch_tool_calls
+from cygnus.runtime.mcp.permissions import (
+    ADMIN_ONLY,
+    ANY_AUTHENTICATED,
+    requirement_for,
+)
 from cygnus.runtime.mcp.server import create_mcp_server
 
 
@@ -129,6 +134,15 @@ class NanobotToolIntegrationTests(unittest.TestCase):
                 "read_knowledge_object",
                 "search_support_evidence",
                 "get_source_trace",
+                "validate_publish_policy",
             }.issubset(tool_names)
         )
+        validate_tool = asyncio.run(mcp.get_tool("validate_publish_policy"))
+        publish_tool = asyncio.run(mcp.get_tool("publish_knowledge_object"))
+        self.assertIsNotNone(validate_tool)
+        self.assertIsNotNone(publish_tool)
+        if validate_tool is None or publish_tool is None:
+            raise AssertionError("governed publish tools were not registered")
+        self.assertIs(requirement_for(validate_tool.fn), ANY_AUTHENTICATED)
+        self.assertIs(requirement_for(publish_tool.fn), ADMIN_ONLY)
         self.assertIn("Never treat chat history", mcp.instructions)

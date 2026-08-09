@@ -14,6 +14,7 @@ from cygnus.domain.objects import (
     TroubleshootingFlow,
 )
 from cygnus.evidence.records import FreshnessState
+from cygnus.integrations.governed_publish_tools import publish_tool_definitions
 from cygnus.integrations.nanobot_tools import (
     GovernedKnowledgeTools,
     allowed_channels_for,
@@ -206,8 +207,9 @@ def session_bridge_capabilities(
     snapshot: SubstrateKnowledgeSnapshot,
 ) -> dict[str, object]:
     registry = build_governed_tool_registry(snapshot)
+    definitions = (*registry.list_definitions(), *publish_tool_definitions())
     return {
-        "contract_version": "2026-08-08",
+        "contract_version": "2026-08-10",
         "owners": {
             "session_continuity": "nanobot",
             "knowledge_truth": "cygnus",
@@ -227,7 +229,7 @@ def session_bridge_capabilities(
                 "parameters": definition.parameters,
                 "availability": "ready",
             }
-            for definition in registry.list_definitions()
+            for definition in definitions
         ],
         "not_exposed": [
             {
@@ -240,8 +242,6 @@ def session_bridge_capabilities(
                 "update_draft_object",
                 "request_review",
                 "read_review_feedback",
-                "validate_publish_policy",
-                "publish_knowledge_object",
                 "list_drift_alerts",
                 "record_feedback_signal",
             )

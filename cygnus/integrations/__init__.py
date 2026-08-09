@@ -8,6 +8,11 @@ Ownership:
 - this package is an adapter boundary, not the core governance domain itself
 """
 
+from cygnus.integrations.governed_publish_tools import (
+    GovernedPublishTools,
+    publish_tool_bindings,
+    publish_tool_definitions,
+)
 from cygnus.integrations.mcp_auth import (
     MCPAuthService,
     ResolvedIdentity,
@@ -33,6 +38,7 @@ __all__ = [
     "ContinuityDisposition",
     "GovernanceDisposition",
     "GovernedKnowledgeTools",
+    "GovernedPublishTools",
     "GovernedQueryRequest",
     "GovernedSessionBridge",
     "MCPAuthService",
@@ -41,6 +47,8 @@ __all__ = [
     "ResolvedIdentity",
     "apply_scope_filter",
     "build_governed_tool_registry",
+    "publish_tool_bindings",
+    "publish_tool_definitions",
     "dispatch_external",
     "hash_token",
     "session_bridge_capabilities",

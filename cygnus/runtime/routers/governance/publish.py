@@ -59,6 +59,7 @@ class PublishApplyRequest(BaseModel):
     approval_ref: uuid.UUID | None = None
     command_id: str | None = None
     target_channels: list[str] | None = None
+    expected_version: int | None = Field(default=None, ge=1)
 
 
 class PropagationUpdateRequest(BaseModel):
@@ -88,14 +89,18 @@ async def publish_preview(
     for signal in signals:
         audience_override = None
         if signal.audience_filter is None and signal.audience_binding_ref is not None:
-            binding_statement = select(GovernanceAudienceBinding).join(
-                WikiPage,
-                WikiPage.id == GovernanceAudienceBinding.page_id,
-            ).where(
-                GovernanceAudienceBinding.binding_key
-                == signal.audience_binding_ref,
-                GovernanceAudienceBinding.page_id == signal.page_id,
-                GovernanceAudienceBinding.object_ref == signal.object_ref,
+            binding_statement = (
+                select(GovernanceAudienceBinding)
+                .join(
+                    WikiPage,
+                    WikiPage.id == GovernanceAudienceBinding.page_id,
+                )
+                .where(
+                    GovernanceAudienceBinding.binding_key
+                    == signal.audience_binding_ref,
+                    GovernanceAudienceBinding.page_id == signal.page_id,
+                    GovernanceAudienceBinding.object_ref == signal.object_ref,
+                )
             )
             if wiki_scope is not None:
                 binding_statement = binding_statement.where(wiki_scope)
@@ -215,6 +220,7 @@ async def publish_apply(
                 action_key=body.action_key,
                 target_channels=tuple(body.target_channels or ()),
                 reason=body.reason,
+                expected_version=body.expected_version,
             )
             return await apply_durable_publish(
                 db,

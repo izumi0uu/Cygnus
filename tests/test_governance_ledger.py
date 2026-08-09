@@ -216,6 +216,7 @@ class GovernanceLedgerUnitTests(unittest.TestCase):
                         action_key="publish",
                         target_channels=["agent-copilot"],
                         reason="approved evidence",
+                        expected_version=3,
                     ),
                     current_user=cast(
                         Employee,
@@ -234,6 +235,7 @@ class GovernanceLedgerUnitTests(unittest.TestCase):
         self.assertEqual(command.draft_id, draft_id)
         self.assertEqual(command.approval_ref, approval_ref)
         self.assertEqual(command.reason, "approved evidence")
+        self.assertEqual(command.expected_version, 3)
 
 
 _INTEGRATION_DATABASE_URL = os.getenv("CYGNUS_GOVERNANCE_TEST_DATABASE_URL")

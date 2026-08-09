@@ -15,12 +15,16 @@ from cygnus.retrieval import (
     sample_knowledge_objects,
     sample_support_evidence,
 )
-from cygnus.review import compile_pressure_proposal_bundles, sample_pressure_intake_records
+from cygnus.review import (
+    compile_pressure_proposal_bundles,
+    sample_pressure_intake_records,
+)
 from cygnus.review.source_blindness import SourceFailureObservation
 from cygnus.runtime.routers.governance.dependencies import (
     GovernanceReadSnapshot,
     get_durable_publish_projection,
     get_governance_read_snapshot,
+    get_governance_knowledge_snapshot,
 )
 
 
@@ -53,6 +57,9 @@ class CommandCenterApiTests(unittest.TestCase):
             visible_source_count=0,
         )
         app.dependency_overrides[get_governance_read_snapshot] = lambda: self.snapshot
+        app.dependency_overrides[get_governance_knowledge_snapshot] = lambda: (
+            self.snapshot.knowledge
+        )
         app.dependency_overrides[get_durable_publish_projection] = lambda: None
 
     def tearDown(self) -> None:
@@ -71,6 +78,7 @@ class CommandCenterApiTests(unittest.TestCase):
 
     def test_governance_reads_require_auth(self) -> None:
         app.dependency_overrides.pop(get_governance_read_snapshot)
+        app.dependency_overrides.pop(get_governance_knowledge_snapshot)
         protected_paths = (
             "/api/command-center",
             "/api/drift",
@@ -83,11 +91,46 @@ class CommandCenterApiTests(unittest.TestCase):
             "/api/recovery/overview",
             "/api/knowledge-graph",
             "/api/traceability/ko-eu-invoice-delay",
+            "/api/session-bridge/capabilities",
         )
         for path in protected_paths:
             with self.subTest(path=path):
                 response = self.client.get(path)
                 self.assertEqual(response.status_code, 401)
+        query_response = self.client.post(
+            "/api/session-bridge/query",
+            json={
+                "request_ref": "unauthenticated-query",
+                "query": "cancel subscription",
+                "audience_context": {
+                    "visibility": "external",
+                    "product_line": "billing",
+                    "plan_tier": "free",
+                },
+            },
+        )
+        self.assertEqual(query_response.status_code, 401)
+
+    def test_session_bridge_query_is_mounted_on_main_app(self) -> None:
+        self.enable_auth()
+        response = self.client.post(
+            "/api/session-bridge/query",
+            json={
+                "request_ref": "main-app-query",
+                "session_ref": "main-app-session",
+                "query": "cancel subscription",
+                "audience_context": {
+                    "visibility": "external",
+                    "product_line": "billing",
+                    "plan_tier": "free",
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["data"]["governance"]["state"], "answerable")
+        self.assertEqual(payload["data"]["session_ref"], "main-app-session")
 
     def test_command_center_payload_shape(self) -> None:
         self.enable_auth()
@@ -127,10 +170,13 @@ class CommandCenterApiTests(unittest.TestCase):
         self.assertEqual(
             payload["observation"]["reason"], "persisted_drift_provider_ready"
         )
-        self.assertEqual(payload["observation"]["covered_signals"], [
-            "release_delta",
-            "incident_delta",
-        ])
+        self.assertEqual(
+            payload["observation"]["covered_signals"],
+            [
+                "release_delta",
+                "incident_delta",
+            ],
+        )
         self.assertEqual(payload["observation"]["missing_signals"], [])
 
     def test_target_governance_routes_do_not_fall_back_to_sample_fixtures(self) -> None:
@@ -310,12 +356,8 @@ class CommandCenterApiTests(unittest.TestCase):
             "cygnus.runtime.routers.governance.recovery.get_durable_recovery_window",
             AsyncMock(return_value=durable_surface),
         ):
-            window_response = self.client.get(
-                "/api/recovery/window/durable-command-1"
-            )
-            canonical_response = self.client.get(
-                "/api/recovery/durable-command-1"
-            )
+            window_response = self.client.get("/api/recovery/window/durable-command-1")
+            canonical_response = self.client.get("/api/recovery/durable-command-1")
 
         self.assertEqual(window_response.status_code, 200)
         self.assertEqual(canonical_response.status_code, 200)

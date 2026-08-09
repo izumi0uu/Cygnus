@@ -458,6 +458,35 @@ Write back consumption feedback so the system can improve knowledge objects.
 - whether refresh/review was queued
 - linked object or draft refs
 
+## 8.5 Governance audit read surface
+### Purpose
+Read durable review, approval, publish, and recovery transitions from append-only `GovernanceLedgerEvent` truth so human governance workbenches and controlled clients can trace one change.
+
+### Risk class
+`R0`
+
+### Current HTTP surface
+- `GET /api/governance/audit`
+- `GET /api/governance/audit/{event_id}`
+- The list accepts `phase`, `event_type`, `draft_id`, `page_id`, and `actor_id` filters plus `page` / `page_size` pagination; `page_size` is capped at `100`.
+- This slice is an authenticated HTTP read surface. It does not automatically expand the four approved R0 retrieval tools exposed by runtime MCP.
+
+### Output highlights
+- `event_id` and stable `trace_ref=governance-event:{event_id}`
+- `phase` (`review|approval|publish|recovery`) and the original ledger `event_type`
+- `from_state` / `to_state`, actor, draft/page/object references, scope, reason, and timestamps
+- event-type allowlisted `details` only; never the complete ledger payload, request fingerprints, or internal execution results
+- list `total`, pagination fields, and `SurfaceObservation`
+
+### Permission and truth boundary
+- Filter in SQL inside the current user's Wiki read scope before projection: admin / `wiki:read:all` may read all rows, while `wiki:read:own_dept` sees only global and member-department truth.
+- A create draft without a materialized page uses `suggested_metadata.scope_type/scope_id` for the same scope decision; a user without Wiki read permission receives an empty result.
+- A missing or out-of-scope detail uses the same `404`, preventing hidden-ID disclosure.
+- Data comes only from the durable governance ledger; never fall back to runtime `AuditLog`, `sample_*` fixtures, or session memory.
+- `persisted:true` / `rehearsal:false` on an audit item or list proves that the ledger event itself is durable. It does not claim the knowledge object is published or propagation is complete.
+- No matching in-scope events still yields a `ready` observation with `observed_count:0`; this is a truthful empty query, not `unavailable`.
+
+
 ## 9. First-pass approval and permission matrix (target-state guidance, not proof of full implementation)
 | Tool | Risk | Default policy |
 |---|---:|---|
@@ -548,3 +577,13 @@ So the accurate current statement is not “Cygnus has finished approval governa
 - `/api/recovery/overview` explicitly returns `rehearsal: true`; this read surface is not durable recovery truth.
 
 The durable providers still missing for ticket pressure, release/incident drift, audience conflict, review assignment, and source impact remain explicit follow-up work. An empty array or green UI must never stand in for their health.
+
+### 13.6 Implemented governed session seam (CYG-92–96)
+Nanobot can now hand `request_ref`, optional `session_ref`, the support query, `audience_context`, and an optional prior `governance_context` to Cygnus through `POST /api/session-bridge/query`. Cygnus reloads the substrate-backed knowledge snapshot inside the request permission scope and returns one envelope containing `answer`, `source_trace`, `tool_trace`, `governance`, `continuity`, and the next portable `governance_context`.
+
+- `GET /api/session-bridge/capabilities` marks only the four fulfilled R0 tools as ready: `search_knowledge_objects`, `read_knowledge_object`, `search_support_evidence`, and `get_source_trace`. Publish/review tools without a real governance write path remain under `not_exposed`.
+- Runtime MCP registers the same request-scoped governed retrieval tools by default; it must not fall back to generic chat history, sample fixtures, or an unscoped global index.
+- Audience mismatch, pending review, stale or unknown freshness, source blindness, and no match all return structured governance states. They converge to `restricted`, `escalate`, or `fallback` rather than fabricating an externally usable answer.
+- Continuity re-queries Cygnus truth on every turn. An audience, object, version, trace, or freshness change invalidates the prior context; an unchanged context is only `revalidated`, and the response always carries `session_memory_used_as_truth:false`.
+
+This seam adds no second session loop or memory store inside Cygnus. Nanobot still owns the session; Cygnus owns knowledge, retrieval, and governance decisions.

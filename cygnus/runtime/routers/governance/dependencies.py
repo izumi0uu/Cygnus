@@ -63,11 +63,11 @@ class GovernanceReadSnapshot:
     audience_conflict_count: int = 0
 
 
-async def get_governance_read_snapshot(
-    current_user: Employee = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> GovernanceReadSnapshot:
-    """Load only rows visible to the authenticated user's Wiki and Source scopes."""
+async def load_governance_knowledge_snapshot(
+    current_user: Employee,
+    db: AsyncSession,
+) -> SubstrateKnowledgeSnapshot:
+    """Load only permission-filtered object and evidence truth."""
     wiki_scope = build_wiki_scope_clause(current_user)
     document_scope = build_document_scope_clause(current_user)
 
@@ -105,11 +105,21 @@ async def get_governance_read_snapshot(
     knowledge_type_slug_by_id: dict[object, str] = {
         item.id: item.slug for item in knowledge_types
     }
-    knowledge = build_substrate_snapshot(
+    return build_substrate_snapshot(
         visible_pages,
         ready_sources,
         knowledge_type_slug_by_id=knowledge_type_slug_by_id,
     )
+
+
+async def get_governance_read_snapshot(
+    current_user: Employee = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> GovernanceReadSnapshot:
+    """Load only rows visible to the authenticated user's governed scopes."""
+    wiki_scope = build_wiki_scope_clause(current_user)
+    document_scope = build_document_scope_clause(current_user)
+    knowledge = await load_governance_knowledge_snapshot(current_user, db)
 
     source_count_stmt = select(func.count(Source.id))
     if document_scope is not None:
@@ -144,20 +154,21 @@ async def get_governance_read_snapshot(
     binding_refs = tuple(
         signal.audience_binding_ref
         for signal in governance_signals
-        if signal.audience_filter is None
-        and signal.audience_binding_ref is not None
+        if signal.audience_filter is None and signal.audience_binding_ref is not None
     )
     binding_by_key = {}
     if binding_refs:
-        binding_statement = select(GovernanceAudienceBinding).join(
-            WikiPage,
-            WikiPage.id == GovernanceAudienceBinding.page_id,
-        ).where(GovernanceAudienceBinding.binding_key.in_(binding_refs))
+        binding_statement = (
+            select(GovernanceAudienceBinding)
+            .join(
+                WikiPage,
+                WikiPage.id == GovernanceAudienceBinding.page_id,
+            )
+            .where(GovernanceAudienceBinding.binding_key.in_(binding_refs))
+        )
         if wiki_scope is not None:
             binding_statement = binding_statement.where(wiki_scope)
-        binding_rows = tuple(
-            (await db.execute(binding_statement)).scalars().all()
-        )
+        binding_rows = tuple((await db.execute(binding_statement)).scalars().all())
         binding_by_key = {row.binding_key: row for row in binding_rows}
 
     pressure_record_list: list[PressureIntakeRecord] = []
@@ -227,7 +238,8 @@ async def get_durable_publish_projection(
 
 
 async def get_governance_knowledge_snapshot(
-    snapshot: GovernanceReadSnapshot = Depends(get_governance_read_snapshot),
+    current_user: Employee = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> SubstrateKnowledgeSnapshot:
-    """Expose the scoped knowledge plane to graph and traceability endpoints."""
-    return snapshot.knowledge
+    """Expose the scoped knowledge plane without compiling unrelated governance state."""
+    return await load_governance_knowledge_snapshot(current_user, db)

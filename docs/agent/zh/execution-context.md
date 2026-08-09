@@ -72,10 +72,18 @@ Agent 必须保留以下纪律：
 - `ready`、`partial`、`unavailable` 是 detector 覆盖状态，不是异常吞噬机制；`partial`/`unavailable` 的空数组不得写成“无风险”。
 - `SourceFailureObservation` 是来源失败事实，`impact_state="unknown"` 前不得推导风险、owner、audience、surface 或执行命令。
 - recovery overview 的 `rehearsal:true` 必须在任何客户端/agent summary 中保留；它不是持久化恢复真相。
-- `persisted:true` 只能来自已审批 typed `WikiPageDraft`、ready evidence、显式 channels 与 durable IDs 同事务落库的 publish；仅 `object_ref` 的 fixture 路径必须保持 `persisted:false`、`rehearsal:true`。
+- publish response / publish projection 的 `persisted:true` 只能来自已审批 typed `WikiPageDraft`、ready evidence、显式 channels 与 durable IDs 同事务落库；仅 `object_ref` 的 fixture 路径必须保持 `persisted:false`、`rehearsal:true`。
+- governance audit 的 `persisted:true` 只证明 append-only ledger event 已落库，不代表知识对象已发布或 propagation 已完成；audit read 必须在 SQL 内按 Wiki read scope 过滤，并对不存在与越权的 event 统一返回 `404`。
 - propagation 创建时只能是 `pending`；不得把 publish 请求成功推导成下游已 `synced`，后者必须来自显式、版本校验的更新。
 
-### 4.1.2 工程执行控制权
+
+### 4.1.2 Governed session seam
+- `/api/session-bridge/query` 必须在当前用户权限范围内重新装载 substrate truth；前一轮 `governance_context` 只能用于判断 continuity，不能作为回答依据。
+- `session_memory_used_as_truth` 必须保持 `false`。audience/object/version/trace/freshness 变化时返回 `invalidated`；未变化时也必须重新检索后才能返回 `revalidated`。
+- runtime MCP 只自动暴露当前真实可执行的四个 R0 governed retrieval tools；尚未接入真实写治理链路的工具必须显式 `not_exposed`。
+- no match、pending review、audience mismatch、stale/unknown evidence 与 source blindness 必须返回结构化 `fallback`、`restricted` 或 `escalate`，不得补写答案。
+
+### 4.1.3 工程执行控制权
 - Jira 是唯一的交付 backlog 与工作流状态真相；priority、owner、blocker、进度和完成态都以 CYG issue 为准。
 - 会改代码或跨 session 的交付必须先绑定一张 CYG issue；一次性的只读调查可以不建票。
 - Trellis 默认只保留 specs 模式：可以使用 `.trellis/spec/`、`trellis-before-dev`、`trellis-check` 与 `trellis-update-spec`，但不得默认创建另一套 task lifecycle。

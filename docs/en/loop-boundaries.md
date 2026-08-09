@@ -253,6 +253,13 @@ Future implementation should enforce:
 - Cygnus workflow orchestration only handles business-state transitions
 - all high-risk external publication must be validated and logged inside Cygnus
 
+### 13.1 Implemented session-seam invariants (CYG-92–96)
+- Nanobot may carry a prior `governance_context`, but it is only a revalidation hint—not knowledge or approval truth.
+- Cygnus must re-query object and evidence truth under the current permission scope and `audience_context` before deciding `answerable`, `restricted`, `escalate`, or `fallback`.
+- Any audience, object, version, trace, or freshness change invalidates the prior context; even an unchanged context becomes `revalidated` only after a fresh query.
+- Session history must not fill missing evidence, override an audience gate, or promote pending/unpublished content into an answerable result.
+- `/api/session-bridge/query` and the runtime MCP governed tools are a domain seam, not a new Cygnus planner, memory store, or free-roaming tool loop.
+
 ## 14. Quick routing test
 If a new capability is mainly answering these questions, it belongs in Nanobot:
 - what does the user want next?

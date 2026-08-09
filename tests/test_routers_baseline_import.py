@@ -14,12 +14,14 @@ ROUTER_BASELINE_FILES = [
     "cygnus/runtime/routers/auth.py",
     "cygnus/runtime/routers/governance/__init__.py",
     "cygnus/runtime/routers/governance/dependencies.py",
+    "cygnus/runtime/routers/governance/audit.py",
     "cygnus/runtime/routers/governance/command_center.py",
     "cygnus/runtime/routers/governance/audience_bindings.py",
     "cygnus/runtime/routers/governance/knowledge_graph.py",
     "cygnus/runtime/routers/governance/publish.py",
     "cygnus/runtime/routers/governance/recovery.py",
     "cygnus/runtime/routers/governance/signals.py",
+    "cygnus/runtime/routers/governance/session_bridge.py",
     "cygnus/runtime/routers/governance/review.py",
     "cygnus/runtime/routers/knowledge_types.py",
     "cygnus/runtime/routers/notes.py",
@@ -52,6 +54,7 @@ MAIN_ASSEMBLED_ROUTER_MODULES = {
     "cygnus.runtime.routers.governance.publish": ["router"],
     "cygnus.runtime.routers.governance.recovery": ["router"],
     "cygnus.runtime.routers.governance.review": ["router"],
+    "cygnus.runtime.routers.governance.session_bridge": ["router"],
     "cygnus.runtime.routers.governance.signals": ["router"],
     "cygnus.runtime.routers.knowledge_types": ["router"],
     "cygnus.runtime.routers.notes": ["router"],
@@ -69,17 +72,40 @@ MAIN_ASSEMBLED_ROUTER_MODULES = {
 
 REQUIRED_ROUTER_SURFACE_TOKENS = {
     "cygnus/runtime/routers/auth.py": ["/auth/login", "/auth/me", "/auth/status"],
-    "cygnus/runtime/routers/governance/audience_bindings.py": ["/api/governance/audience-bindings"],
+    "cygnus/runtime/routers/governance/audience_bindings.py": [
+        "/api/governance/audience-bindings"
+    ],
+    "cygnus/runtime/routers/governance/session_bridge.py": ["/api/session-bridge"],
     "cygnus/runtime/routers/governance/signals.py": ["/api/governance-signals"],
-    "cygnus/runtime/routers/sources.py": ["/sources", "/sources/upload", "/sources/{source_id}/plan/approve"],
+    "cygnus/runtime/routers/sources.py": [
+        "/sources",
+        "/sources/upload",
+        "/sources/{source_id}/plan/approve",
+    ],
     "cygnus/runtime/routers/wiki.py": ["/wiki/pages", "/wiki/index", "/wiki/graph"],
-    "cygnus/runtime/routers/wiki_drafts.py": ["/wiki/drafts", "/wiki/drafts/{draft_id}/approve"],
-    "cygnus/runtime/routers/wiki_branches.py": ["/wiki/branches", "/wiki/branches/{branch_id}/merge"],
+    "cygnus/runtime/routers/wiki_drafts.py": [
+        "/wiki/drafts",
+        "/wiki/drafts/{draft_id}/approve",
+    ],
+    "cygnus/runtime/routers/wiki_branches.py": [
+        "/wiki/branches",
+        "/wiki/branches/{branch_id}/merge",
+    ],
     "cygnus/runtime/routers/skills.py": ["/skills", "/skills/upload"],
-    "cygnus/runtime/routers/skill_contributions.py": ["/skill-contributions", "/admin/skill-contributions"],
-    "cygnus/runtime/routers/rbac.py": ["/departments", "/employees", "/my/mcp-token/status"],
+    "cygnus/runtime/routers/skill_contributions.py": [
+        "/skill-contributions",
+        "/admin/skill-contributions",
+    ],
+    "cygnus/runtime/routers/rbac.py": [
+        "/departments",
+        "/employees",
+        "/my/mcp-token/status",
+    ],
     "cygnus/runtime/routers/audit.py": ['prefix="/audit"', '"/log"'],
-    "cygnus/runtime/routers/notifications.py": ["/notifications", "/notifications/unread-count"],
+    "cygnus/runtime/routers/notifications.py": [
+        "/notifications",
+        "/notifications/unread-count",
+    ],
     "cygnus/runtime/routers/knowledge_types.py": ["/knowledge-types"],
 }
 
@@ -87,15 +113,23 @@ REQUIRED_ROUTER_SURFACE_TOKENS = {
 class RouterBaselineImportTests(unittest.TestCase):
     def test_router_baseline_files_exist(self) -> None:
         for relative_path in ROUTER_BASELINE_FILES:
-            self.assertTrue(Path(relative_path).is_file(), f"missing mirrored router file: {relative_path}")
+            self.assertTrue(
+                Path(relative_path).is_file(),
+                f"missing mirrored router file: {relative_path}",
+            )
 
     def test_router_baseline_files_are_syntax_valid(self) -> None:
         for relative_path in ROUTER_BASELINE_FILES:
             source = Path(relative_path).read_text(encoding="utf-8")
             compile(source, relative_path, "exec")
 
-    def test_router_baseline_topology_matches_current_runtime_module_family(self) -> None:
-        expected = {Path(path).relative_to("cygnus/runtime/routers") for path in ROUTER_BASELINE_FILES}
+    def test_router_baseline_topology_matches_current_runtime_module_family(
+        self,
+    ) -> None:
+        expected = {
+            Path(path).relative_to("cygnus/runtime/routers")
+            for path in ROUTER_BASELINE_FILES
+        }
         actual = {
             path.relative_to("cygnus/runtime/routers")
             for path in Path("cygnus/runtime/routers").rglob("*.py")
@@ -118,19 +152,29 @@ class RouterBaselineImportTests(unittest.TestCase):
 
             for symbol in symbols:
                 router = getattr(module, symbol, None)
-                self.assertIsNotNone(router, f"{module_name} missing router symbol: {symbol}")
+                self.assertIsNotNone(
+                    router, f"{module_name} missing router symbol: {symbol}"
+                )
                 self.assertTrue(
                     hasattr(router, "routes"),
                     f"{module_name}.{symbol} should expose a FastAPI router-like object",
                 )
-                self.assertGreater(len(router.routes), 0, f"{module_name}.{symbol} should expose route entries")
+                self.assertGreater(
+                    len(router.routes),
+                    0,
+                    f"{module_name}.{symbol} should expose route entries",
+                )
 
     def test_router_baseline_preserves_key_upstream_route_surfaces(self) -> None:
         for relative_path, route_tokens in REQUIRED_ROUTER_SURFACE_TOKENS.items():
             source = Path(relative_path).read_text(encoding="utf-8")
 
             for route_token in route_tokens:
-                self.assertIn(route_token, source, f"{relative_path} lost upstream route surface: {route_token}")
+                self.assertIn(
+                    route_token,
+                    source,
+                    f"{relative_path} lost upstream route surface: {route_token}",
+                )
 
     def test_legacy_scopes_router_was_removed_from_current_runtime_tree(self) -> None:
         main_source = Path("cygnus/runtime/main.py").read_text(encoding="utf-8")

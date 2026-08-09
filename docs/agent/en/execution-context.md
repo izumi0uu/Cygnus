@@ -72,10 +72,18 @@ Downstream agents must follow this contract in Jira comments, handoffs, logs, an
 - `ready`, `partial`, and `unavailable` describe detector coverage, not swallowed failures. Empty arrays under `partial` or `unavailable` must never be summarized as “no risk.”
 - A `SourceFailureObservation` is a source-failure fact. Before `impact_state="unknown"` is resolved, do not infer a risk, owner, audience, surface, or executable command.
 - Preserve `rehearsal:true` from recovery overview in every client or agent summary; it is not durable recovery truth.
-- `persisted:true` is valid only when an approved typed `WikiPageDraft`, ready evidence, explicit channels, and durable IDs commit in one publish transaction; the fixture `object_ref` path must remain `persisted:false`, `rehearsal:true`.
+- `persisted:true` on a publish response or publish projection is valid only when an approved typed `WikiPageDraft`, ready evidence, explicit channels, and durable IDs commit in one transaction; the fixture `object_ref` path must remain `persisted:false`, `rehearsal:true`.
+- `persisted:true` on a governance audit record proves only that the append-only ledger event committed; it does not claim publication or completed propagation. Audit reads must filter in SQL inside Wiki read scope and return the same `404` for missing and hidden events.
 - New propagation is always `pending`; a successful publish request never implies downstream `synced`, which requires an explicit version-checked update.
 
-### 4.1.2 Engineering execution control
+
+### 4.1.2 Governed session seam
+- `/api/session-bridge/query` must reload substrate truth inside the current user permission scope; a prior `governance_context` is only continuity input and never answer truth.
+- `session_memory_used_as_truth` must remain `false`. An audience/object/version/trace/freshness change returns `invalidated`; an unchanged context may return `revalidated` only after retrieval runs again.
+- Runtime MCP automatically exposes only the four currently executable R0 governed retrieval tools. Tools without a real governance write path remain explicitly `not_exposed`.
+- No match, pending review, audience mismatch, stale/unknown evidence, and source blindness must return structured `fallback`, `restricted`, or `escalate` states rather than a fabricated answer.
+
+### 4.1.3 Engineering execution control
 - Jira is the only delivery backlog and workflow-status source of truth; CYG issues own priority, owner, blockers, progress, and completion.
 - Code-changing or multi-session delivery must bind to one CYG issue before implementation; a one-turn read-only investigation may remain untracked.
 - Trellis defaults to specs-only mode: `.trellis/spec/`, `trellis-before-dev`, `trellis-check`, and `trellis-update-spec` remain available, but agents must not create a second task lifecycle by default.

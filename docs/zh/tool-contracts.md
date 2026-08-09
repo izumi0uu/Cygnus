@@ -458,6 +458,35 @@ Nanobot 只消费结果，不拥有检索真相。
 - whether refresh/review was queued
 - linked object/draft refs
 
+## 8.5 Governance audit read surface
+### 用途
+从 append-only `GovernanceLedgerEvent` 读取 review、approval、publish 与 recovery 的持久化状态迁移，供人类治理工作台与受控客户端追踪一次变更。
+
+### 风险级别
+`R0`
+
+### 当前 HTTP surface
+- `GET /api/governance/audit`
+- `GET /api/governance/audit/{event_id}`
+- list 可按 `phase`、`event_type`、`draft_id`、`page_id`、`actor_id` 过滤，并使用 `page` / `page_size` 分页；`page_size` 上限为 `100`。
+- 当前切片是受认证的 HTTP read surface，不会自动扩张 runtime MCP 的四个已批准 R0 retrieval tools。
+
+### 输出重点
+- `event_id` 与稳定的 `trace_ref=governance-event:{event_id}`
+- `phase`（`review|approval|publish|recovery`）与原始 ledger `event_type`
+- `from_state` / `to_state`、actor、draft/page/object 引用、作用域、reason 与时间戳
+- 只返回按 event type allowlist 的 `details`；不得透传完整 ledger payload、请求指纹或内部执行结果
+- list 返回 `total`、分页信息与 `SurfaceObservation`
+
+### 权限与真相边界
+- 必须先在 SQL 内按当前用户的 Wiki read scope 过滤，再做投影：admin / `wiki:read:all` 可读全部，`wiki:read:own_dept` 只读 global 与所属 department。
+- 尚未物化 page 的 create draft 使用 `suggested_metadata.scope_type/scope_id` 做同样的作用域判断；没有 Wiki read 权限时返回空集合。
+- 单条记录不存在或越权时统一返回 `404`，不得泄露隐藏 ID 是否存在。
+- 数据只能来自 durable governance ledger，不得回退到 runtime `AuditLog`、`sample_*` fixture 或 session memory。
+- audit item 与 list 的 `persisted:true` / `rehearsal:false` 只证明 ledger 事件本身已持久化，不代表对应知识对象已发布或下游 propagation 已完成。
+- 作用域内无匹配事件时 observation 仍为 `ready`、`observed_count:0`；这表示真实查询为空，不是 `unavailable`。
+
+
 ## 9. 审批与权限矩阵（目标态建议，不等于当前全部已实现）
 | Tool | Risk | 默认策略 |
 |---|---:|---|
@@ -548,3 +577,13 @@ Cygnus 域层已实现、但**尚未作为工具暴露**的能力：
 - `/api/recovery/overview` 显式返回 `rehearsal: true`；该 read surface 不是持久化恢复真相。
 
 仍未接入的 durable provider（工单压力、发布/事故 drift、受众冲突、审阅分配、source impact）必须保持显式 follow-up，不能用空数组或绿色 UI 冒充健康状态。
+
+### 13.6 已落地的 governed session seam（CYG-92～96）
+Nanobot 现在可以通过 `POST /api/session-bridge/query` 把 `request_ref`、可选 `session_ref`、support query、`audience_context` 与可选的前一轮 `governance_context` 交给 Cygnus。Cygnus 在请求级权限范围内重新装载 substrate-backed knowledge snapshot，并返回统一 envelope：`answer`、`source_trace`、`tool_trace`、`governance`、`continuity` 与下一轮可携带的 `governance_context`。
+
+- `GET /api/session-bridge/capabilities` 只把四个已兑现的 R0 工具标为 ready：`search_knowledge_objects`、`read_knowledge_object`、`search_support_evidence`、`get_source_trace`。尚未接入真实治理写链路的 publish/review tools 必须留在 `not_exposed`。
+- runtime MCP 默认注册同一组 request-scoped governed retrieval tools；不能回退到 generic chat history、sample fixtures 或不受权限约束的全局索引。
+- audience mismatch、pending review、stale/unknown freshness、source blindness 与 no-match 都返回结构化治理状态；分别收敛为 `restricted`、`escalate` 或 `fallback`，不能生成看似可直接外发的答案。
+- continuity 每轮都重新查询 Cygnus truth。受众、对象、版本、trace 或 freshness 改变时前一轮 context 必须失效；即使没有变化也只能标记为 revalidated，且始终返回 `session_memory_used_as_truth:false`。
+
+该接缝没有在 Cygnus 中增加第二套 session loop 或 memory store；Nanobot 仍拥有会话，Cygnus 只拥有知识、检索与治理裁决。

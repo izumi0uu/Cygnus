@@ -253,6 +253,13 @@ Cygnus 内部工作流编排只应该服务于那些“已经明显是业务流�
 - Cygnus workflow orchestration 只编排业务状态迁移
 - 所有高风险 external publish 都必须在 Cygnus 域内校验并记录
 
+### 13.1 已落地的会话接缝不变量（CYG-92～96）
+- Nanobot 可以携带前一轮 `governance_context`，但它只是 revalidation hint，不是知识或审批真相。
+- Cygnus 必须在当前权限与 `audience_context` 下重新查询 object/evidence truth，再决定 `answerable`、`restricted`、`escalate` 或 `fallback`。
+- audience、object、version、trace 或 freshness 任一变化都必须让旧 context 进入 `invalidated`；上下文未变也只能在重新查询后进入 `revalidated`。
+- session history 不得补齐缺失证据、覆盖 audience gate 或把 pending/unpublished 内容升级为可回答内容。
+- `/api/session-bridge/query` 与 runtime MCP governed tools 是 domain seam，不是 Cygnus 内部的新 planner、memory 或自由工具循环。
+
 ## 14. 快速判断法
 如果一个新能力主要是在回答这些问题，它属于 Nanobot：
 - 用户下一步想做什么？

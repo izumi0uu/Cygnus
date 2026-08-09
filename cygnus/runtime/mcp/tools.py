@@ -12,12 +12,13 @@ All tools verify the employee's MCP token and enforce knowledge_type scope:
     get_knowledge_type_docs: enforce per-source scope via apply_scope_filter.
 """
 
-from typing import Optional
+from typing import Any, Optional
 
 from fastmcp import FastMCP
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.runtime.mcp.logging import current_identity, logged_tool
+from cygnus.integrations.nanobot_tools import GovernedKnowledgeTools
 from cygnus.runtime.mcp.permissions import (
     ANY_AUTHENTICATED,
     CAN_CONTRIBUTE_WIKI,
@@ -29,6 +30,7 @@ from cygnus.runtime.mcp.permissions import (
 # ---------------------------------------------------------------------------
 # Auth helpers
 # ---------------------------------------------------------------------------
+
 
 async def _get_identity():
     """Resolve the bearer token to a ResolvedIdentity, or return an error string."""
@@ -66,7 +68,62 @@ async def _get_identity():
     return identity, None
 
 
-async def _get_allowed_source_ids(identity, session: Optional[AsyncSession] = None) -> Optional[set[str]]:
+async def _get_governed_knowledge_tools() -> tuple[
+    GovernedKnowledgeTools | None, str | None
+]:
+    """Resolve one authenticated, permission-filtered knowledge tool surface."""
+    identity, error = await _get_identity()
+    if error is not None:
+        return None, error
+    assert identity is not None
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from cygnus.runtime.database import async_session_factory
+    from cygnus.runtime.database.models import Employee
+    from cygnus.runtime.routers.governance.dependencies import (
+        load_governance_knowledge_snapshot,
+    )
+
+    async with async_session_factory() as session:
+        employee = (
+            await session.execute(
+                select(Employee)
+                .where(Employee.id == identity.employee_id)
+                .options(selectinload(Employee.employee_departments))
+            )
+        ).scalar_one_or_none()
+        if employee is None:
+            return None, "Authenticated employee no longer exists."
+        snapshot = await load_governance_knowledge_snapshot(employee, session)
+    return GovernedKnowledgeTools(snapshot), None
+
+
+def _structured_tool_error(summary: str, *, code: str = "scope_denied") -> str:
+    import json
+
+    return json.dumps(
+        {
+            "status": "denied",
+            "summary": summary,
+            "data": {},
+            "warnings": [],
+            "errors": [code],
+        },
+        ensure_ascii=False,
+    )
+
+
+def _serialize_tool_result(payload: dict[str, Any]) -> str:
+    import json
+
+    return json.dumps(payload, ensure_ascii=False, default=str)
+
+
+async def _get_allowed_source_ids(
+    identity, session: Optional[AsyncSession] = None
+) -> Optional[set[str]]:
     """Allowed source UUID strings, or None when access is unrestricted.
 
     Pass an existing session to avoid opening a second DB connection.
@@ -99,6 +156,7 @@ async def _get_allowed_source_ids(identity, session: Optional[AsyncSession] = No
 # Permission helpers (shared across review/contribute tools)
 # ---------------------------------------------------------------------------
 
+
 async def _can_review_page(session: AsyncSession, employee, page) -> bool:
     """Editor+ in the page's workspace, or wiki:write:all globally, or admin."""
     from cygnus.runtime.services.permission_engine import (
@@ -106,6 +164,7 @@ async def _can_review_page(session: AsyncSession, employee, page) -> bool:
         get_workspace_role,
         workspace_role_can,
     )
+
     if employee.role == "admin":
         return True
     if page.scope_type == "project" and page.scope_id:
@@ -130,6 +189,7 @@ async def _can_contribute_to_page(session: AsyncSession, employee, page) -> bool
         has_any_permission,
         workspace_role_can,
     )
+
     if employee.role == "admin":
         return True
     perms = _get_user_permissions(employee)
@@ -142,8 +202,7 @@ async def _can_contribute_to_page(session: AsyncSession, employee, page) -> bool
         if "wiki:write:all" in perms:
             return True
         return (
-            "wiki:write:own_dept" in perms
-            and page.scope_id in employee.department_ids
+            "wiki:write:own_dept" in perms and page.scope_id in employee.department_ids
         )
     return has_any_permission(list(perms), "wiki", "write")
 
@@ -151,6 +210,7 @@ async def _can_contribute_to_page(session: AsyncSession, employee, page) -> bool
 # ---------------------------------------------------------------------------
 # Out-of-scope hint (Tier 1 — count + scope name, no titles/content leaked)
 # ---------------------------------------------------------------------------
+
 
 async def _format_oos_hint(session: AsyncSession, oos_hits: list) -> str:
     """Aggregate out-of-scope search hits into a short "ask for access" hint.
@@ -181,10 +241,11 @@ async def _format_oos_hint(session: AsyncSession, oos_hits: list) -> str:
 
     # Resolve human-readable scope labels.
     labels: dict[tuple[str, str | None], str] = {}
-    for (scope_type, scope_id) in buckets.keys():
+    for scope_type, scope_id in buckets.keys():
         label: str | None = None
         if scope_id:
             import uuid as _uuid
+
             try:
                 sid = _uuid.UUID(scope_id)
             except (ValueError, TypeError):
@@ -210,8 +271,87 @@ async def _format_oos_hint(session: AsyncSession, oos_hits: list) -> str:
 # Tool registration
 # ---------------------------------------------------------------------------
 
+
 def register_tools(mcp: FastMCP):
     """Register all KB tools on the MCP server."""
+
+    # =========================================================================
+    # Governed support object layer — the default path for support questions
+    # =========================================================================
+
+    @kb_tool(mcp, requires=ANY_AUTHENTICATED)
+    @logged_tool("search_knowledge_objects", query_arg="query")
+    async def search_knowledge_objects(
+        query: str,
+        audience_context: dict[str, Any] | None = None,
+        object_types: list[str] | None = None,
+        limit: int = 10,
+        include_unpublished: bool = False,
+    ) -> str:
+        """Search typed support objects through Cygnus audience gating."""
+        tools, error = await _get_governed_knowledge_tools()
+        if tools is None:
+            return _structured_tool_error(error or "Governed retrieval is unavailable.")
+        try:
+            payload = tools.search_knowledge_objects(
+                query=query,
+                audience_context=audience_context,
+                object_types=object_types,
+                limit=min(max(1, limit), 50),
+                include_unpublished=include_unpublished,
+            )
+        except ValueError as exc:
+            return _structured_tool_error(str(exc), code="invalid_arguments")
+        return _serialize_tool_result(payload)
+
+    @kb_tool(mcp, requires=ANY_AUTHENTICATED)
+    @logged_tool("read_knowledge_object", query_arg="id_or_slug")
+    async def read_knowledge_object(
+        id_or_slug: str,
+        include_variants: bool = True,
+        include_trace: bool = True,
+    ) -> str:
+        """Read one typed support object from the caller's governed scope."""
+        tools, error = await _get_governed_knowledge_tools()
+        if tools is None:
+            return _structured_tool_error(error or "Governed retrieval is unavailable.")
+        return _serialize_tool_result(
+            tools.read_knowledge_object(
+                id_or_slug=id_or_slug,
+                include_variants=include_variants,
+                include_trace=include_trace,
+            )
+        )
+
+    @kb_tool(mcp, requires=ANY_AUTHENTICATED)
+    @logged_tool("search_support_evidence", query_arg="query")
+    async def search_support_evidence(
+        query: str,
+        filters: dict[str, Any] | None = None,
+        limit: int = 10,
+    ) -> str:
+        """Search permission-filtered evidence without promoting it to answer truth."""
+        tools, error = await _get_governed_knowledge_tools()
+        if tools is None:
+            return _structured_tool_error(error or "Governed retrieval is unavailable.")
+        try:
+            payload = tools.search_support_evidence(
+                query=query,
+                filters=filters,
+                limit=min(max(1, limit), 50),
+            )
+        except ValueError as exc:
+            return _structured_tool_error(str(exc), code="invalid_arguments")
+        return _serialize_tool_result(payload)
+
+    @kb_tool(mcp, requires=ANY_AUTHENTICATED)
+    @logged_tool("get_source_trace", query_arg="object_id")
+    async def get_source_trace(object_id: str) -> str:
+        """Return the evidence, freshness, and blind-spot trace for one object."""
+        tools, error = await _get_governed_knowledge_tools()
+        if tools is None:
+            return _structured_tool_error(error or "Governed retrieval is unavailable.")
+        return _serialize_tool_result(tools.get_source_trace(object_id=object_id))
 
     # =========================================================================
     # Wiki layer — synthesized markdown pages compiled from sources
@@ -311,7 +451,10 @@ def register_tools(mcp: FastMCP):
                 if len(preview) > 200:
                     preview = preview[:200] + "…"
                 grouped[source.id] = {
-                    "source": source, "sim": sim, "preview": preview, "pages": set(),
+                    "source": source,
+                    "sim": sim,
+                    "preview": preview,
+                    "pages": set(),
                 }
             grouped[source.id]["pages"].add(chunk.page_number)
 
@@ -322,23 +465,28 @@ def register_tools(mcp: FastMCP):
         ranked = ranked[:top_k]
 
         if not ranked:
-            base = f"No knowledge base matches found for: \"{query}\""
+            base = f'No knowledge base matches found for: "{query}"'
             if oos_hint:
                 return f"{base}\n\n{oos_hint}"
             return base
 
         def _portal_link(source_id) -> str:
             base = (settings.portal_base_url or "").rstrip("/")
-            return f"{base}/wiki/source/{source_id}" if base else f"/wiki/source/{source_id}"
+            return (
+                f"{base}/wiki/source/{source_id}"
+                if base
+                else f"/wiki/source/{source_id}"
+            )
 
-        lines = [f"**KB search — {len(ranked)} result(s) for: \"{query}\"**\n"]
+        lines = [f'**KB search — {len(ranked)} result(s) for: "{query}"**\n']
         for kind, sim, obj in ranked:
             similarity_pct = f"{sim:.0%}"
             if kind == "wiki":
                 page = obj
                 kt_label = (
                     f" [{', '.join(page.knowledge_type_slugs)}]"
-                    if page.knowledge_type_slugs else ""
+                    if page.knowledge_type_slugs
+                    else ""
                 )
                 entry = (
                     f"- 📘 `{page.slug}` ({page.page_type}){kt_label} — {similarity_pct}\n"
@@ -346,7 +494,7 @@ def register_tools(mcp: FastMCP):
                 )
                 if page.summary:
                     entry += f" — {page.summary}"
-                entry += "\n  _Read: `read_wiki_page(\"%s\")`_" % page.slug
+                entry += '\n  _Read: `read_wiki_page("%s")`_' % page.slug
             else:
                 source = obj["source"]
                 title = source.title or source.file_name or source.url or "Untitled"
@@ -355,7 +503,7 @@ def register_tools(mcp: FastMCP):
                 entry = (
                     f"- 📄 **{title}** (original text) — {similarity_pct} — pages {pages_label}\n"
                     f"  “{obj['preview']}”\n"
-                    f"  _Read original: `get_source_pages(\"{source.id}\", \"{pages_sorted[0]}\")` · "
+                    f'  _Read original: `get_source_pages("{source.id}", "{pages_sorted[0]}")` · '
                     f"Link: {_portal_link(source.id)}_"
                 )
             lines.append(entry)
@@ -422,13 +570,16 @@ def register_tools(mcp: FastMCP):
         async with async_session_factory() as session:
             # Try global → department.
             page = await wiki_service.get_page_by_slug(
-                session, slug, allowed_kt_slugs=identity.allowed_knowledge_types,
+                session,
+                slug,
+                allowed_kt_slugs=identity.allowed_knowledge_types,
             )
             if not page and identity.department_ids:
                 # Walk the user's departments until we hit a matching slug.
                 for did in identity.department_ids:
                     page = await wiki_service.get_page_by_slug(
-                        session, slug,
+                        session,
+                        slug,
                         allowed_kt_slugs=identity.allowed_knowledge_types,
                         scope_type="department",
                         scope_id=did,
@@ -443,8 +594,10 @@ def register_tools(mcp: FastMCP):
                     stmt = sa_select(WikiPage).where(WikiPage.slug == slug)
                     others = (await session.execute(stmt)).scalars().all()
                     inaccessible = [
-                        p for p in others
-                        if p.scope_type == "department" and p.scope_id not in identity.department_ids
+                        p
+                        for p in others
+                        if p.scope_type == "department"
+                        and p.scope_id not in identity.department_ids
                     ]
                     if inaccessible:
                         labels: list[str] = []
@@ -467,21 +620,31 @@ def register_tools(mcp: FastMCP):
                 return f"Wiki page not found or out of scope: `{slug}`"
 
             backlinks = await wiki_service.get_backlinks(
-                session, slug, page.scope_type, page.scope_id,
+                session,
+                slug,
+                page.scope_type,
+                page.scope_id,
             )
             outlinks = await wiki_service.get_outlinks(
-                session, slug, page.scope_type, page.scope_id,
+                session,
+                slug,
+                page.scope_type,
+                page.scope_id,
             )
 
         body = page.content_md or ""
         outlinks = sorted({s for s in outlinks if s != slug})
         if outlinks:
-            body = body.rstrip() + "\n\n## Outlinks\n" + "\n".join(
-                f"- `{s}`" for s in outlinks
+            body = (
+                body.rstrip()
+                + "\n\n## Outlinks\n"
+                + "\n".join(f"- `{s}`" for s in outlinks)
             )
         if backlinks:
-            body = body.rstrip() + "\n\n## Backlinks\n" + "\n".join(
-                f"- `{s}`" for s in sorted(backlinks)
+            body = (
+                body.rstrip()
+                + "\n\n## Backlinks\n"
+                + "\n".join(f"- `{s}`" for s in sorted(backlinks))
             )
         return body
 
@@ -538,7 +701,11 @@ def register_tools(mcp: FastMCP):
 
         lines = [f"**Wiki pages — {len(pages)} result(s)**\n"]
         for p in pages:
-            kt_label = f" [{', '.join(p.knowledge_type_slugs)}]" if p.knowledge_type_slugs else ""
+            kt_label = (
+                f" [{', '.join(p.knowledge_type_slugs)}]"
+                if p.knowledge_type_slugs
+                else ""
+            )
             line = f"- `{p.slug}` ({p.page_type}){kt_label} — **{p.title}**"
             if p.summary:
                 line += f" — {p.summary}"
@@ -578,8 +745,12 @@ def register_tools(mcp: FastMCP):
 
         async with async_session_factory() as session:
             stmt = (
-                select(Source).where(Source.id == sid)
-                .options(selectinload(Source.knowledge_type), selectinload(Source.contributor))
+                select(Source)
+                .where(Source.id == sid)
+                .options(
+                    selectinload(Source.knowledge_type),
+                    selectinload(Source.contributor),
+                )
             )
             source = (await session.execute(stmt)).scalar_one_or_none()
             if not source:
@@ -590,8 +761,12 @@ def register_tools(mcp: FastMCP):
                 return "Access denied: this source is outside your knowledge scope."
 
         page_count = len(source.page_offsets or [])
-        kt_label = source.knowledge_type.name if source.knowledge_type else "Uncategorized"
-        contributor_label = source.contributor.name if source.contributor else "(admin upload)"
+        kt_label = (
+            source.knowledge_type.name if source.knowledge_type else "Uncategorized"
+        )
+        contributor_label = (
+            source.contributor.name if source.contributor else "(admin upload)"
+        )
 
         lines = [
             f"# {source.title or source.file_name or 'Untitled Source'}",
@@ -599,7 +774,9 @@ def register_tools(mcp: FastMCP):
             f"- **Type:** {source.source_type or 'file'}",
             f"- **Knowledge type:** {kt_label}",
             f"- **Status:** {source.status}",
-            f"- **Pages:** {page_count}" if page_count else "- **Pages:** (single block)",
+            f"- **Pages:** {page_count}"
+            if page_count
+            else "- **Pages:** (single block)",
             f"- **Contributed by:** {contributor_label}",
         ]
         if source.file_name:
@@ -651,6 +828,7 @@ def register_tools(mcp: FastMCP):
             return "_(no outline — this document has no detectable headings)_"
 
         lines = ["# Outline\n"]
+
         def _walk(nodes: list[dict]):
             for n in nodes:
                 indent = "  " * (max(0, n.get("level", 1) - 1))
@@ -659,6 +837,7 @@ def register_tools(mcp: FastMCP):
                 lines.append(f"{indent}- {n.get('title', '')}{page_label}")
                 if n.get("children"):
                     _walk(n["children"])
+
         _walk(outline)
         return "\n".join(lines)
 
@@ -681,7 +860,7 @@ def register_tools(mcp: FastMCP):
 
         from cygnus.runtime.database import async_session_factory
         from cygnus.runtime.database.models import Source
-        from cygnus.substrate.source_outline import parse_page_range, slice_pages_by_range
+        from cygnus.substrate.source_outline import parse_page_range, slice_pages_by_range  # fmt: skip
 
         identity, err = await _get_identity()
         if err:
@@ -694,7 +873,9 @@ def register_tools(mcp: FastMCP):
 
         page_nums = parse_page_range(pages)
         if not page_nums:
-            return f"Invalid page range: {pages!r}. Use formats like '5-7', '3,8', '12'."
+            return (
+                f"Invalid page range: {pages!r}. Use formats like '5-7', '3,8', '12'."
+            )
 
         async with async_session_factory() as session:
             source = await session.get(Source, sid)
@@ -758,21 +939,20 @@ def register_tools(mcp: FastMCP):
 
         async with async_session_factory() as session:
             stmt = select(Source).where(
-                Source.status == "ready",
-                Source.full_text.ilike(f"%{query}%")
+                Source.status == "ready", Source.full_text.ilike(f"%{query}%")
             )
             stmt = apply_scope_filter(stmt, identity).offset(offset).limit(limit)
             sources = (await session.execute(stmt)).scalars().all()
 
         if not sources:
-            return f"No document content matches found for: \"{query}\""
+            return f'No document content matches found for: "{query}"'
 
         try:
             pattern = re.compile(re.escape(query), re.IGNORECASE)
         except Exception:
             pattern = None
 
-        lines = [f"**Content search results for: \"{query}\"**\n"]
+        lines = [f'**Content search results for: "{query}"**\n']
         for s in sources:
             text = s.full_text or ""
             offsets = s.page_offsets or []
@@ -803,7 +983,7 @@ def register_tools(mcp: FastMCP):
                         re.escape(query),
                         lambda m: f"**{m.group(0)}**",
                         snippet,
-                        flags=re.IGNORECASE
+                        flags=re.IGNORECASE,
                     )
 
                     matches_in_doc.append((page_num, highlighted_snippet))
@@ -864,16 +1044,20 @@ def register_tools(mcp: FastMCP):
             if status != "all":
                 stmt = stmt.where(Source.status == status)
             if knowledge_type:
-                kt_id = (await session.execute(
-                    select(KnowledgeType.id).where(KnowledgeType.slug == knowledge_type)
-                )).scalar()
+                kt_id = (
+                    await session.execute(
+                        select(KnowledgeType.id).where(
+                            KnowledgeType.slug == knowledge_type
+                        )
+                    )
+                ).scalar()
                 if kt_id:
                     stmt = stmt.where(Source.knowledge_type_id == kt_id)
             if query:
                 stmt = stmt.where(
-                    Source.title.ilike(f"%{query}%") |
-                    Source.file_name.ilike(f"%{query}%") |
-                    Source.url.ilike(f"%{query}%")
+                    Source.title.ilike(f"%{query}%")
+                    | Source.file_name.ilike(f"%{query}%")
+                    | Source.url.ilike(f"%{query}%")
                 )
             stmt = apply_scope_filter(stmt, identity).offset(offset).limit(limit)
             sources = (await session.execute(stmt)).scalars().all()
@@ -887,6 +1071,7 @@ def register_tools(mcp: FastMCP):
             return msg + "."
 
         from collections import defaultdict
+
         by_type = defaultdict(list)
         for s in sources:
             kt_name = s.knowledge_type.name if s.knowledge_type else "Uncategorized"
@@ -921,7 +1106,8 @@ def register_tools(mcp: FastMCP):
                 select(KnowledgeType, func.count(Source.id).label("doc_count"))
                 .outerjoin(
                     Source,
-                    (Source.knowledge_type_id == KnowledgeType.id) & (Source.status == "ready"),
+                    (Source.knowledge_type_id == KnowledgeType.id)
+                    & (Source.status == "ready"),
                 )
                 .group_by(KnowledgeType.id)
                 .order_by(KnowledgeType.sort_order, KnowledgeType.name)
@@ -967,17 +1153,23 @@ def register_tools(mcp: FastMCP):
             return err
         assert identity is not None
 
-        if (identity.allowed_knowledge_types is not None
-                and knowledge_type_slug not in identity.allowed_knowledge_types):
+        if (
+            identity.allowed_knowledge_types is not None
+            and knowledge_type_slug not in identity.allowed_knowledge_types
+        ):
             return (
                 f"Access denied: knowledge type '{knowledge_type_slug}' is outside your scope. "
                 f"Use `list_knowledge_types` to see what types you can access."
             )
 
         async with async_session_factory() as session:
-            kt = (await session.execute(
-                select(KnowledgeType).where(KnowledgeType.slug == knowledge_type_slug)
-            )).scalar_one_or_none()
+            kt = (
+                await session.execute(
+                    select(KnowledgeType).where(
+                        KnowledgeType.slug == knowledge_type_slug
+                    )
+                )
+            ).scalar_one_or_none()
             if not kt:
                 return f"Knowledge type '{knowledge_type_slug}' not found."
 
@@ -1064,13 +1256,22 @@ def register_tools(mcp: FastMCP):
         async with async_session_factory() as session:
             if scope_type:
                 page = await wiki_service.get_page_by_slug(
-                    session, slug, scope_type=scope_type, scope_id=sid,
+                    session,
+                    slug,
+                    scope_type=scope_type,
+                    scope_id=sid,
                 )
             else:
                 # No explicit scope: require the slug to be unambiguous.
-                matches = (await session.execute(
-                    select(WikiPage).where(WikiPage.slug == slug)
-                )).scalars().all()
+                matches = (
+                    (
+                        await session.execute(
+                            select(WikiPage).where(WikiPage.slug == slug)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
                 if len(matches) > 1:
                     scopes = ", ".join(
                         f"{m.scope_type}:{m.scope_id or 'global'}" for m in matches
@@ -1111,7 +1312,10 @@ def register_tools(mcp: FastMCP):
             )
             draft.page = page
             await contribution_service.notify_submitted(
-                session, wiki_draft_adapter, draft, employee,
+                session,
+                wiki_draft_adapter,
+                draft,
+                employee,
             )
             await session.commit()
 
@@ -1178,12 +1382,21 @@ def register_tools(mcp: FastMCP):
         async with async_session_factory() as session:
             if scope_type:
                 page = await wiki_service.get_page_by_slug(
-                    session, slug, scope_type=scope_type, scope_id=sid,
+                    session,
+                    slug,
+                    scope_type=scope_type,
+                    scope_id=sid,
                 )
             else:
-                matches = (await session.execute(
-                    select(WikiPage).where(WikiPage.slug == slug)
-                )).scalars().all()
+                matches = (
+                    (
+                        await session.execute(
+                            select(WikiPage).where(WikiPage.slug == slug)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
                 if len(matches) > 1:
                     scopes = ", ".join(
                         f"{m.scope_type}:{m.scope_id or 'global'}" for m in matches
@@ -1205,11 +1418,15 @@ def register_tools(mcp: FastMCP):
                     return f"Error: requires editor role or above to directly edit '{slug}'."
                 return "Error: requires wiki:write:all permission to directly edit global wiki pages. Use propose_wiki_edit() instead."
 
-            await wiki_service.direct_edit_page(session, page, employee.id, content_md.strip(), change_note)
+            await wiki_service.direct_edit_page(
+                session, page, employee.id, content_md.strip(), change_note
+            )
             edited_scope_type = page.scope_type or "global"
             edited_scope_id = page.scope_id
             await wiki_service.regenerate_index(
-                session, scope_type=edited_scope_type, scope_id=edited_scope_id,
+                session,
+                scope_type=edited_scope_type,
+                scope_id=edited_scope_id,
             )
             await wiki_service.append_log(
                 session,
@@ -1289,10 +1506,12 @@ def register_tools(mcp: FastMCP):
                     ProjectMember.employee_id == employee.id,
                     ProjectMember.role.in_(editor_levels),
                 )
-                stmt = stmt.where(and_(
-                    WikiPage.scope_type == "project",
-                    WikiPage.scope_id.in_(workspace_pages),
-                ))
+                stmt = stmt.where(
+                    and_(
+                        WikiPage.scope_type == "project",
+                        WikiPage.scope_id.in_(workspace_pages),
+                    )
+                )
 
             if workspace_id:
                 stmt = stmt.where(WikiPage.scope_id == workspace_id)
@@ -1345,14 +1564,16 @@ def register_tools(mcp: FastMCP):
             return "Error: invalid draft ID format."
 
         async with async_session_factory() as session:
-            draft = (await session.execute(
-                select(WikiPageDraft)
-                .where(WikiPageDraft.id == did)
-                .options(
-                    selectinload(WikiPageDraft.page),
-                    selectinload(WikiPageDraft.author),
+            draft = (
+                await session.execute(
+                    select(WikiPageDraft)
+                    .where(WikiPageDraft.id == did)
+                    .options(
+                        selectinload(WikiPageDraft.page),
+                        selectinload(WikiPageDraft.author),
+                    )
                 )
-            )).scalar_one_or_none()
+            ).scalar_one_or_none()
             if not draft:
                 return f"Draft `{draft_id}` not found."
 
@@ -1426,11 +1647,13 @@ def register_tools(mcp: FastMCP):
             return "Error: invalid draft ID format."
 
         async with async_session_factory() as session:
-            draft = (await session.execute(
-                select(WikiPageDraft)
-                .where(WikiPageDraft.id == did)
-                .options(selectinload(WikiPageDraft.page))
-            )).scalar_one_or_none()
+            draft = (
+                await session.execute(
+                    select(WikiPageDraft)
+                    .where(WikiPageDraft.id == did)
+                    .options(selectinload(WikiPageDraft.page))
+                )
+            ).scalar_one_or_none()
             if not draft:
                 return f"Draft `{draft_id}` not found."
             if draft.status != "pending":
@@ -1453,7 +1676,9 @@ def register_tools(mcp: FastMCP):
 
             try:
                 await contribution_service.approve_wiki_draft(
-                    session, draft, employee.id,
+                    session,
+                    draft,
+                    employee.id,
                     reviewer_note=reviewer_note,
                     edited_content_md=edited_content_md,
                     allow_conflict=allow_conflict,
@@ -1466,7 +1691,9 @@ def register_tools(mcp: FastMCP):
             approved_scope_type = page.scope_type or "global"
             approved_scope_id = page.scope_id
             await wiki_service.regenerate_index(
-                session, scope_type=approved_scope_type, scope_id=approved_scope_id,
+                session,
+                scope_type=approved_scope_type,
+                scope_id=approved_scope_id,
             )
             await wiki_service.append_log(
                 session,
@@ -1476,8 +1703,12 @@ def register_tools(mcp: FastMCP):
             )
             from cygnus.review import contributions as contribution_service
             from cygnus.review.contributions import wiki_draft_adapter
+
             await contribution_service.notify_approved(
-                session, wiki_draft_adapter, draft, employee,
+                session,
+                wiki_draft_adapter,
+                draft,
+                employee,
                 version_label=f"v{page.version}",
             )
             await session.commit()
@@ -1519,11 +1750,13 @@ def register_tools(mcp: FastMCP):
             return "Error: invalid draft ID format."
 
         async with async_session_factory() as session:
-            draft = (await session.execute(
-                select(WikiPageDraft)
-                .where(WikiPageDraft.id == did)
-                .options(selectinload(WikiPageDraft.page))
-            )).scalar_one_or_none()
+            draft = (
+                await session.execute(
+                    select(WikiPageDraft)
+                    .where(WikiPageDraft.id == did)
+                    .options(selectinload(WikiPageDraft.page))
+                )
+            ).scalar_one_or_none()
             if not draft:
                 return f"Draft `{draft_id}` not found."
             if draft.status != "pending":
@@ -1540,9 +1773,15 @@ def register_tools(mcp: FastMCP):
             if not await _can_review_page(session, employee, page):
                 return "Error: insufficient permission to reject drafts for this page."
 
-            await contribution_service.reject_wiki_draft(session, draft, employee.id, reviewer_note.strip())
+            await contribution_service.reject_wiki_draft(
+                session, draft, employee.id, reviewer_note.strip()
+            )
             await contribution_service.notify_rejected(
-                session, wiki_draft_adapter, draft, employee, reason=reviewer_note.strip(),
+                session,
+                wiki_draft_adapter,
+                draft,
+                employee,
+                reason=reviewer_note.strip(),
             )
             await session.commit()
 
@@ -1593,11 +1832,13 @@ def register_tools(mcp: FastMCP):
             return "Error: invalid draft ID format."
 
         async with async_session_factory() as session:
-            draft = (await session.execute(
-                select(WikiPageDraft)
-                .where(WikiPageDraft.id == did)
-                .options(selectinload(WikiPageDraft.page))
-            )).scalar_one_or_none()
+            draft = (
+                await session.execute(
+                    select(WikiPageDraft)
+                    .where(WikiPageDraft.id == did)
+                    .options(selectinload(WikiPageDraft.page))
+                )
+            ).scalar_one_or_none()
             if not draft:
                 return f"Draft `{draft_id}` not found."
 
@@ -1613,7 +1854,11 @@ def register_tools(mcp: FastMCP):
 
             try:
                 await contribution_service.request_changes(
-                    session, wiki_draft_adapter, draft, employee, reviewer_note.strip(),
+                    session,
+                    wiki_draft_adapter,
+                    draft,
+                    employee,
+                    reviewer_note.strip(),
                 )
             except InvalidTransition as e:
                 return f"Error: {e}"
@@ -1667,11 +1912,13 @@ def register_tools(mcp: FastMCP):
             return "Error: invalid draft ID format."
 
         async with async_session_factory() as session:
-            draft = (await session.execute(
-                select(WikiPageDraft)
-                .where(WikiPageDraft.id == did)
-                .options(selectinload(WikiPageDraft.page))
-            )).scalar_one_or_none()
+            draft = (
+                await session.execute(
+                    select(WikiPageDraft)
+                    .where(WikiPageDraft.id == did)
+                    .options(selectinload(WikiPageDraft.page))
+                )
+            ).scalar_one_or_none()
             if not draft:
                 return f"Draft `{draft_id}` not found."
 
@@ -1681,7 +1928,11 @@ def register_tools(mcp: FastMCP):
 
             try:
                 await contribution_service.resubmit_wiki_draft(
-                    session, draft, employee, content_md.strip(), author_note=note,
+                    session,
+                    draft,
+                    employee,
+                    content_md.strip(),
+                    author_note=note,
                 )
             except InvalidTransition as e:
                 return f"Error: {e}"
@@ -1726,11 +1977,13 @@ def register_tools(mcp: FastMCP):
             return "Error: invalid draft ID format."
 
         async with async_session_factory() as session:
-            draft = (await session.execute(
-                select(WikiPageDraft)
-                .where(WikiPageDraft.id == did)
-                .options(selectinload(WikiPageDraft.page))
-            )).scalar_one_or_none()
+            draft = (
+                await session.execute(
+                    select(WikiPageDraft)
+                    .where(WikiPageDraft.id == did)
+                    .options(selectinload(WikiPageDraft.page))
+                )
+            ).scalar_one_or_none()
             if not draft:
                 return f"Draft `{draft_id}` not found."
 
@@ -1740,7 +1993,10 @@ def register_tools(mcp: FastMCP):
 
             try:
                 await contribution_service.withdraw(
-                    session, wiki_draft_adapter, draft, employee,
+                    session,
+                    wiki_draft_adapter,
+                    draft,
+                    employee,
                 )
             except InvalidTransition as e:
                 return f"Error: {e}"
@@ -1828,6 +2084,7 @@ def register_tools(mcp: FastMCP):
                     has_any_permission,
                     workspace_role_can,
                 )
+
                 perms = _get_user_permissions(employee)
                 if scope_type == "project" and sid:
                     role = await get_workspace_role(session, employee, sid)
@@ -1835,7 +2092,8 @@ def register_tools(mcp: FastMCP):
                         return "Error: requires contributor role or above in this workspace."
                 elif scope_type == "department" and sid:
                     if "wiki:write:all" not in perms and not (
-                        "wiki:write:own_dept" in perms and sid in employee.department_ids
+                        "wiki:write:own_dept" in perms
+                        and sid in employee.department_ids
                     ):
                         return "Error: insufficient permission to propose pages in this department."
                 else:
@@ -1843,7 +2101,10 @@ def register_tools(mcp: FastMCP):
                         return "Error: insufficient permission to propose new pages."
 
             existing = await wiki_service.get_page_by_slug(
-                session, slug, scope_type=scope_type, scope_id=sid,
+                session,
+                slug,
+                scope_type=scope_type,
+                scope_id=sid,
             )
             if existing is not None:
                 return (
@@ -1852,7 +2113,9 @@ def register_tools(mcp: FastMCP):
                 )
 
             suggested_metadata = {
-                "slug": slug, "title": title, "page_type": page_type,
+                "slug": slug,
+                "title": title,
+                "page_type": page_type,
                 "knowledge_type_slugs": list(knowledge_type_slugs or []),
                 "scope_type": scope_type,
                 "scope_id": str(sid) if sid else None,
@@ -1869,7 +2132,10 @@ def register_tools(mcp: FastMCP):
                 suggested_metadata=suggested_metadata,
             )
             await contribution_service.notify_submitted(
-                session, wiki_draft_adapter, draft, employee,
+                session,
+                wiki_draft_adapter,
+                draft,
+                employee,
             )
             await session.commit()
 
@@ -1946,6 +2212,7 @@ def register_tools(mcp: FastMCP):
                     get_workspace_role,
                     workspace_role_can,
                 )
+
                 if scope_type == "project" and sid:
                     role = await get_workspace_role(session, employee, sid)
                     if not role or not workspace_role_can(role, "editor"):
@@ -1956,26 +2223,36 @@ def register_tools(mcp: FastMCP):
                         return "Error: requires wiki:write:all permission. Use propose_wiki_create() instead."
 
             existing = await wiki_service.get_page_by_slug(
-                session, slug, scope_type=scope_type, scope_id=sid,
+                session,
+                slug,
+                scope_type=scope_type,
+                scope_id=sid,
             )
             if existing is not None:
                 return f"Error: page '{slug}' already exists in {scope_type}."
 
             page = await wiki_service.apply_create(
                 session,
-                slug=slug, title=title, page_type=page_type,
-                content_md=content_md.strip(), summary="",
+                slug=slug,
+                title=title,
+                page_type=page_type,
+                content_md=content_md.strip(),
+                summary="",
                 knowledge_type_slugs=list(knowledge_type_slugs or []),
                 source_ids=[],
-                scope_type=scope_type, scope_id=sid,
+                scope_type=scope_type,
+                scope_id=sid,
             )
             await wiki_service.regenerate_index(
-                session, scope_type=scope_type, scope_id=sid,
+                session,
+                scope_type=scope_type,
+                scope_id=sid,
             )
             await wiki_service.append_log(
                 session,
                 f"Created page: {title} ({slug}) via MCP by {employee.name or employee.email}",
-                scope_type=scope_type, scope_id=sid,
+                scope_type=scope_type,
+                scope_id=sid,
             )
             await session.commit()
 

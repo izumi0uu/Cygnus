@@ -13,10 +13,12 @@ The intended relationship is:
 - **Support Brain for SaaS** is the support-domain product enhancement built on top of that substrate
 - **Cygnus** is the repository where that Arkon-enhanced support product is being defined
 
-Current engineering strategy (status as of 2026-07):
+Current engineering strategy (status as of 2026-08):
 - ✅ the Arkon full-port baseline, runability recovery (compose stack), and the post-P2 internalization / upstream-cutover lane are **complete** (Jira CYG-23, CYG-24, CYG-69–91; the stop-line is enforced by the guard-test suite and `scripts/upstream_cutover_gate.py`)
 - ✅ the first P3 support-verticalization story wave (CYG-6–17) is closed on typed rehearsal providers; the first durable governance write/publication ledger slice now lands real approved Wiki truth with append-only events, idempotent publications, and explicit pending propagation (CYG-98)
-- ▶ the current mainline continues the **Nanobot ↔ Cygnus governed session seam and provider convergence** (Jira CYG-92+): fixture-backed pressure/drift/recovery inputs must keep their rehearsal labels until their own durable providers land
+- ✅ the Nanobot ↔ Cygnus governed session seam (CYG-92–96) is implemented: request-scoped query handoff, four truthful R0 governed retrieval tools, structured governance fallback, and continuity revalidation all keep session memory outside the knowledge-truth boundary
+- ✅ the governed audit read surface now exposes durable, permission-scoped review / approval / publish / recovery transitions with stable trace refs and truthful empty observations (CYG-99)
+- ▶ the current mainline moves to notification/ownership durability and the remaining provider convergence (CYG-100, CYG-104); fixture-backed pressure/drift/recovery inputs keep their rehearsal labels until their own durable providers land
 - keep product-shell parity as a deferred non-roadmap lane by default
 - classify `auth / admin / wiki` shell candidates before any shell-parity implementation, and keep non-support pages isolated unless they directly unblock support verticalization
 
@@ -134,6 +136,7 @@ This package is intentionally focused on:
 - governance command framing (risk-ranked review, blast-radius publish, propagation + recovery)
 - human/AI shared source of truth
 - request-scoped governed reads whose explicit observation coverage prevents empty risk arrays from being interpreted as healthy truth
+- a governed Nanobot ↔ Cygnus session seam that revalidates substrate truth on every turn and never treats session memory as knowledge truth
 
 This package intentionally does **not** expand into:
 - GTM / pricing / sales collateral
@@ -149,6 +152,6 @@ Cygnus is no longer only a documentation package. It now combines:
 - Arkon internalization / upstream-cutover planning
 - early governance/control-plane prototype surfaces
 
-So downstream readers should not treat this repo as docs-only, and should not assume the visual/product-story pack is the current engineering entry point. The migration mainline (baseline import -> runability recovery -> internalization / upstream cutover) is complete and the first support-verticalization wave is closed; the current engineering mainline is the Nanobot ↔ Cygnus governed session seam (CYG-92–96), sitting on top of governed-plane substrate-truth convergence.
+So downstream readers should not treat this repo as docs-only, and should not assume the visual/product-story pack is the current engineering entry point. The migration mainline and first support-verticalization wave are complete; the governed session seam (CYG-92–96) now sits on request-scoped substrate truth, and the governance audit lane (CYG-99) now reads durable ledger truth inside Wiki permission scope. The next delivery lane is notification/ownership durability plus the remaining provider convergence.
 
-The governed plane currently exposes sparse, request-scoped truth: source errors are observable facts, while ticket pressure, release/incident drift, audience conflict, review assignment, and source-impact inference remain explicitly partial or unavailable rather than fixture-backed claims.
+The governed plane currently exposes sparse, request-scoped truth: governance ledger transitions and source errors are observable facts, while ticket pressure, release/incident drift, audience conflict, review assignment, and source-impact inference remain explicitly partial or unavailable rather than fixture-backed claims.

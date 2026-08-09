@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Iterable
+from typing import Any
 
-from cygnus.domain import AudienceContext, LifecycleState, Visibility
+from cygnus.domain import AudienceContext, Visibility
 from cygnus.domain.objects import (
     AnswerCard,
     EscalationRoute,
@@ -11,333 +11,178 @@ from cygnus.domain.objects import (
     PolicyRule,
     TroubleshootingFlow,
 )
-from cygnus.evidence.records import SupportEvidence
-from cygnus.recovery import (
-    DownstreamRealityCheckQuery,
-    GovernanceOverviewQuery,
-    RecoveryWindowQuery,
-    get_downstream_reality_check_surface,
-    get_governance_overview_surface,
-    get_recovery_window_surface,
-)
 from cygnus.retrieval import (
     EvidenceIndex,
     KnowledgeObjectIndex,
     SubstrateKnowledgeSnapshot,
-    load_substrate_snapshot,
     slugify,
 )
-from cygnus.review.drift import get_drift_governance_surface
-from cygnus.review.fixtures import sample_review_bundles
+from cygnus.retrieval.contracts import KnowledgeObjectHit, SourceTrace
 from cygnus.substrate.agent_protocol import ToolDefinition
 from cygnus.substrate.tool_runtime import ToolRegistry
 
-if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
 
-_UNCONFIGURED_MESSAGE = (
-    "governed knowledge is not configured; call configure_governed_knowledge(...) "
-    "or configure_governed_knowledge_from_substrate(session) first"
-)
+class GovernedKnowledgeTools:
+    """Request-scoped implementation of Cygnus' governed retrieval tools."""
 
-_object_index_state: KnowledgeObjectIndex | None = None
-_evidence_index_state: EvidenceIndex | None = None
+    __slots__ = ("_evidence_index", "_object_index")
 
+    def __init__(self, snapshot: SubstrateKnowledgeSnapshot) -> None:
+        self._object_index = KnowledgeObjectIndex(snapshot.objects, snapshot.evidence)
+        self._evidence_index = EvidenceIndex(snapshot.evidence)
 
-def configure_governed_knowledge(
-    *,
-    objects: Iterable[KnowledgeObject],
-    evidence: Iterable[SupportEvidence],
-) -> None:
-    """Install the governed object/evidence truth used by the tool surface.
+    def search_hits(
+        self,
+        *,
+        query: str,
+        audience_context: AudienceContext | None = None,
+        object_types: list[str] | None = None,
+        limit: int = 10,
+        include_unpublished: bool = False,
+    ) -> tuple[KnowledgeObjectHit, ...]:
+        return self._object_index.search(
+            query=query,
+            audience_context=audience_context,
+            object_types=object_types,
+            limit=limit,
+            include_unpublished=include_unpublished,
+        )
 
-    Runtime wiring must install substrate-backed truth (see
-    ``configure_governed_knowledge_from_substrate``); tests may inject
-    fixtures explicitly. There is no implicit sample fallback.
-    """
-    global _object_index_state, _evidence_index_state
-    evidence_tuple = tuple(evidence)
-    _object_index_state = KnowledgeObjectIndex(tuple(objects), evidence_tuple)
-    _evidence_index_state = EvidenceIndex(evidence_tuple)
+    def read_object(self, id_or_slug: str) -> KnowledgeObject | None:
+        return self._object_index.read(id_or_slug)
 
+    def read_trace(self, object_id: str) -> SourceTrace | None:
+        return self._object_index.trace_resolver.get_trace(object_id)
 
-async def configure_governed_knowledge_from_substrate(
-    session: "AsyncSession",
-) -> SubstrateKnowledgeSnapshot:
-    """Load substrate truth and install it as the governed tool-surface truth."""
-    snapshot = await load_substrate_snapshot(session)
-    configure_governed_knowledge(objects=snapshot.objects, evidence=snapshot.evidence)
-    return snapshot
-
-
-def reset_governed_knowledge() -> None:
-    """Clear the installed governed truth (test isolation / rewiring)."""
-    global _object_index_state, _evidence_index_state
-    _object_index_state = None
-    _evidence_index_state = None
-
-
-def _knowledge_object_index() -> KnowledgeObjectIndex:
-    if _object_index_state is None:
-        raise RuntimeError(_UNCONFIGURED_MESSAGE)
-    return _object_index_state
-
-
-def _evidence_index() -> EvidenceIndex:
-    if _evidence_index_state is None:
-        raise RuntimeError(_UNCONFIGURED_MESSAGE)
-    return _evidence_index_state
-
-
-def search_knowledge_objects(
-    *,
-    query: str,
-    audience_context: dict[str, Any] | None = None,
-    object_types: list[str] | None = None,
-    limit: int = 10,
-    include_unpublished: bool = False,
-) -> dict[str, Any]:
-    runtime_context = _audience_context_from_payload(audience_context)
-    results = _knowledge_object_index().search(
-        query=query,
-        audience_context=runtime_context,
-        object_types=object_types,
-        limit=limit,
-        include_unpublished=include_unpublished,
-    )
-    return {
-        "status": "success",
-        "summary": f"{len(results)} matching knowledge objects found",
-        "data": {
-            "query": query,
-            "audience_context": audience_context or {},
-            "object_types": object_types or [],
-            "limit": limit,
-            "include_unpublished": include_unpublished,
-            "results": [item.to_dict() for item in results],
-        },
-        "warnings": [],
-        "errors": [],
-    }
-
-
-def read_knowledge_object(
-    *,
-    id_or_slug: str,
-    include_variants: bool = True,
-    include_trace: bool = True,
-) -> dict[str, Any]:
-    object_ = _knowledge_object_index().read(id_or_slug)
-    if object_ is None:
+    def search_knowledge_objects(
+        self,
+        *,
+        query: str,
+        audience_context: dict[str, Any] | None = None,
+        object_types: list[str] | None = None,
+        limit: int = 10,
+        include_unpublished: bool = False,
+    ) -> dict[str, Any]:
+        runtime_context = audience_context_from_payload(audience_context)
+        results = self.search_hits(
+            query=query,
+            audience_context=runtime_context,
+            object_types=object_types,
+            limit=limit,
+            include_unpublished=include_unpublished,
+        )
         return {
-            "status": "not_found",
-            "summary": f"Knowledge object not found: {id_or_slug}",
-            "data": {"id_or_slug": id_or_slug},
+            "status": "success",
+            "summary": f"{len(results)} matching knowledge objects found",
+            "data": {
+                "query": query,
+                "audience_context": audience_context or {},
+                "object_types": object_types or [],
+                "limit": limit,
+                "include_unpublished": include_unpublished,
+                "results": [item.to_dict() for item in results],
+            },
             "warnings": [],
-            "errors": ["not_found"],
+            "errors": [],
         }
 
-    payload = object_.to_dict()
-    if not include_variants and "audience_variants" in payload:
-        payload.pop("audience_variants")
+    def read_knowledge_object(
+        self,
+        *,
+        id_or_slug: str,
+        include_variants: bool = True,
+        include_trace: bool = True,
+    ) -> dict[str, Any]:
+        object_ = self.read_object(id_or_slug)
+        if object_ is None:
+            return {
+                "status": "not_found",
+                "summary": f"Knowledge object not found: {id_or_slug}",
+                "data": {"id_or_slug": id_or_slug},
+                "warnings": [],
+                "errors": ["not_found"],
+            }
 
-    payload.update(
-        {
-            "slug": slugify(object_.title),
-            "version": 1,
-            "allowed_channels": list(_allowed_channels_for(object_)),
-        }
-    )
+        payload = object_.to_dict()
+        if not include_variants and "audience_variants" in payload:
+            payload.pop("audience_variants")
+        payload.update(
+            {
+                "slug": slugify(object_.title),
+                "version": 1,
+                "allowed_channels": list(allowed_channels_for(object_)),
+            }
+        )
 
-    if include_trace:
-        trace = _knowledge_object_index().trace_resolver.build_trace_for_object(object_)
-        payload["source_trace_summary"] = trace.summary()
+        trace_ref = None
+        if include_trace:
+            trace = self._object_index.trace_resolver.build_trace_for_object(object_)
+            payload["source_trace_summary"] = trace.summary()
+            trace_ref = f"trace:{object_.object_id}"
 
-    return {
-        "status": "success",
-        "summary": f"Knowledge object loaded: {object_.title}",
-        "data": payload,
-        "warnings": [],
-        "errors": [],
-    }
-
-
-def search_support_evidence(
-    *,
-    query: str,
-    filters: dict[str, Any] | None = None,
-    limit: int = 10,
-) -> dict[str, Any]:
-    results = _evidence_index().search(query=query, filters=filters, limit=limit)
-    return {
-        "status": "success",
-        "summary": f"{len(results)} matching evidence records found",
-        "data": {
-            "query": query,
-            "filters": filters or {},
-            "limit": limit,
-            "results": [item.to_dict() for item in results],
-        },
-        "warnings": [],
-        "errors": [],
-    }
-
-
-def get_source_trace(*, object_id: str) -> dict[str, Any]:
-    trace = _knowledge_object_index().trace_resolver.get_trace(object_id)
-    if trace is None:
         return {
-            "status": "not_found",
-            "summary": f"Source trace not found: {object_id}",
-            "data": {"object_id": object_id},
+            "status": "success",
+            "summary": f"Knowledge object loaded: {object_.title}",
+            "data": payload,
+            "trace_ref": trace_ref,
             "warnings": [],
-            "errors": ["trace_unavailable"],
+            "errors": [],
         }
 
-    warnings = list(trace.blind_spots)
-    return {
-        "status": "success",
-        "summary": f"Source trace loaded for {object_id}",
-        "data": trace.to_dict(),
-        "warnings": warnings,
-        "errors": [],
-    }
+    def search_support_evidence(
+        self,
+        *,
+        query: str,
+        filters: dict[str, Any] | None = None,
+        limit: int = 10,
+    ) -> dict[str, Any]:
+        results = self._evidence_index.search(query=query, filters=filters, limit=limit)
+        return {
+            "status": "success",
+            "summary": f"{len(results)} matching evidence records found",
+            "data": {
+                "query": query,
+                "filters": filters or {},
+                "limit": limit,
+                "results": [item.to_dict() for item in results],
+            },
+            "warnings": [],
+            "errors": [],
+        }
+
+    def get_source_trace(self, *, object_id: str) -> dict[str, Any]:
+        trace = self.read_trace(object_id)
+        if trace is None:
+            return {
+                "status": "not_found",
+                "summary": f"Source trace not found: {object_id}",
+                "data": {"object_id": object_id},
+                "warnings": [],
+                "errors": ["trace_unavailable"],
+            }
+
+        return {
+            "status": "success",
+            "summary": f"Source trace loaded for {object_id}",
+            "data": trace.to_dict(),
+            "trace_ref": f"trace:{object_id}",
+            "warnings": list(trace.blind_spots),
+            "errors": [],
+        }
 
 
-def propose_knowledge_object(
-    *,
-    object_type: str,
-    title: str,
-    summary: str,
-    evidence_ids: list[str],
-) -> dict[str, Any]:
-    return {
-        "status": "success",
-        "summary": f"Draft proposal created for {object_type}",
-        "data": {
-            "draft_id": f"draft:{title.strip().lower().replace(' ', '-')}",
-            "object_type": object_type,
-            "title": title,
-            "summary": summary,
-            "evidence_ids": evidence_ids,
-            "lifecycle_state": LifecycleState.DRAFT.value,
-        },
-        "warnings": [],
-        "errors": [],
-    }
-
-
-def request_review(*, draft_id: str) -> dict[str, Any]:
-    return {
-        "status": "success",
-        "summary": f"Review requested for {draft_id}",
-        "data": {
-            "draft_id": draft_id,
-            "review_status": "requested",
-        },
-        "warnings": [],
-        "errors": [],
-    }
-
-
-def validate_publish_policy(*, draft_id: str, target_channel: str) -> dict[str, Any]:
-    return {
-        "status": "success",
-        "summary": f"Publish policy validated for {draft_id}",
-        "data": {
-            "draft_id": draft_id,
-            "target_channel": target_channel,
-            "approval_required": target_channel != "internal_copilot",
-            "policy_status": "ready_for_review",
-        },
-        "warnings": [],
-        "errors": [],
-    }
-
-
-def publish_knowledge_object(*, draft_id: str, target_channel: str) -> dict[str, Any]:
-    return {
-        "status": "approval_required"
-        if target_channel != "internal_copilot"
-        else "success",
-        "summary": f"Publish request recorded for {draft_id}",
-        "data": {
-            "draft_id": draft_id,
-            "target_channel": target_channel,
-            "publish_state": "queued_for_approval"
-            if target_channel != "internal_copilot"
-            else "published_internal",
-        },
-        "warnings": [],
-        "errors": [],
-    }
-
-
-def list_drift_alerts(*, filters: dict[str, Any] | None = None) -> dict[str, Any]:
-    surface = get_drift_governance_surface(bundles=sample_review_bundles())
-    payload = surface.to_dict()
-    return {
-        "status": "success",
-        "summary": "Drift alerts listed from Cygnus governance surface",
-        "data": {
-            "filters": filters or {},
-            "alert_count": len(payload["contexts"]),
-            "alerts": payload["contexts"],
-        },
-        "warnings": [],
-        "errors": [],
-    }
-
-
-def get_downstream_reality_check(*, command_id: str) -> dict[str, Any]:
-    surface = get_downstream_reality_check_surface(
-        DownstreamRealityCheckQuery(command_id=command_id)
-    )
-    payload = surface.to_dict()
-    return {
-        "status": "success",
-        "summary": f"Downstream reality check loaded for {command_id}",
-        "data": payload,
-        "warnings": [],
-        "errors": [],
-    }
-
-
-def get_recovery_window(*, command_id: str) -> dict[str, Any]:
-    surface = get_recovery_window_surface(RecoveryWindowQuery(command_id=command_id))
-    payload = surface.to_dict()
-    return {
-        "status": "success",
-        "summary": f"Recovery window loaded for {command_id}",
-        "data": payload,
-        "warnings": [],
-        "errors": [],
-    }
-
-
-def get_governance_overview(*, command_ids: list[str]) -> dict[str, Any]:
-    surface = get_governance_overview_surface(
-        GovernanceOverviewQuery(command_ids=tuple(command_ids))
-    )
-    payload = surface.to_dict()
-    payload["rehearsal"] = True
-    return {
-        "status": "success",
-        "summary": "Governance overview loaded",
-        "data": payload,
-        "warnings": [],
-        "errors": [],
-    }
-
-
-def build_default_tool_registry() -> ToolRegistry:
+def build_governed_tool_registry(snapshot: SubstrateKnowledgeSnapshot) -> ToolRegistry:
+    """Build the truthful R0 tool surface for one permission-filtered request."""
+    tools = GovernedKnowledgeTools(snapshot)
     registry = ToolRegistry()
-    for definition, handler in _tool_bindings():
+    for definition, handler in tool_bindings(tools):
         registry.register(definition, handler)
     return registry
 
 
-def _tool_bindings() -> tuple[tuple[ToolDefinition, Any], ...]:
+def tool_bindings(
+    tools: GovernedKnowledgeTools,
+) -> tuple[tuple[ToolDefinition, Any], ...]:
     return (
         (
             ToolDefinition(
@@ -356,52 +201,7 @@ def _tool_bindings() -> tuple[tuple[ToolDefinition, Any], ...]:
                 },
                 risk_level="R0",
             ),
-            search_knowledge_objects,
-        ),
-        (
-            ToolDefinition(
-                name="get_downstream_reality_check",
-                description="Return frontline recovery feedback for a specific governance command.",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "command_id": {"type": "string"},
-                    },
-                    "required": ["command_id"],
-                },
-                risk_level="R0",
-            ),
-            get_downstream_reality_check,
-        ),
-        (
-            ToolDefinition(
-                name="get_recovery_window",
-                description="Return before/after recovery proof for a specific governance command.",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "command_id": {"type": "string"},
-                    },
-                    "required": ["command_id"],
-                },
-                risk_level="R0",
-            ),
-            get_recovery_window,
-        ),
-        (
-            ToolDefinition(
-                name="get_governance_overview",
-                description="Compare multiple open loops and choose the next highest-leverage command.",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "command_ids": {"type": "array", "items": {"type": "string"}},
-                    },
-                    "required": ["command_ids"],
-                },
-                risk_level="R0",
-            ),
-            get_governance_overview,
+            tools.search_knowledge_objects,
         ),
         (
             ToolDefinition(
@@ -418,12 +218,12 @@ def _tool_bindings() -> tuple[tuple[ToolDefinition, Any], ...]:
                 },
                 risk_level="R0",
             ),
-            read_knowledge_object,
+            tools.read_knowledge_object,
         ),
         (
             ToolDefinition(
                 name="search_support_evidence",
-                description="Search support evidence without collapsing to object-level truth.",
+                description="Search support evidence without collapsing it to object truth.",
                 parameters={
                     "type": "object",
                     "properties": {
@@ -435,7 +235,7 @@ def _tool_bindings() -> tuple[tuple[ToolDefinition, Any], ...]:
                 },
                 risk_level="R0",
             ),
-            search_support_evidence,
+            tools.search_support_evidence,
         ),
         (
             ToolDefinition(
@@ -443,98 +243,17 @@ def _tool_bindings() -> tuple[tuple[ToolDefinition, Any], ...]:
                 description="Return the governed source trace for a Cygnus knowledge object.",
                 parameters={
                     "type": "object",
-                    "properties": {
-                        "object_id": {"type": "string"},
-                    },
+                    "properties": {"object_id": {"type": "string"}},
                     "required": ["object_id"],
                 },
                 risk_level="R0",
             ),
-            get_source_trace,
-        ),
-        (
-            ToolDefinition(
-                name="propose_knowledge_object",
-                description="Create a Cygnus draft proposal without publishing it.",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "object_type": {"type": "string"},
-                        "title": {"type": "string"},
-                        "summary": {"type": "string"},
-                        "evidence_ids": {"type": "array", "items": {"type": "string"}},
-                    },
-                    "required": ["object_type", "title", "summary", "evidence_ids"],
-                },
-                risk_level="R1",
-            ),
-            propose_knowledge_object,
-        ),
-        (
-            ToolDefinition(
-                name="request_review",
-                description="Move a draft into the Cygnus review path.",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "draft_id": {"type": "string"},
-                    },
-                    "required": ["draft_id"],
-                },
-                risk_level="R1",
-            ),
-            request_review,
-        ),
-        (
-            ToolDefinition(
-                name="validate_publish_policy",
-                description="Check Cygnus publish policy before commit.",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "draft_id": {"type": "string"},
-                        "target_channel": {"type": "string"},
-                    },
-                    "required": ["draft_id", "target_channel"],
-                },
-                risk_level="R2",
-            ),
-            validate_publish_policy,
-        ),
-        (
-            ToolDefinition(
-                name="publish_knowledge_object",
-                description="Request Cygnus publish execution through a governed boundary.",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "draft_id": {"type": "string"},
-                        "target_channel": {"type": "string"},
-                    },
-                    "required": ["draft_id", "target_channel"],
-                },
-                risk_level="R3",
-            ),
-            publish_knowledge_object,
-        ),
-        (
-            ToolDefinition(
-                name="list_drift_alerts",
-                description="Read governance drift alerts through the Cygnus domain surface.",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "filters": {"type": "object"},
-                    },
-                },
-                risk_level="R0",
-            ),
-            list_drift_alerts,
+            tools.get_source_trace,
         ),
     )
 
 
-def _audience_context_from_payload(
+def audience_context_from_payload(
     payload: dict[str, Any] | None,
 ) -> AudienceContext | None:
     if payload is None:
@@ -544,22 +263,18 @@ def _audience_context_from_payload(
     if visibility_value is None:
         return None
 
-    normalized = dict(payload)
-    if "plan_tier" in normalized and "plan" not in normalized:
-        normalized["plan"] = normalized.pop("plan_tier")
-
     return AudienceContext(
         visibility=Visibility(visibility_value),
-        brand=normalized.get("brand"),
-        product_line=normalized.get("product_line"),
-        plan=normalized.get("plan"),
-        region=normalized.get("region"),
-        language=normalized.get("language"),
-        product_version=normalized.get("product_version"),
+        brand=payload.get("brand"),
+        product_line=payload.get("product_line"),
+        plan=payload.get("plan", payload.get("plan_tier")),
+        region=payload.get("region"),
+        language=payload.get("language"),
+        product_version=payload.get("product_version"),
     )
 
 
-def _allowed_channels_for(object_: KnowledgeObject) -> tuple[str, ...]:
+def allowed_channels_for(object_: KnowledgeObject) -> tuple[str, ...]:
     if isinstance(object_, AnswerCard):
         return object_.publish_targets
     if isinstance(object_, PolicyRule):

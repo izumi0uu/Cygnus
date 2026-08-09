@@ -6,7 +6,7 @@ import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from itertools import combinations
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,8 +14,10 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from cygnus.domain.audience import AudienceFilter, Visibility
 from cygnus.governance.ledger import lock_governance_command
-from cygnus.publish.preview import PublishBinding, PublishConflict
 from cygnus.runtime.database.models import GovernanceAudienceBinding, WikiPage
+
+if TYPE_CHECKING:
+    from cygnus.publish.preview import PublishBinding, PublishConflict
 
 
 class AudienceBindingNotFound(LookupError):
@@ -269,6 +271,7 @@ def audience_filter_from_binding(record: GovernanceAudienceBinding) -> AudienceF
 
 
 def publish_binding_from_record(record: GovernanceAudienceBinding) -> PublishBinding:
+    from cygnus.publish.preview import PublishBinding
     return PublishBinding(
         audience_filter=audience_filter_from_binding(record),
         channel=record.channel,
@@ -335,6 +338,7 @@ def detect_audience_binding_conflicts(
 def publish_conflicts_from_records(
     bindings: Iterable[GovernanceAudienceBinding],
 ) -> tuple[PublishConflict, ...]:
+    from cygnus.publish.preview import PublishConflict
     by_key: dict[tuple[AudienceFilter, str], PublishConflict] = {}
     for conflict in detect_audience_binding_conflicts(bindings):
         for record in (conflict.left, conflict.right):

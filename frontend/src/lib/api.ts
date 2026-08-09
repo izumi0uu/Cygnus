@@ -18,6 +18,13 @@ export interface PriorityItem {
   urgency: string
   object_type: string
   object_ref: string
+  // Durable review-assignment provenance: the governance signal this risk is
+  // bound to, plus the owner-of-record trace/version read back from the
+  // durable provider. Commands must send assignment_version verbatim as
+  // expected_version.
+  signal_ref: string
+  assignment_trace_ref: string
+  assignment_version: number
   why_now_summary: string
   audience_labels: string[]
   affected_audiences: AffectedAudience[]
@@ -194,6 +201,34 @@ export interface SourceBlindnessContext {
   signal_loss_summary: string
 }
 
+// Durable source-impact truth. A source failure is an observed fact, not an
+// inference: `mapped` means at least one visible linked Wiki page exists;
+// `unmapped` means the provider ran but no governed Wiki impact is mapped in
+// the current read scope — never present unmapped as "no business impact".
+export type SourceImpactState = 'mapped' | 'unmapped'
+
+// Persisted audience binding affected by the failed source; `version` is the
+// binding's durable version read back from the provider.
+export interface SourceAudienceImpact {
+  binding_ref: string
+  object_ref: string
+  variant_ref: string
+  channel: string
+  audience: AffectedAudience
+  version: number
+}
+
+// Persisted propagation record for an object grounded in the failed source.
+export interface SourcePropagationImpact {
+  propagation_ref: string
+  publication_ref: string
+  object_ref: string
+  surface_id: string
+  status: string // synced | pending | failed | manual_action_required
+  channel_refs: string[]
+  version: number
+}
+
 export interface SourceFailureObservation {
   source_id: string
   title: string
@@ -202,8 +237,10 @@ export interface SourceFailureObservation {
   error_message: string
   linked_wiki_refs: string[]
   linked_object_refs: string[]
+  audience_impacts: SourceAudienceImpact[]
+  propagation_impacts: SourcePropagationImpact[]
   observed_at: string | null
-  impact_state: 'unknown'
+  impact_state: SourceImpactState
 }
 
 export interface SourceBlindnessSurface {
@@ -251,8 +288,8 @@ export interface GovernanceOverviewSurface {
   surface_id: string
   headline: string
   summary: string
-  persisted: boolean
-  rehearsal: boolean
+  persisted: true
+  rehearsal: false
   open_loops: GovernanceOpenLoop[]
   open_loop_ranks: GovernanceOpenLoopRank[]
   highest_leverage_command: string | null
@@ -314,6 +351,74 @@ export interface ReviewIntakeSurface {
 
 export async function fetchReviewIntake(): Promise<ReviewIntakeSurface> {
   return authApi<ReviewIntakeSurface>('/api/review-intake')
+}
+
+// ============================================================
+// Review assignment — durable owner commands on one governance
+// signal (POST /api/review-assignments/{signal_ref}/commands).
+// The assignment is the persisted owner of record for a review
+// signal; every command appends one event and bumps `version`.
+// Callers must send the version they read as expected_version
+// and re-read authoritative state after success — never claim
+// persistence before this endpoint answers persisted: true.
+// ============================================================
+
+export const REVIEW_ASSIGNMENT_REF_MAX_LENGTH = 220
+export const REVIEW_ASSIGNMENT_REASON_MAX_LENGTH = 2_000
+
+export type ReviewAssignmentAction = 'assign' | 'escalate' | 'release'
+
+export type ReviewAssignmentState = 'unassigned' | 'assigned' | 'escalated'
+
+export interface ReviewAssignmentCommandRequest {
+  command_id: string
+  action: ReviewAssignmentAction
+  owner_ref: string | null
+  reason: string
+  expected_version: number
+}
+
+export interface ReviewAssignment {
+  id: string
+  signal_ref: string
+  owner_ref: string | null
+  lifecycle_state: ReviewAssignmentState
+  escalation_reason: string | null
+  version: number
+  trace_ref: string
+  persisted: true
+  created_at: string
+  updated_at: string
+}
+
+export interface ReviewAssignmentEvent {
+  id: string
+  event_type: string
+  from_state: ReviewAssignmentState | null
+  to_state: ReviewAssignmentState
+  actor_id: string
+  owner_ref: string | null
+  reason: string
+  sequence: number
+  trace_ref: string
+  persisted: true
+  occurred_at: string
+}
+
+export interface ReviewAssignmentCommandResult {
+  assignment: ReviewAssignment
+  event: ReviewAssignmentEvent
+  replayed: boolean
+}
+
+export async function executeReviewAssignment(
+  signalRef: string,
+  command: ReviewAssignmentCommandRequest,
+): Promise<ReviewAssignmentCommandResult> {
+  return authApi<ReviewAssignmentCommandResult>(
+    `/api/review-assignments/${encodeURIComponent(signalRef)}/commands`,
+    { method: 'POST', body: command },
+  )
 }
 
 // ============================================================
@@ -425,6 +530,8 @@ export interface PublishPreviewSurface {
   selected_action: string | null
   action_echo: PublishActionEcho | null
   durable_command?: DurablePublishCommandEnvelope | null
+  persisted: true
+  rehearsal: false
 }
 
 export async function fetchPublishPreview(
@@ -766,4 +873,70 @@ export async function markAllNotificationsRead(): Promise<{
   persisted: true
 }> {
   return authApi('/api/notifications/read-all', { method: 'POST' })
+}
+
+// ============================================================
+// Governance audit — permission-scoped durable ledger read
+// (GET /api/governance/audit). Every item is one committed
+// governance transition inside the caller's Wiki read scope,
+// ordered newest first by its durable recorded timestamp. `persisted: true` / `rehearsal: false`
+// only prove the ledger event itself committed — never that a
+// downstream publication or propagation completed. `details`
+// is the backend-whitelisted payload subset; render it as
+// recorded, without local inference.
+// ============================================================
+
+export type GovernanceAuditPhase = 'review' | 'approval' | 'publish' | 'recovery'
+
+export interface GovernanceAuditActor {
+  actor_id: string
+  name: string | null
+}
+
+export interface GovernanceAuditResource {
+  page_id: string | null
+  slug: string | null
+  title: string | null
+  object_ref: string | null
+  scope_type: string
+  scope_id: string | null
+}
+
+export interface GovernanceAuditEvent {
+  event_id: string
+  trace_ref: string
+  draft_id: string
+  sequence: number
+  phase: GovernanceAuditPhase
+  event_type: string
+  from_state: string | null
+  to_state: string
+  actor: GovernanceAuditActor | null
+  resource: GovernanceAuditResource
+  reason: string | null
+  details: Record<string, unknown>
+  occurred_at: string
+  recorded_at: string
+  persisted: true
+  rehearsal: false
+}
+
+export interface GovernanceAuditPage {
+  items: GovernanceAuditEvent[]
+  total: number
+  page: number
+  page_size: number
+  observation: SurfaceObservation
+  persisted: true
+  rehearsal: false
+}
+
+export async function fetchGovernanceAudit(
+  phase?: GovernanceAuditPhase,
+  page = 1,
+  pageSize = 20,
+): Promise<GovernanceAuditPage> {
+  const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
+  if (phase) params.set('phase', phase)
+  return authApi<GovernanceAuditPage>(`/api/governance/audit?${params.toString()}`)
 }

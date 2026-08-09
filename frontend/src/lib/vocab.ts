@@ -23,6 +23,7 @@ const COMMAND: Record<string, Pair> = {
   open_review: { zh: '开始审阅', en: 'Open review' },
   restrict_publish: { zh: '限制发布', en: 'Restrict publish' },
   assign_owner: { zh: '指派责任人', en: 'Assign owner' },
+  release_owner: { zh: '解除责任', en: 'Release owner' },
   request_more_evidence: { zh: '补充证据', en: 'Request evidence' },
   refresh_sources: { zh: '刷新来源', en: 'Refresh sources' },
   mark_urgent: { zh: '标记紧急', en: 'Mark urgent' },
@@ -85,6 +86,12 @@ const LIFECYCLE: Record<string, Pair> = {
   published: { zh: '已发布', en: 'Published' },
   superseded: { zh: '已替代', en: 'Superseded' },
   archived: { zh: '已归档', en: 'Archived' },
+}
+
+const ASSIGNMENT_STATE: Record<string, Pair> = {
+  unassigned: { zh: '未分配', en: 'Unassigned' },
+  assigned: { zh: '已指派', en: 'Assigned' },
+  escalated: { zh: '已升级', en: 'Escalated' },
 }
 
 const FRESHNESS: Record<string, Pair> = {
@@ -203,6 +210,7 @@ export function useVocab() {
     surface: (k: string) => pick(SURFACE, k, zh),
     objectType: (k: string) => pick(OBJECT_TYPE, k, zh),
     lifecycle: (k: string) => pick(LIFECYCLE, k, zh),
+    assignmentState: (k: string) => pick(ASSIGNMENT_STATE, k, zh),
     freshness: (k: string) => pick(FRESHNESS, k, zh),
     evidenceSourceType: (k: string) => pick(EVIDENCE_SOURCE_TYPE, k, zh),
     visibility: (k: string) => pick(VISIBILITY, k, zh),

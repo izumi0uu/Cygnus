@@ -57,7 +57,7 @@ export default function NotificationBell({ cloudsVisible, onToggleClouds }: { cl
       <button
         onClick={() => setOpen((o) => !o)}
         aria-label={t('notif.title')}
-        className="relative flex h-[34px] w-[34px] items-center justify-center rounded-full border border-border bg-card text-muted-foreground hover:bg-muted"
+        className="relative flex h-[34px] w-[34px] items-center justify-center rounded-full border border-border bg-card text-muted-foreground hover:bg-muted max-md:h-11 max-md:w-11"
       >
         <Bell size={16} />
         {unread > 0 && (
@@ -68,7 +68,7 @@ export default function NotificationBell({ cloudsVisible, onToggleClouds }: { cl
       </button>
 
       {open && (
-        <div className="absolute right-0 top-[42px] z-[100] w-[360px] overflow-hidden rounded-xl border border-border bg-card shadow-soft">
+        <div className="absolute right-0 top-[42px] z-[100] w-[calc(100vw-20px)] max-w-[360px] overflow-hidden rounded-xl border border-border bg-card shadow-soft max-md:top-[48px]">
           <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
             <span className="text-[13px] font-bold">{t('notif.title')}</span>
             {unread > 0 && <span className="rounded-full bg-muted px-1.5 font-mono text-[10px] text-muted-foreground">{unread}</span>}

@@ -338,13 +338,11 @@ function TraceabilitySection({ objectId }: { objectId: string }) {
             </div>
           )}
 
-          {/* what-if projection from the last APPLY on this object.
-              persisted:false — the executor ran, but the fixture store did not
-              change, so this is a projection of what the action WOULD do, not a
-              claim that the trace changed. Tagged explicitly so it never reads
-              as durable post-publish state. */}
+          {/* The latest APPLY result for this object. Durable results come
+              from the persisted publication ledger; explicit rehearsal
+              results remain labelled as non-persisted projections. */}
           {trace.projection && (
-            <WhatIfProjection
+            <PublishExecutionResult
               actionKey={trace.projection.selected_action}
               opened={trace.projection.opened_bindings}
               removed={trace.projection.removed_bindings}
@@ -403,12 +401,10 @@ function Section({ label, children }: { label: string; children: React.ReactNode
   )
 }
 
-// Post-apply what-if projection. The apply ran (opened/removed/held bindings
-// are real executor output) but persisted:false — the fixture store did not
-// change. So this is labelled PROJECTION, never "published". When there is
-// nothing to project (no bindings moved), we still render the stamp so the
-// user sees the apply was a no-op on bindings, not silently swallowed.
-function WhatIfProjection({
+// Render either the latest durable publication result or an explicit rehearsal
+// projection. The server-owned persisted flag controls every label and verb;
+// the frontend never promotes a rehearsal result into published truth.
+function PublishExecutionResult({
   actionKey,
   opened,
   removed,

@@ -15,7 +15,7 @@ const SourcesEvidence = lazy(() => import('@/pages/SourcesEvidence'))
 const CoverageDrift = lazy(() => import('@/pages/CoverageDrift'))
 const Propagation = lazy(() => import('@/pages/Propagation'))
 const RecoveryDetail = lazy(() => import('@/pages/RecoveryDetail'))
-const Placeholder = lazy(() => import('@/pages/Placeholder'))
+const Audit = lazy(() => import('@/pages/Audit'))
 const PlotterDemo = lazy(() => import('@/pages/PlotterDemo'))
 const Mastermind = lazy(() => import('@/pages/Mastermind'))
 
@@ -38,7 +38,7 @@ export default function App() {
               <Route path="drift" element={<CoverageDrift />} />
               <Route path="propagation" element={<Propagation />} />
               <Route path="recovery/:commandId" element={<RecoveryDetail />} />
-              <Route path="audit" element={<Placeholder sectionKey="audit" />} />
+              <Route path="audit" element={<Audit />} />
             </Route>
           </Route>
         </Routes>

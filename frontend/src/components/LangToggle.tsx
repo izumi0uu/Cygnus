@@ -9,21 +9,34 @@ export default function LangToggle() {
     localStorage.setItem('cygnus-lang', next)
   }
   return (
-    <div className="lang-toggle-wrapper">
+    <label
+      className="lang-toggle-wrapper bp-toggle-hit"
+      role="switch"
+      tabIndex={0}
+      aria-checked={isEn}
+      aria-label={t(isEn ? 'lang.switchToZh' : 'lang.switchToEn')}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          toggle()
+        }
+      }}
+    >
       <input
         type="checkbox"
         id="lang-toggle"
         className="lang-tgl lang-tgl-skewed"
         checked={isEn}
         onChange={toggle}
-        aria-label={t(isEn ? 'lang.switchToZh' : 'lang.switchToEn')}
+        tabIndex={-1}
+        aria-hidden="true"
       />
-      <label
-        htmlFor="lang-toggle"
+      <span
         data-tg-on="EN"
         data-tg-off="中"
         className="lang-tgl-btn"
+        aria-hidden="true"
       />
-    </div>
+    </label>
   )
 }

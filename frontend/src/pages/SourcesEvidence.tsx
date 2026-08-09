@@ -87,7 +87,7 @@ export default function SourcesEvidence() {
           {data.observation.state === 'ready'
             ? t('src.empty')
             : failures.length > 0
-              ? t('observation.sourceImpactPending')
+              ? t('observation.sourceFactsOnly')
               : t('observation.sourceEmptyPartial')}
         </div>
       ) : ok > 0 ? (

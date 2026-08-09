@@ -199,6 +199,21 @@
   /* ============================================================
      Day/Night theme toggle — standalone dark track checkbox
      ============================================================ */
+  /* Full touch target around compact visual toggles. */
+  .bp-toggle-hit {
+    display: inline-flex;
+    min-width: 44px;
+    min-height: 44px;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    cursor: pointer;
+  }
+  .bp-toggle-hit:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: -2px;
+  }
+
   .theme-switch {
     font-size: 16px;
     cursor: pointer;
@@ -894,6 +909,141 @@
     color: var(--primary);
     opacity: 0.35;
     white-space: nowrap;
+  }
+
+  /* ============================================================
+     Narrow-viewport shell (< md / 768px) — overlay navigation
+     Desktop keeps the 220px directory + coordinate chrome.
+     Below md the directory becomes a drawer, the coordinate bar
+     compacts to section identity + global controls, and
+     desktop-only drawing metadata (readout, zoom, title block)
+     is hidden instead of squeezed.
+     ============================================================ */
+
+  /* Mobile-only affordances — never rendered on desktop */
+  .bp-nav-trigger,
+  .bp-nav-close,
+  .bp-nav-backdrop {
+    display: none;
+  }
+
+  @media (max-width: 767.98px) {
+    /* Drawing directory → fixed overlay drawer */
+    .bp-dir {
+      display: none;
+      position: fixed;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      z-index: 60;
+      width: min(300px, 84vw);
+      background: var(--background);
+      border-right: 1px solid color-mix(in srgb, var(--primary) 35%, transparent);
+    }
+    .bp-dir[data-open="true"] {
+      display: flex;
+    }
+
+    /* Roomier layer rows for touch */
+    .bp-dir-item {
+      min-height: 44px;
+      padding: 10px 16px;
+    }
+
+    /* Drawer header gains the close affordance */
+    .bp-dir-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .bp-nav-close {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 44px;
+      height: 44px;
+      flex-shrink: 0;
+      padding: 0;
+      background: transparent;
+      border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
+      border-radius: 0;
+      color: var(--faint);
+      cursor: pointer;
+      transition: all .15s;
+    }
+    .bp-nav-close:hover {
+      color: var(--primary);
+      border-color: var(--primary);
+      background: color-mix(in srgb, var(--primary) 8%, transparent);
+    }
+    .bp-nav-close:focus-visible {
+      outline: 2px solid var(--ring);
+      outline-offset: 2px;
+    }
+
+    /* Dimmed drawing behind the drawer */
+    .bp-nav-backdrop {
+      display: block;
+      position: fixed;
+      inset: 0;
+      z-index: 55;
+      background: color-mix(in srgb, var(--foreground) 28%, transparent);
+    }
+
+    /* Compacted coordinate bar — CAD toolbar slot + identity */
+    .bp-coord-bar {
+      gap: 4px;
+      padding: 0 4px 0 0;
+    }
+    .bp-nav-trigger {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      align-self: stretch;
+      width: 44px;
+      flex-shrink: 0;
+      padding: 0;
+      background: transparent;
+      border: none;
+      border-right: 1px solid color-mix(in srgb, var(--primary) 20%, transparent);
+      border-radius: 0;
+      color: var(--faint);
+      cursor: pointer;
+      transition: color .15s, background-color .15s, border-color .15s;
+    }
+    .bp-nav-trigger:hover {
+      color: var(--primary);
+      background: color-mix(in srgb, var(--primary) 8%, transparent);
+    }
+    .bp-nav-trigger[aria-expanded="true"] {
+      color: var(--primary);
+    }
+    .bp-nav-trigger:focus-visible {
+      outline: 2px solid var(--ring);
+      outline-offset: -2px;
+    }
+
+    /* Section label truncates instead of forcing overflow */
+    .bp-coord-sec {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* Desktop-only drawing metadata */
+    .bp-coord-readout,
+    .bp-coord-sep,
+    .bp-zoom-ctrl {
+      display: none;
+    }
+
+    /* Fixed title block would cover the small canvas; section
+       identity already lives in the coordinate bar */
+    .bp-titleblock {
+      display: none;
+    }
   }
 
   /* ============================================================

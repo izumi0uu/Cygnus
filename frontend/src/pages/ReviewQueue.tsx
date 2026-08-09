@@ -1,8 +1,14 @@
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { SlidersHorizontal, Plus, X } from 'lucide-react'
-import { fetchReviewIntake, type ReviewIntakeSurface, type ReviewIntakeBundle, type PriorityItem } from '@/lib/api'
+import {
+  fetchReviewIntake,
+  type ReviewIntakeSurface,
+  type ReviewIntakeBundle,
+  type PriorityItem,
+  type ReviewAssignmentCommandResult,
+} from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Segmented } from '@/components/Segmented'
 import { Stat } from '@/components/Stat'
@@ -28,10 +34,21 @@ export default function ReviewQueue() {
   const [filter, setFilter] = useState<Filter>('all')
   const [searchParams, setSearchParams] = useSearchParams()
 
-  const load = () => {
-    setLoading(true)
-    setError(null)
-    fetchReviewIntake().then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false))
+  const load = (background = false) => {
+    // Background re-reads (after a durable assignment command) must not flip
+    // the page into the skeleton or tear down the open drawer/modal; on
+    // failure the stale surface stays and the durable receipt still carries
+    // the authoritative server response.
+    if (!background) {
+      setLoading(true)
+      setError(null)
+    }
+    fetchReviewIntake()
+      .then(setData)
+      .catch((e) => {
+        if (!background) setError(String(e))
+      })
+      .finally(() => setLoading(false))
   }
   useEffect(() => {
     fetchReviewIntake().then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false))
@@ -46,15 +63,19 @@ export default function ReviewQueue() {
 
   const openRisk = (id: string) =>
     setSearchParams((p) => { const n = new URLSearchParams(p); n.set('risk', id); return n })
-  const closeRisk = () =>
-    setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('risk'); return n }, { replace: true })
+  // Stable identity: the drawer's focus trap re-runs (stealing focus back to
+  // the drawer) whenever this changes — including after background reloads.
+  const closeRisk = useCallback(
+    () => setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('risk'); return n }, { replace: true }),
+    [setSearchParams],
+  )
 
   if (loading) return <PageSkeleton />
   if (error)
     return (
       <div className="bp-panel p-4">
         <div className="font-mono text-sm" style={{ color: 'var(--urgent)' }}>⚠ {t('state.error')}</div>
-        <Button variant="ghost" className="mt-3" onClick={load}>{t('state.retry')}</Button>
+        <Button variant="ghost" className="mt-3" onClick={() => load()}>{t('state.retry')}</Button>
       </div>
     )
   if (!data) return null
@@ -138,6 +159,8 @@ export default function ReviewQueue() {
             <span>
               {it.owner_state === 'unassigned' ? (
                 <span className="bp-tol bp-tol-high">{t('owner.gap')}</span>
+              ) : it.owner_state === 'escalated' ? (
+                <span className="bp-tol bp-tol-urgent">{t('owner.escalatedFmt', { owner: it.queue_owner ?? '—' })}</span>
               ) : (
                 <span className="font-mono text-[11.5px] text-muted-foreground">@{it.queue_owner}</span>
               )}
@@ -154,16 +177,43 @@ export default function ReviewQueue() {
         )}
       </div>
 
-      {selected && <Drawer item={selected} bundle={bundlesByRef.get(selected.object_ref) ?? null} onClose={closeRisk} />}
+      {selected && (
+        <Drawer
+          key={selected.risk_id}
+          item={selected}
+          bundle={bundlesByRef.get(selected.object_ref) ?? null}
+          onClose={closeRisk}
+          onChanged={() => load(true)}
+        />
+      )}
     </>
   )
 }
 
-function Drawer({ item, bundle, onClose }: { item: PriorityItem; bundle: ReviewIntakeBundle | null; onClose: () => void }) {
+function Drawer({
+  item,
+  bundle,
+  onClose,
+  onChanged,
+}: {
+  item: PriorityItem
+  bundle: ReviewIntakeBundle | null
+  onClose: () => void
+  /** Re-read the queue after a durable assignment mutation (background). */
+  onChanged: () => void
+}) {
   const { t } = useTranslation()
   const v = useVocab()
   const ref = useRef<HTMLElement>(null)
   useFocusTrap(ref, true, onClose)
+  // The durable receipt of the last assignment command executed from this
+  // drawer — rendered as a drawing stamp until another risk is opened. It is
+  // populated only from a real server response, never optimistically.
+  const [receipt, setReceipt] = useState<ReviewAssignmentCommandResult | null>(null)
+  const handleExecuted = (result: ReviewAssignmentCommandResult) => {
+    setReceipt(result)
+    onChanged()
+  }
   return (
     <>
       <div className="fixed inset-0 z-40 bg-foreground/25" onClick={onClose} />
@@ -176,7 +226,7 @@ function Drawer({ item, bundle, onClose }: { item: PriorityItem; bundle: ReviewI
         tabIndex={-1}
         replayKey={item.risk_id}
         lapDuration={0.4}
-        className="fixed right-0 top-0 z-50 flex h-full w-full max-w-[440px] flex-col overflow-hidden border-l-0 p-5 outline-none"
+        className="fixed right-0 top-0 z-50 flex h-full w-full max-w-[440px] flex-col overflow-y-auto border-l-0 p-5 outline-none"
       >
         <div className="flex items-center gap-2">
           <span className={`bp-tol ${HEAT[item.urgency]}`}>{t(`urgency.${item.urgency}`)}</span>
@@ -203,7 +253,7 @@ function Drawer({ item, bundle, onClose }: { item: PriorityItem; bundle: ReviewI
                 <span className={`bp-tol ${bundle.evidence_sufficiency === 'sufficient' ? 'bp-tol-ok' : 'bp-tol-high'}`}>{bundle.evidence_sufficiency}</span>
               </div>
               <div className="flex items-center gap-2 text-[12.5px]">
-                <span className="font-mono text-[10px] uppercase text-faint">{t('detail.reviewOwner')}</span>
+                <span className="font-mono text-[10px] uppercase text-faint">{t('detail.suggestedReviewOwner')}</span>
                 <span className="font-mono text-[11.5px] text-muted-foreground">@{bundle.review_owner}</span>
               </div>
               {bundle.audience_notes.length > 0 && (
@@ -226,12 +276,76 @@ function Drawer({ item, bundle, onClose }: { item: PriorityItem; bundle: ReviewI
           <div className="flex flex-wrap gap-1.5">{item.affected_surfaces.map((s) => <span key={s} className="bp-tol bp-tol-flat">{v.surface(s)}</span>)}</div>
         </Section>
         <Section label={t('detail.owner')}>
-          {item.owner_state === 'unassigned'
-            ? <span className="bp-tol bp-tol-high">{t('detail.unassigned')}</span>
-            : <span className="bp-tol bp-tol-flat">@{item.queue_owner}</span>}
+          {item.owner_state === 'unassigned' ? (
+            <span className="bp-tol bp-tol-high">{t('detail.unassigned')}</span>
+          ) : item.owner_state === 'escalated' ? (
+            <span className="bp-tol bp-tol-urgent">{t('owner.escalatedFmt', { owner: item.queue_owner ?? '—' })}</span>
+          ) : (
+            <span className="bp-tol bp-tol-flat">@{item.queue_owner}</span>
+          )}
+          {item.assignment_trace_ref && (
+            <div className="mt-1.5 font-mono text-[10px] text-faint">
+              {item.assignment_trace_ref} · {t('assign.version')} {item.assignment_version}
+            </div>
+          )}
+          {receipt && (
+            <div
+              className="mt-3 border px-3 py-2.5"
+              style={{
+                borderColor: 'color-mix(in srgb, var(--ok) 40%, transparent)',
+                background: 'color-mix(in srgb, var(--ok) 6%, transparent)',
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <span className="bp-stamp" style={{ color: 'var(--ok)' }}>{t('assign.persisted')}</span>
+                {receipt.replayed && <span className="bp-tol bp-tol-flat">{t('assign.replayed')}</span>}
+              </div>
+              <dl className="mt-2 space-y-1 font-mono text-[10.5px] leading-relaxed text-muted-foreground">
+                <div className="flex justify-between gap-3">
+                  <dt className="text-faint">{t('assign.transition')}</dt>
+                  <dd>
+                    {receipt.event.from_state ? v.assignmentState(receipt.event.from_state) : '—'} →{' '}
+                    {v.assignmentState(receipt.event.to_state)}
+                  </dd>
+                </div>
+                {receipt.assignment.owner_ref && (
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-faint">{t('assign.owner')}</dt>
+                    <dd>@{receipt.assignment.owner_ref}</dd>
+                  </div>
+                )}
+                <div className="flex justify-between gap-3">
+                  <dt className="text-faint">{t('assign.version')}</dt>
+                  <dd>
+                    {receipt.assignment.version} · #{receipt.event.sequence}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <dt className="text-faint">{t('assign.trace')}</dt>
+                  <dd className="break-all text-right">{receipt.assignment.trace_ref}</dd>
+                </div>
+              </dl>
+            </div>
+          )}
         </Section>
         <Section label={t('detail.commands')}>
-          <div className="flex flex-wrap gap-2">{item.command_actions.map((c) => <CmdButton key={c} command={c} objectRef={item.object_ref} />)}</div>
+          <div className="flex flex-wrap gap-2">
+            {item.command_actions.map((c) => (
+              <CmdButton
+                key={c}
+                command={c}
+                objectRef={item.object_ref}
+                assignment={{
+                  signalRef: item.signal_ref,
+                  version: item.assignment_version,
+                  owner: item.queue_owner,
+                  state: item.owner_state,
+                  onExecuted: handleExecuted,
+                  onRefresh: onChanged,
+                }}
+              />
+            ))}
+          </div>
           <p className="mt-2 font-mono text-[10px] leading-relaxed text-faint">{t('detail.commandNote')}</p>
         </Section>
       </PlotterPanel>

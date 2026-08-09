@@ -1,7 +1,7 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Search, Plus, Minus, Maximize2 } from 'lucide-react'
+import { Search, Plus, Minus, Maximize2, Menu, X } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { useZoom } from '@/lib/zoom'
 import { useToast } from '@/lib/toast'
@@ -10,6 +10,7 @@ import LangToggle from '@/components/LangToggle'
 import NotificationBell from '@/components/NotificationBell'
 import { RevisionClouds } from '@/components/RevisionClouds'
 import CommandPalette from '@/components/CommandPalette'
+import { useFocusTrap } from '@/lib/useFocusTrap'
 
 type Group = 'gov' | 'obs'
 type NavItem = { to: string; key: string; code: string; group: Group; end?: boolean; badge?: string }
@@ -25,7 +26,7 @@ const NAV: NavItem[] = [
   { to: '/console/audit', key: 'audit', code: 'SEC-G', group: 'obs' },
 ]
 
-function DirGroup({ group }: { group: Group }) {
+function DirGroup({ group, onNavigate }: { group: Group; onNavigate?: () => void }) {
   const { t } = useTranslation()
   return (
     <div>
@@ -36,6 +37,7 @@ function DirGroup({ group }: { group: Group }) {
           to={item.to}
           end={item.end}
           className="bp-dir-item"
+          onClick={onNavigate}
         >
           {({ isActive }) => (
             <>
@@ -86,6 +88,35 @@ export default function AppShell() {
   const [isPanning, setIsPanning] = useState(false)
   const [mouseCoord, setMouseCoord] = useState({ x: 0, y: 0 })
   const [cloudsVisible, setCloudsVisible] = useState(true)
+
+  // Narrow-viewport navigation drawer (< md breakpoint)
+  const [navOpen, setNavOpen] = useState(false)
+  const navRef = useRef<HTMLElement>(null)
+  const navTriggerRef = useRef<HTMLButtonElement>(null)
+  const navCloseRef = useRef<HTMLButtonElement>(null)
+  const wasNavOpen = useRef(false)
+  const closeNav = useCallback(() => setNavOpen(false), [])
+  useFocusTrap(navRef, navOpen, closeNav)
+
+  // Move focus with the modal state. No animation frame is required: the
+  // drawer visibility change is immediate, including in background tabs.
+  useEffect(() => {
+    const wasOpen = wasNavOpen.current
+    wasNavOpen.current = navOpen
+    if (navOpen) navCloseRef.current?.focus()
+    else if (wasOpen) navTriggerRef.current?.focus()
+  }, [navOpen])
+
+  // A live viewport resize must not leave the desktop directory behaving as
+  // a modal focus trap.
+  useEffect(() => {
+    const desktop = window.matchMedia('(min-width: 768px)')
+    const onChange = (event: MediaQueryListEvent) => {
+      if (event.matches) setNavOpen(false)
+    }
+    desktop.addEventListener('change', onChange)
+    return () => desktop.removeEventListener('change', onChange)
+  }, [])
 
   // Reset view when navigating between sections
   useEffect(() => {
@@ -212,16 +243,40 @@ export default function AppShell() {
   const scaleLabel = `${zoom.toFixed(2)}:1`
 
   return (
-    <div className="grid h-screen grid-cols-[220px_1fr]">
-      {/* Drawing directory panel */}
-      <aside className="bp-dir">
+    <div className="grid h-dvh min-w-0 grid-cols-1 md:h-screen md:grid-cols-[220px_1fr]">
+      {/* Drawing directory panel — two-column sidebar on desktop,
+          overlay drawer below the md breakpoint */}
+      <aside
+        ref={navRef}
+        className="bp-dir"
+        id="bp-nav-drawer"
+        data-open={navOpen}
+        role={navOpen ? 'dialog' : undefined}
+        aria-modal={navOpen || undefined}
+        aria-label={navOpen ? t('nav.primary') : undefined}
+        tabIndex={-1}
+      >
         <div className="bp-dir-header">
-          <div className="bp-dir-dwg-id">DWG-SHEET · 1/1</div>
-          <div className="bp-dir-dwg-title">CYGNUS</div>
+          <div>
+            <div className="bp-dir-dwg-id">DWG-SHEET · 1/1</div>
+            <div className="bp-dir-dwg-title">CYGNUS</div>
+          </div>
+          <button
+            ref={navCloseRef}
+            type="button"
+            onClick={closeNav}
+            aria-label={t('nav.close')}
+            title={t('nav.close')}
+            className="bp-nav-close"
+          >
+            <X size={14} />
+          </button>
         </div>
         <div className="thin-scroll flex-1 overflow-y-auto pb-2">
-          <DirGroup group="gov" />
-          <DirGroup group="obs" />
+          <nav aria-label={t('nav.primary')}>
+            <DirGroup group="gov" onNavigate={closeNav} />
+            <DirGroup group="obs" onNavigate={closeNav} />
+          </nav>
         </div>
         <div className="bp-dir-footer">
           <div className="bp-dir-footer-info">
@@ -239,16 +294,38 @@ export default function AppShell() {
         </div>
       </aside>
 
+      {/* Drawer scrim — narrow viewports only (hidden at md+ via CSS) */}
+      {navOpen && (
+        <div
+          className="bp-nav-backdrop"
+          aria-hidden="true"
+          onClick={closeNav}
+        />
+      )}
+
       {/* Main drawing area */}
       <div className="flex min-w-0 flex-col">
         {/* Coordinate bar */}
         <div className="bp-coord-bar">
+          {/* Navigation trigger — narrow viewports only (hidden at md+ via CSS) */}
+          <button
+            ref={navTriggerRef}
+            type="button"
+            className="bp-nav-trigger"
+            onClick={() => setNavOpen((o) => !o)}
+            aria-expanded={navOpen}
+            aria-controls="bp-nav-drawer"
+            aria-label={t('nav.menu')}
+            title={t('nav.menu')}
+          >
+            <Menu size={16} />
+          </button>
           <span className="bp-coord-dwg">{active.code}</span>
           <span className="bp-coord-sep">/</span>
           <span className="bp-coord-sec">{t(`nav.${active.key}`)}</span>
 
-          {/* P3: Clickable coordinate readout — click to copy */}
-          <span className="bp-coord-sep">·</span>
+          {/* P3: Clickable coordinate readout — click to copy (desktop only) */}
+          <span className="bp-coord-sep bp-coord-opt">·</span>
           <button
             className="bp-coord-readout"
             onClick={copyCoord}
@@ -273,12 +350,13 @@ export default function AppShell() {
 
           <button
             onClick={() => setPaletteOpen(true)}
-            className="ml-auto flex items-center gap-2 border border-[color-mix(in_srgb,var(--primary)_25%,transparent)] bg-transparent px-3 py-1.5 font-mono text-[11px] text-faint transition-all hover:border-[color-mix(in_srgb,var(--primary)_50%,transparent)] hover:text-foreground"
+            className="ml-auto flex items-center gap-2 border border-[color-mix(in_srgb,var(--primary)_25%,transparent)] bg-transparent px-3 py-1.5 font-mono text-[11px] text-faint transition-all hover:border-[color-mix(in_srgb,var(--primary)_50%,transparent)] hover:text-foreground max-md:h-11 max-md:w-11 max-md:flex-shrink-0 max-md:justify-center max-md:px-0 max-md:py-0"
             style={{ borderRadius: 0 }}
+            aria-label={t('queue.search')}
           >
             <Search size={12} />
-            <span>{t('queue.search')}</span>
-            <kbd className="font-mono text-[9px] opacity-50">⌘K</kbd>
+            <span className="max-md:hidden">{t('queue.search')}</span>
+            <kbd className="font-mono text-[9px] opacity-50 max-md:hidden">⌘K</kbd>
           </button>
           <ThemeToggle />
           <LangToggle />

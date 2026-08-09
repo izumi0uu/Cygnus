@@ -107,4 +107,22 @@ me_json=$(curl -fsS "$BASE_URL/api/auth/me" \
 
 printf '%s' "$me_json" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["email"], data; assert data["role"] in {"admin","employee"}, data'
 
+echo "[docker-smoke] exercising durable governance golden path..."
+golden_exercise_json=$(docker compose exec -T api \
+  python -m cygnus.runtime.bootstrap.governance_smoke exercise \
+  --admin-email "$ADMIN_EMAIL" \
+  --admin-password "$ADMIN_PASSWORD")
+printf '%s\n' "$golden_exercise_json"
+
+echo "[docker-smoke] restarting API to prove durable recovery..."
+docker compose restart api >/dev/null
+wait_for_url "restarted api health" "$BASE_URL/health"
+wait_for_url "restarted api detailed health" "$BASE_URL/api/health"
+
+golden_verify_json=$(docker compose exec -T api \
+  python -m cygnus.runtime.bootstrap.governance_smoke verify \
+  --admin-email "$ADMIN_EMAIL" \
+  --admin-password "$ADMIN_PASSWORD")
+printf '%s\n' "$golden_verify_json"
+
 echo "[docker-smoke] smoke gate passed"

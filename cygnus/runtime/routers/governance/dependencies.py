@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from fastapi import Depends
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 from cygnus.governance.audience_bindings import (
     audience_filter_from_binding,
     load_audience_conflict_provider_data,
 )
+from cygnus.governance.review_assignments import load_review_assignments
 from cygnus.governance.signals import (
     governance_signal_to_pressure_record,
     list_governance_signals,
@@ -22,11 +24,13 @@ from cygnus.publish import (
 from cygnus.retrieval.substrate_provider import (
     SubstrateKnowledgeSnapshot,
     build_substrate_snapshot,
+    resolve_object_type,
 )
 from cygnus.review.intake import (
     PressureIntakeRecord,
     compile_pressure_proposal_bundles,
 )
+from cygnus.review.briefing import OwnerState
 from cygnus.review.service import ProposalBundle
 from cygnus.review.source_blindness import (
     SourceFailureObservation,
@@ -36,6 +40,8 @@ from cygnus.runtime.database import get_db
 from cygnus.runtime.database.models import (
     Employee,
     GovernanceAudienceBinding,
+    GovernancePropagation,
+    GovernancePublication,
     GovernanceSignal,
     KnowledgeType,
     Source,
@@ -58,9 +64,102 @@ class GovernanceReadSnapshot:
     review_bundles: tuple[ProposalBundle, ...] = field(default_factory=tuple)
     pressure_records: tuple[PressureIntakeRecord, ...] = field(default_factory=tuple)
     governance_signals: tuple[GovernanceSignal, ...] = field(default_factory=tuple)
+    review_assignment_count: int = 0
     uncompiled_signal_count: int = 0
     uncompiled_signal_types: tuple[str, ...] = field(default_factory=tuple)
     audience_conflict_count: int = 0
+
+
+async def _load_source_failure_impacts(
+    db: AsyncSession,
+    *,
+    error_sources: tuple[Source, ...],
+    linked_pages: tuple[WikiPage, ...],
+    wiki_scope: ColumnElement[bool] | None,
+) -> tuple[SourceFailureObservation, ...]:
+    if not linked_pages:
+        return build_source_failure_observations(error_sources, ())
+
+    linked_page_ids = tuple(page.id for page in linked_pages)
+    binding_statement = (
+        select(GovernanceAudienceBinding)
+        .join(WikiPage, WikiPage.id == GovernanceAudienceBinding.page_id)
+        .where(
+            GovernanceAudienceBinding.page_id.in_(linked_page_ids),
+            GovernanceAudienceBinding.lifecycle_state == "active",
+        )
+    )
+    if wiki_scope is not None:
+        binding_statement = binding_statement.where(wiki_scope)
+    binding_statement = binding_statement.order_by(
+        GovernanceAudienceBinding.page_id,
+        GovernanceAudienceBinding.object_ref,
+        GovernanceAudienceBinding.channel,
+        GovernanceAudienceBinding.binding_key,
+    )
+    audience_bindings = tuple(
+        (await db.execute(binding_statement)).scalars().all()
+    )
+
+    governed_page_ids = tuple(
+        page.id
+        for page in linked_pages
+        if resolve_object_type(page.knowledge_type_slugs) is not None
+    )
+    latest_publications: tuple[GovernancePublication, ...] = ()
+    propagations: tuple[GovernancePropagation, ...] = ()
+    if governed_page_ids:
+        ranked_publications = (
+            select(
+                GovernancePublication.id.label("publication_id"),
+                func.row_number()
+                .over(
+                    partition_by=GovernancePublication.page_id,
+                    order_by=(
+                        GovernancePublication.published_at.desc(),
+                        GovernancePublication.id.desc(),
+                    ),
+                )
+                .label("position"),
+            )
+            .where(GovernancePublication.page_id.in_(governed_page_ids))
+            .subquery()
+        )
+        latest_publication_statement = (
+            select(GovernancePublication)
+            .join(
+                ranked_publications,
+                ranked_publications.c.publication_id == GovernancePublication.id,
+            )
+            .where(ranked_publications.c.position == 1)
+            .order_by(GovernancePublication.page_id)
+        )
+        latest_publications = tuple(
+            (await db.execute(latest_publication_statement)).scalars().all()
+        )
+        if latest_publications:
+            publication_ids = tuple(
+                publication.id for publication in latest_publications
+            )
+            propagation_statement = (
+                select(GovernancePropagation)
+                .where(GovernancePropagation.publication_id.in_(publication_ids))
+                .order_by(
+                    GovernancePropagation.publication_id,
+                    GovernancePropagation.surface_id,
+                )
+            )
+            propagations = tuple(
+                (await db.execute(propagation_statement)).scalars().all()
+            )
+
+    return build_source_failure_observations(
+        error_sources,
+        linked_pages,
+        audience_bindings=audience_bindings,
+        publications=latest_publications,
+        propagations=propagations,
+    )
 
 
 async def load_governance_knowledge_snapshot(
@@ -151,6 +250,20 @@ async def get_governance_read_snapshot(
         db,
         current_user=current_user,
     )
+    assignment_by_signal_id = await load_review_assignments(
+        db,
+        tuple(signal.id for signal in governance_signals),
+    )
+    missing_assignment_refs = tuple(
+        signal.signal_ref
+        for signal in governance_signals
+        if signal.id not in assignment_by_signal_id
+    )
+    if missing_assignment_refs:
+        raise RuntimeError(
+            "durable review assignments are missing for governance signals: "
+            + ", ".join(missing_assignment_refs)
+        )
     binding_refs = tuple(
         signal.audience_binding_ref
         for signal in governance_signals
@@ -173,6 +286,7 @@ async def get_governance_read_snapshot(
 
     pressure_record_list: list[PressureIntakeRecord] = []
     compiled_signals: list[GovernanceSignal] = []
+    review_bundle_list: list[ProposalBundle] = []
     for signal in governance_signals:
         audience_override = None
         if signal.audience_filter is None:
@@ -184,15 +298,30 @@ async def get_governance_read_snapshot(
             ):
                 continue
             audience_override = audience_filter_from_binding(binding)
+        assignment = assignment_by_signal_id[signal.id]
+        base_pressure_record = governance_signal_to_pressure_record(
+            signal,
+            audience_filter=audience_override,
+        )
+        compiled_bundle = compile_pressure_proposal_bundles((base_pressure_record,))[0]
         pressure_record_list.append(
-            governance_signal_to_pressure_record(
-                signal,
-                audience_filter=audience_override,
+            replace(base_pressure_record, queue_owner=assignment.owner_ref)
+        )
+        review_bundle_list.append(
+            replace(
+                compiled_bundle,
+                signal=replace(
+                    compiled_bundle.signal,
+                    queue_owner=assignment.owner_ref,
+                ),
+                owner_state=OwnerState(assignment.lifecycle_state),
+                assignment_trace_ref=f"review-assignment:{assignment.id}",
+                assignment_version=assignment.version,
             )
         )
         compiled_signals.append(signal)
     pressure_records = tuple(pressure_record_list)
-    review_bundles = compile_pressure_proposal_bundles(pressure_records)
+    review_bundles = tuple(review_bundle_list)
     compiled_signal_ids = {signal.id for signal in compiled_signals}
     uncompiled_signal_types = tuple(
         dict.fromkeys(
@@ -206,15 +335,20 @@ async def get_governance_read_snapshot(
         page_scope_clause=wiki_scope,
     )
 
+    source_observations = await _load_source_failure_impacts(
+        db,
+        error_sources=error_sources,
+        linked_pages=linked_pages,
+        wiki_scope=wiki_scope,
+    )
     return GovernanceReadSnapshot(
         knowledge=knowledge,
-        source_observations=build_source_failure_observations(
-            error_sources, linked_pages
-        ),
+        source_observations=source_observations,
         visible_source_count=visible_source_count,
         review_bundles=review_bundles,
         pressure_records=pressure_records,
         governance_signals=governance_signals,
+        review_assignment_count=len(assignment_by_signal_id),
         uncompiled_signal_count=len(governance_signals) - len(compiled_signals),
         uncompiled_signal_types=uncompiled_signal_types,
         audience_conflict_count=len(audience_conflicts.conflicts),

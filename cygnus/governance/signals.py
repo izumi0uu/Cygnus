@@ -13,6 +13,7 @@ from cygnus.domain.audience import AudienceFilter, Visibility
 from cygnus.domain.objects import KnowledgeObjectType
 from cygnus.evidence.records import EvidenceSourceType, FreshnessState
 from cygnus.governance.ledger import lock_governance_command
+from cygnus.governance.review_assignments import initialize_review_assignment
 from cygnus.review.intake import (
     PressureIntakeRecord,
     PressureSignalType,
@@ -68,7 +69,6 @@ class GovernanceSignalInput:
     audience_binding_ref: str | None = None
     trigger_signals: tuple[str, ...] = field(default_factory=tuple)
     evidence_source_type: EvidenceSourceType | None = None
-    queue_owner: str | None = None
     observed_at: datetime | None = None
 
     def __post_init__(self) -> None:
@@ -83,13 +83,12 @@ class GovernanceSignalInput:
             if not raw_value.strip():
                 raise ValueError(f"{label} must not be blank")
         if self.audience_filter is None and self.audience_binding_ref is None:
-            raise ValueError(
-                "audience_filter or audience_binding_ref must be provided"
-            )
-        if self.audience_binding_ref is not None and not self.audience_binding_ref.strip():
+            raise ValueError("audience_filter or audience_binding_ref must be provided")
+        if (
+            self.audience_binding_ref is not None
+            and not self.audience_binding_ref.strip()
+        ):
             raise ValueError("audience_binding_ref must not be blank when provided")
-        if self.queue_owner is not None and not self.queue_owner.strip():
-            raise ValueError("queue_owner must not be blank when provided")
         if (
             self.audience_filter is None
             and self.audience_binding_ref is not None
@@ -168,11 +167,6 @@ async def create_governance_signal(
         summary=signal_input.summary.strip(),
         reason=signal_input.reason.strip(),
         evidence_excerpt=signal_input.evidence_excerpt.strip(),
-        queue_owner=(
-            signal_input.queue_owner.strip()
-            if signal_input.queue_owner is not None
-            else None
-        ),
         status=GovernanceSignalStatus.ACTIVE.value,
         created_by_id=created_by_id,
     )
@@ -180,6 +174,11 @@ async def create_governance_signal(
         signal.observed_at = signal_input.observed_at
     session.add(signal)
     await session.flush()
+    await initialize_review_assignment(
+        session,
+        signal,
+        actor_id=created_by_id,
+    )
     return signal
 
 
@@ -290,6 +289,8 @@ def compile_review_signal_bundles(
 def governance_signal_to_pressure_record(
     signal: GovernanceSignal,
     audience_filter: AudienceFilter | None = None,
+    *,
+    queue_owner: str | None = None,
 ) -> PressureIntakeRecord:
     resolved_audience = audience_filter
     if resolved_audience is None and signal.audience_filter is not None:
@@ -316,7 +317,7 @@ def governance_signal_to_pressure_record(
         affected_surfaces=tuple(signal.affected_surfaces),
         trigger_signals=tuple(signal.trigger_signals),
         freshness_state=FreshnessState(signal.freshness),
-        queue_owner=signal.queue_owner,
+        queue_owner=queue_owner,
         reason=signal.reason,
         evidence_excerpt=signal.evidence_excerpt,
         proposal_id=signal.object_ref,
@@ -345,7 +346,6 @@ def governance_signal_to_dict(signal: GovernanceSignal) -> dict[str, object]:
         "summary": signal.summary,
         "reason": signal.reason,
         "evidence_excerpt": signal.evidence_excerpt,
-        "queue_owner": signal.queue_owner,
         "status": signal.status,
         "observed_at": signal.observed_at.isoformat(),
         "resolved_at": (
@@ -419,12 +419,6 @@ def _matches_input(
         and signal.summary == signal_input.summary.strip()
         and signal.reason == signal_input.reason.strip()
         and signal.evidence_excerpt == signal_input.evidence_excerpt.strip()
-        and signal.queue_owner
-        == (
-            signal_input.queue_owner.strip()
-            if signal_input.queue_owner is not None
-            else None
-        )
     )
     return identity_matches and (
         signal_input.observed_at is None

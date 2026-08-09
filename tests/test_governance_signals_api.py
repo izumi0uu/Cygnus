@@ -47,7 +47,6 @@ def _signal() -> GovernanceSignal:
         summary="Repeated tickets show a governed knowledge gap.",
         reason="The recurring intent crossed the review threshold.",
         evidence_excerpt="Agents reconstruct the same sequence.",
-        queue_owner="support-ops",
         status="active",
         observed_at=_NOW,
         resolved_at=None,
@@ -74,7 +73,6 @@ _CREATE_PAYLOAD = {
     "summary": "Repeated tickets show a governed knowledge gap.",
     "reason": "The recurring intent crossed the review threshold.",
     "evidence_excerpt": "Agents reconstruct the same sequence.",
-    "queue_owner": "support-ops",
 }
 
 
@@ -181,9 +179,7 @@ class GovernanceSignalsApiTests(unittest.TestCase):
             "resolve_governance_signal",
             AsyncMock(return_value=None),
         ):
-            missing = self.client.post(
-                "/api/governance-signals/missing/resolve"
-            )
+            missing = self.client.post("/api/governance-signals/missing/resolve")
         self.assertEqual(missing.status_code, 404)
 
         signal = _signal()

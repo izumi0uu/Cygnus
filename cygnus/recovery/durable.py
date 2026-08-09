@@ -8,6 +8,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cygnus.governance.review_assignments import load_review_assignments
 from cygnus.publish.durable import list_publication_propagations
 from cygnus.recovery.overview import GovernanceOverviewSurface
 from cygnus.recovery.providers import (
@@ -54,6 +55,7 @@ class _DurableRecoveryContext:
     publish_event: GovernanceLedgerEvent | None
     propagations: tuple[GovernancePropagation, ...]
     signals: tuple[GovernanceSignal, ...]
+    owner_ref_by_signal_id: dict[object, str | None]
 
 
 _METRIC_DEFINITIONS = (
@@ -114,7 +116,13 @@ async def get_durable_downstream_reality_check(
         for signal in context.signals
         if signal.status in {"active", "resolved"}
         and signal.observed_at > context.publication.published_at
-        for item in (_feedback_signal(signal, command_ref=command_ref),)
+        for item in (
+            _feedback_signal(
+                signal,
+                command_ref=command_ref,
+                owner_ref=context.owner_ref_by_signal_id.get(signal.id),
+            ),
+        )
         if item is not None
     )
     if not feedback:
@@ -232,13 +240,8 @@ async def get_durable_governance_overview(
     return build_governance_overview(
         command_refs=(window.command_ref for window in windows),
         recovery_windows=windows,
-        residual_risks=(
-            risk
-            for window in windows
-            for risk in window.residual_risks
-        ),
+        residual_risks=(risk for window in windows for risk in window.residual_risks),
     )
-
 
 
 async def _load_context_by_command(
@@ -308,6 +311,10 @@ async def _load_context_for_publication(
         .scalars()
         .all()
     )
+    assignments = await load_review_assignments(
+        session,
+        tuple(signal.id for signal in signals),
+    )
     return _DurableRecoveryContext(
         publication=publication,
         page=page,
@@ -315,6 +322,10 @@ async def _load_context_for_publication(
         publish_event=publish_event,
         propagations=propagations,
         signals=signals,
+        owner_ref_by_signal_id={
+            signal_id: assignment.owner_ref
+            for signal_id, assignment in assignments.items()
+        },
     )
 
 
@@ -340,6 +351,7 @@ def _build_recovery_window(
             command_id=context.publication.command_id,
             signals=after_signals,
             propagations=context.propagations,
+            owner_ref_by_signal_id=context.owner_ref_by_signal_id,
         ),
     )
 
@@ -406,7 +418,10 @@ def _metric_keys(signal: GovernanceSignal) -> tuple[str, ...]:
     keys: list[str] = []
     if signal.signal_type == "human_rewrite" or triggers & _REWRITE_TRIGGERS:
         keys.append("rewrite_count")
-    if signal.signal_type in {"release_delta", "incident_delta"} or triggers & _DRIFT_TRIGGERS:
+    if (
+        signal.signal_type in {"release_delta", "incident_delta"}
+        or triggers & _DRIFT_TRIGGERS
+    ):
         keys.append("drift_count")
     if signal.signal_type == "ticket_cluster" or triggers & _ESCALATION_TRIGGERS:
         keys.append("escalation_count")
@@ -513,6 +528,7 @@ def _residual_risks(
     command_id: str,
     signals: tuple[GovernanceSignal, ...],
     propagations: tuple[GovernancePropagation, ...],
+    owner_ref_by_signal_id: dict[object, str | None],
 ) -> tuple[ResidualRisk, ...]:
     signal_risks = tuple(
         ResidualRisk(
@@ -524,7 +540,7 @@ def _residual_risks(
             summary=signal.summary,
             acceptable_residual=False,
             recommended_command=_signal_follow_up(signal),
-            owner=signal.queue_owner,
+            owner=owner_ref_by_signal_id.get(signal.id),
             blocking_surface=(
                 signal.affected_surfaces[0] if signal.affected_surfaces else None
             ),
@@ -571,6 +587,7 @@ def _feedback_signal(
     signal: GovernanceSignal,
     *,
     command_ref: GovernanceCommandRef,
+    owner_ref: str | None,
 ) -> DownstreamFeedbackSignal | None:
     signal_type = _feedback_type(signal)
     if signal_type is None or not signal.affected_surfaces:
@@ -585,7 +602,7 @@ def _feedback_signal(
         summary=signal.summary,
         changed_behavior=signal.reason,
         event_at=_isoformat(signal.observed_at),
-        queue_owner=signal.queue_owner,
+        queue_owner=owner_ref,
         source_refs=_signal_evidence_refs(signal),
         follow_up_actions=(_feedback_follow_up(signal_type),),
     )
@@ -649,10 +666,10 @@ def _signal_follow_up(signal: GovernanceSignal) -> str:
 
 
 def _signal_severity(signal: GovernanceSignal) -> str:
-    if (
-        signal.signal_type in {"source_failure", "incident_delta"}
-        or "publish_conflict_count" in _metric_keys(signal)
-    ):
+    if signal.signal_type in {
+        "source_failure",
+        "incident_delta",
+    } or "publish_conflict_count" in _metric_keys(signal):
         return "critical"
     return "elevated"
 

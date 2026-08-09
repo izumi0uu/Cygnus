@@ -66,15 +66,12 @@ class GovernanceSignalCreateRequest(BaseModel):
     summary: str
     reason: str
     evidence_excerpt: str
-    queue_owner: str | None = None
     observed_at: datetime | None = None
 
     @model_validator(mode="after")
     def require_audience(self) -> GovernanceSignalCreateRequest:
         if self.audience_filter is None and self.audience_binding_ref is None:
-            raise ValueError(
-                "audience_filter or audience_binding_ref must be provided"
-            )
+            raise ValueError("audience_filter or audience_binding_ref must be provided")
         if (
             self.audience_filter is None
             and self.audience_binding_ref is not None
@@ -107,7 +104,6 @@ class GovernanceSignalCreateRequest(BaseModel):
             summary=self.summary,
             reason=self.reason,
             evidence_excerpt=self.evidence_excerpt,
-            queue_owner=self.queue_owner,
             observed_at=self.observed_at,
         )
 
@@ -172,7 +168,9 @@ async def resolve_signal(
     try:
         signal = await resolve_governance_signal(db, signal_ref)
     except GovernanceSignalConflict as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
     if signal is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

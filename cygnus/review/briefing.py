@@ -24,7 +24,6 @@ class OwnerState(str, Enum):
     ESCALATED = "escalated"
 
 
-
 def _normalize(values: Iterable[str] | None, *, label: str) -> tuple[str, ...]:
     if values is None:
         return ()
@@ -47,9 +46,19 @@ class WhyNowFrame:
     def __post_init__(self) -> None:
         if not self.summary.strip():
             raise ValueError("summary must not be blank")
-        object.__setattr__(self, "trigger_signals", _normalize(self.trigger_signals, label="trigger signal"))
-        object.__setattr__(self, "evidence_ids", _normalize(self.evidence_ids, label="evidence id"))
-        object.__setattr__(self, "affected_surfaces", _normalize(self.affected_surfaces, label="affected surface"))
+        object.__setattr__(
+            self,
+            "trigger_signals",
+            _normalize(self.trigger_signals, label="trigger signal"),
+        )
+        object.__setattr__(
+            self, "evidence_ids", _normalize(self.evidence_ids, label="evidence id")
+        )
+        object.__setattr__(
+            self,
+            "affected_surfaces",
+            _normalize(self.affected_surfaces, label="affected surface"),
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -63,6 +72,7 @@ class WhyNowFrame:
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ReviewRiskItem:
     risk_id: str
+    signal_ref: str
     title: str
     risk_type: ReviewRiskType
     object_type: KnowledgeObjectType
@@ -73,34 +83,58 @@ class ReviewRiskItem:
     why_now: WhyNowFrame
     recommended_actions: tuple[str, ...] = field(default_factory=tuple)
     queue_owner: str | None = None
+    assignment_trace_ref: str | None = None
+    assignment_version: int | None = None
 
     def __post_init__(self) -> None:
         if not self.risk_id.strip():
             raise ValueError("risk_id must not be blank")
+        if not self.signal_ref.strip():
+            raise ValueError("signal_ref must not be blank")
         if not self.title.strip():
             raise ValueError("title must not be blank")
         if not self.object_ref.strip():
             raise ValueError("object_ref must not be blank")
         if self.queue_owner is not None and not self.queue_owner.strip():
             raise ValueError("queue_owner must not be blank when provided")
+        if (self.assignment_trace_ref is None) != (self.assignment_version is None):
+            raise ValueError("assignment trace and version must be provided together")
+        if (
+            self.assignment_trace_ref is not None
+            and not self.assignment_trace_ref.strip()
+        ):
+            raise ValueError("assignment_trace_ref must not be blank when provided")
+        if self.assignment_version is not None and self.assignment_version < 1:
+            raise ValueError("assignment_version must be at least 1")
         object.__setattr__(self, "affected_audiences", tuple(self.affected_audiences))
-        object.__setattr__(self, "recommended_actions", _normalize(self.recommended_actions, label="recommended action"))
+        object.__setattr__(
+            self,
+            "recommended_actions",
+            _normalize(self.recommended_actions, label="recommended action"),
+        )
         if not self.affected_audiences:
-            raise ValueError("review risk item must include at least one affected audience")
+            raise ValueError(
+                "review risk item must include at least one affected audience"
+            )
 
     def to_dict(self) -> dict[str, object]:
         return {
             "risk_id": self.risk_id,
+            "signal_ref": self.signal_ref,
             "title": self.title,
             "risk_type": self.risk_type.value,
             "object_type": self.object_type.value,
             "object_ref": self.object_ref,
-            "affected_audiences": [audience.to_dict() for audience in self.affected_audiences],
+            "affected_audiences": [
+                audience.to_dict() for audience in self.affected_audiences
+            ],
             "owner_state": self.owner_state.value,
             "urgency": self.urgency.value,
             "why_now": self.why_now.to_dict(),
             "recommended_actions": list(self.recommended_actions),
             "queue_owner": self.queue_owner,
+            "assignment_trace_ref": self.assignment_trace_ref,
+            "assignment_version": self.assignment_version,
         }
 
 
@@ -129,21 +163,24 @@ class ReviewCommandBrief:
         }
 
 
-
 def risk_item_from_proposal(
     proposal: CompilationProposal,
     *,
     risk_id: str,
+    signal_ref: str,
     risk_type: ReviewRiskType,
     affected_audiences: tuple[AudienceFilter, ...],
     owner_state: OwnerState,
     affected_surfaces: tuple[str, ...],
     trigger_signals: tuple[str, ...],
     queue_owner: str | None = None,
+    assignment_trace_ref: str | None = None,
+    assignment_version: int | None = None,
     recommended_actions: tuple[str, ...] = ("open_review", "assign_owner"),
 ) -> ReviewRiskItem:
     return ReviewRiskItem(
         risk_id=risk_id,
+        signal_ref=signal_ref,
         title=proposal.title,
         risk_type=risk_type,
         object_type=proposal.object_type,
@@ -158,5 +195,11 @@ def risk_item_from_proposal(
             affected_surfaces=affected_surfaces,
         ),
         recommended_actions=recommended_actions,
-        queue_owner=queue_owner or proposal.review_owner,
+        queue_owner=(
+            None
+            if owner_state is OwnerState.UNASSIGNED
+            else queue_owner or proposal.review_owner
+        ),
+        assignment_trace_ref=assignment_trace_ref,
+        assignment_version=assignment_version,
     )

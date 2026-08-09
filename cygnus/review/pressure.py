@@ -11,7 +11,11 @@ from cygnus.review.fixtures import sample_review_bundles
 from cygnus.review.providers import build_review_command_surface_from_bundles
 from cygnus.review.queue import ReviewQueueSurface, build_review_queue_surface
 from cygnus.review.service import ProposalBundle, derive_owner_state
-from cygnus.substrate.compilation_plan import CompilationProposal, EvidenceSufficiency, UrgencyLevel
+from cygnus.substrate.compilation_plan import (
+    CompilationProposal,
+    EvidenceSufficiency,
+    UrgencyLevel,
+)
 
 
 def _normalize(values: Iterable[str] | None, *, label: str) -> tuple[str, ...]:
@@ -60,10 +64,26 @@ class ReviewPressureLine:
             raise ValueError("visibility_consequence must not be blank")
         if not self.impact_summary.strip():
             raise ValueError("impact_summary must not be blank")
-        object.__setattr__(self, "trigger_signals", _normalize(self.trigger_signals, label="trigger signal"))
-        object.__setattr__(self, "affected_audience_labels", _normalize(self.affected_audience_labels, label="affected audience label"))
-        object.__setattr__(self, "affected_surfaces", _normalize(self.affected_surfaces, label="affected surface"))
-        object.__setattr__(self, "command_actions", _normalize(self.command_actions, label="command action"))
+        object.__setattr__(
+            self,
+            "trigger_signals",
+            _normalize(self.trigger_signals, label="trigger signal"),
+        )
+        object.__setattr__(
+            self,
+            "affected_audience_labels",
+            _normalize(self.affected_audience_labels, label="affected audience label"),
+        )
+        object.__setattr__(
+            self,
+            "affected_surfaces",
+            _normalize(self.affected_surfaces, label="affected surface"),
+        )
+        object.__setattr__(
+            self,
+            "command_actions",
+            _normalize(self.command_actions, label="command action"),
+        )
         if not self.command_actions:
             raise ValueError("command_actions must not be empty")
 
@@ -94,7 +114,9 @@ class ReviewPressureSurface:
     pressure_lines: tuple[ReviewPressureLine, ...]
     available_commands: tuple[str, ...] = field(default_factory=tuple)
     proposal_lane: tuple[str, ...] = field(default_factory=tuple)
-    bundles: tuple[ProposalBundle, ...] = field(default_factory=tuple, repr=False, compare=False)
+    bundles: tuple[ProposalBundle, ...] = field(
+        default_factory=tuple, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         if not self.surface_id.strip():
@@ -104,8 +126,16 @@ class ReviewPressureSurface:
         if not self.summary.strip():
             raise ValueError("summary must not be blank")
         object.__setattr__(self, "pressure_lines", tuple(self.pressure_lines))
-        object.__setattr__(self, "available_commands", _normalize(self.available_commands, label="available command"))
-        object.__setattr__(self, "proposal_lane", _normalize(self.proposal_lane, label="proposal lane ref"))
+        object.__setattr__(
+            self,
+            "available_commands",
+            _normalize(self.available_commands, label="available command"),
+        )
+        object.__setattr__(
+            self,
+            "proposal_lane",
+            _normalize(self.proposal_lane, label="proposal lane ref"),
+        )
         object.__setattr__(self, "bundles", tuple(self.bundles))
         if not self.pressure_lines:
             raise ValueError("pressure_lines must not be empty")
@@ -129,16 +159,30 @@ class PressureCommand:
     reason: str
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "target_refs", _normalize(self.target_refs, label="target ref"))
+        object.__setattr__(
+            self, "target_refs", _normalize(self.target_refs, label="target ref")
+        )
         if self.new_owner is not None and not self.new_owner.strip():
             raise ValueError("new_owner must not be blank when provided")
         if not self.reason.strip():
             raise ValueError("reason must not be blank")
-        if self.command_type is PressureCommandType.ROUTE_TO_REVIEW and not self.target_refs:
+        if (
+            self.command_type is PressureCommandType.ROUTE_TO_REVIEW
+            and not self.target_refs
+        ):
             raise ValueError("route_to_review command requires at least one target ref")
-        if self.command_type in (PressureCommandType.ASSIGN_OWNER, PressureCommandType.MARK_URGENT) and len(self.target_refs) != 1:
-            raise ValueError(f"{self.command_type.value} command requires exactly one target ref")
-        if self.command_type is PressureCommandType.ASSIGN_OWNER and self.new_owner is None:
+        if (
+            self.command_type
+            in (PressureCommandType.ASSIGN_OWNER, PressureCommandType.MARK_URGENT)
+            and len(self.target_refs) != 1
+        ):
+            raise ValueError(
+                f"{self.command_type.value} command requires exactly one target ref"
+            )
+        if (
+            self.command_type is PressureCommandType.ASSIGN_OWNER
+            and self.new_owner is None
+        ):
             raise ValueError("assign_owner command requires new_owner")
 
 
@@ -152,13 +196,19 @@ class PressureMutationResult:
     command_log: tuple[str, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "touched_refs", _normalize(self.touched_refs, label="touched ref"))
-        object.__setattr__(self, "command_log", _normalize(self.command_log, label="command log"))
+        object.__setattr__(
+            self, "touched_refs", _normalize(self.touched_refs, label="touched ref")
+        )
+        object.__setattr__(
+            self, "command_log", _normalize(self.command_log, label="command log")
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {
             "pressure_surface": self.pressure_surface.to_dict(),
-            "routed_queue": self.routed_queue.to_dict() if self.routed_queue is not None else None,
+            "routed_queue": self.routed_queue.to_dict()
+            if self.routed_queue is not None
+            else None,
             "touched_refs": list(self.touched_refs),
             "owner_echo": list(self.owner_echo),
             "urgency_echo": list(self.urgency_echo),
@@ -177,16 +227,22 @@ def get_review_pressure_surface(
 def build_review_pressure_surface(
     bundles: Iterable[ProposalBundle],
 ) -> ReviewPressureSurface:
-    pressure_bundles = tuple(bundle for bundle in bundles if _is_frontline_pressure(bundle))
+    pressure_bundles = tuple(
+        bundle for bundle in bundles if _is_frontline_pressure(bundle)
+    )
     if not pressure_bundles:
-        raise ValueError("review pressure surface requires at least one frontline pressure bundle")
+        raise ValueError(
+            "review pressure surface requires at least one frontline pressure bundle"
+        )
     lines = tuple(_line_from_bundle(bundle) for bundle in pressure_bundles)
     return ReviewPressureSurface(
         surface_id="review-pressure",
         headline="Frontline friction rising into review pressure",
         summary=_build_surface_summary(lines),
         pressure_lines=lines,
-        available_commands=_dedupe(command for line in lines for command in line.command_actions),
+        available_commands=_dedupe(
+            command for line in lines for command in line.command_actions
+        ),
         proposal_lane=tuple(line.proposal_ref for line in lines),
         bundles=pressure_bundles,
     )
@@ -204,9 +260,16 @@ def apply_pressure_commands(
     for command in commands:
         if command.command_type is PressureCommandType.ASSIGN_OWNER:
             target_ref = command.target_refs[0]
-            current_bundles = _assign_owner(current_bundles, proposal_ref=target_ref, new_owner=command.new_owner or "", reason=command.reason)
+            current_bundles = _assign_owner(
+                current_bundles,
+                proposal_ref=target_ref,
+                new_owner=command.new_owner or "",
+                reason=command.reason,
+            )
             touched_refs.append(target_ref)
-            command_log.append(f"assign_owner:{target_ref}:{command.new_owner}:{command.reason}")
+            command_log.append(
+                f"assign_owner:{target_ref}:{command.new_owner}:{command.reason}"
+            )
         elif command.command_type is PressureCommandType.MARK_URGENT:
             target_ref = command.target_refs[0]
             current_bundles = _mark_urgent(current_bundles, proposal_ref=target_ref)
@@ -223,11 +286,15 @@ def apply_pressure_commands(
                 )
             )
             touched_refs.extend(command.target_refs)
-            command_log.append(f"route_to_review:{','.join(command.target_refs)}:{command.reason}")
+            command_log.append(
+                f"route_to_review:{','.join(command.target_refs)}:{command.reason}"
+            )
 
     next_surface = build_review_pressure_surface(current_bundles)
     touched_set = tuple(_dedupe(touched_refs))
-    touched_lines = tuple(line for line in next_surface.pressure_lines if line.proposal_ref in touched_set)
+    touched_lines = tuple(
+        line for line in next_surface.pressure_lines if line.proposal_ref in touched_set
+    )
     return PressureMutationResult(
         pressure_surface=next_surface,
         routed_queue=routed_queue,
@@ -263,9 +330,13 @@ def _is_frontline_pressure(bundle: ProposalBundle) -> bool:
 def _line_from_bundle(bundle: ProposalBundle) -> ReviewPressureLine:
     proposal = bundle.proposal
     signal = bundle.signal
-    owner_state = bundle.owner_state or derive_owner_state(proposal=proposal, signal=signal)
-    queue_owner = _queue_owner(proposal=proposal, queue_owner=signal.queue_owner, owner_state=owner_state)
-    audience_labels = tuple(_audience_label(audience) for audience in signal.affected_audiences)
+    owner_state = bundle.owner_state or derive_owner_state(signal=signal)
+    queue_owner = _queue_owner(
+        proposal=proposal, queue_owner=signal.queue_owner, owner_state=owner_state
+    )
+    audience_labels = tuple(
+        _audience_label(audience) for audience in signal.affected_audiences
+    )
     affected_surfaces = tuple(_dedupe(signal.affected_surfaces))
     return ReviewPressureLine(
         proposal_ref=proposal.proposal_id,
@@ -323,7 +394,9 @@ def _visibility_consequence(
     surfaces: tuple[str, ...],
     evidence_sufficiency: EvidenceSufficiency,
 ) -> str:
-    external_count = sum(1 for audience in audiences if audience.visibility.value == "external")
+    external_count = sum(
+        1 for audience in audiences if audience.visibility.value == "external"
+    )
     surface_phrase = ", ".join(surfaces)
     if external_count:
         return (
@@ -337,8 +410,12 @@ def _visibility_consequence(
 
 
 def _build_surface_summary(lines: tuple[ReviewPressureLine, ...]) -> str:
-    rewrite_driven = sum(1 for line in lines if "rewrite_cluster" in line.trigger_signals)
-    ticket_driven = sum(1 for line in lines if "ticket_pressure" in line.trigger_signals)
+    rewrite_driven = sum(
+        1 for line in lines if "rewrite_cluster" in line.trigger_signals
+    )
+    ticket_driven = sum(
+        1 for line in lines if "ticket_pressure" in line.trigger_signals
+    )
     return (
         f"{len(lines)} frontline pressure line(s) are ready to enter review; "
         f"{rewrite_driven} rewrite-driven and {ticket_driven} recurring-ticket-driven signal(s) "
@@ -373,7 +450,9 @@ def _assign_owner(
             )
         )
     if not found:
-        raise ValueError(f"proposal_ref={proposal_ref} is not present in review pressure")
+        raise ValueError(
+            f"proposal_ref={proposal_ref} is not present in review pressure"
+        )
     return tuple(updated)
 
 
@@ -396,7 +475,9 @@ def _mark_urgent(
             )
         )
     if not found:
-        raise ValueError(f"proposal_ref={proposal_ref} is not present in review pressure")
+        raise ValueError(
+            f"proposal_ref={proposal_ref} is not present in review pressure"
+        )
     return tuple(updated)
 
 

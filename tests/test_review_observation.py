@@ -9,9 +9,16 @@ from cygnus.review.drift import DriftGovernanceSurface, get_drift_governance_sur
 from cygnus.review.fixtures import sample_review_bundles
 from cygnus.review.home import get_review_home_surface
 from cygnus.review.intake import build_pressure_intake_surfaces
-from cygnus.runtime.database.models import Source, WikiPage
+from cygnus.runtime.database.models import (
+    GovernanceAudienceBinding,
+    GovernancePropagation,
+    GovernancePublication,
+    Source,
+    WikiPage,
+)
 from cygnus.review.source_blindness import (
     SourceFailureObservation,
+    SourceImpactState,
     build_source_blindness_surface,
     build_source_failure_observations,
 )
@@ -118,6 +125,7 @@ class SurfaceObservationTests(unittest.TestCase):
             source_ref="incident-feed",
             status="error",
             error_message="upstream timeout",
+            impact_state=SourceImpactState.UNMAPPED,
         )
 
         drift_builder = cast(Callable[..., DriftGovernanceSurface], get_drift_governance_surface)
@@ -155,7 +163,7 @@ class SurfaceObservationTests(unittest.TestCase):
             (source_failure,),
         )
 
-    def test_projector_excludes_non_error_sources_and_keeps_impact_unknown(self) -> None:
+    def test_projector_excludes_non_error_sources_and_marks_mapped_impact(self) -> None:
         error_source = cast(
             Source,
             cast(
@@ -191,6 +199,7 @@ class SurfaceObservationTests(unittest.TestCase):
             cast(
                 object,
                 SimpleNamespace(
+                    id="page-visible",
                     slug="billing-incident",
                     knowledge_type_slugs=("known_issue_page",),
                     source_ids=("source-error",),
@@ -202,6 +211,7 @@ class SurfaceObservationTests(unittest.TestCase):
             cast(
                 object,
                 SimpleNamespace(
+                    id="page-hidden",
                     slug="hidden-incident",
                     knowledge_type_slugs=("known_issue_page",),
                     source_ids=("source-ready",),
@@ -221,5 +231,171 @@ class SurfaceObservationTests(unittest.TestCase):
         self.assertEqual(observation.error_message, "source_error_detail_unavailable")
         self.assertEqual(observation.linked_wiki_refs, ("billing-incident",))
         self.assertEqual(observation.linked_object_refs, ("ko-billing-incident",))
-        self.assertEqual(observation.impact_state, "unknown")
+        self.assertEqual(observation.impact_state, SourceImpactState.MAPPED)
+
+    def test_projector_carries_durable_audience_and_page_scoped_propagation_truth(
+        self,
+    ) -> None:
+        source = cast(
+            Source,
+            cast(
+                object,
+                SimpleNamespace(
+                    id="source-error",
+                    status="error",
+                    title="Incident feed",
+                    file_name=None,
+                    url="https://status.example/feed",
+                    error_message="upstream timeout",
+                    updated_at=datetime(2026, 8, 9, tzinfo=timezone.utc),
+                ),
+            ),
+        )
+        page = cast(
+            WikiPage,
+            cast(
+                object,
+                SimpleNamespace(
+                    id="page-visible",
+                    slug="billing-incident",
+                    knowledge_type_slugs=("known_issue_page",),
+                    source_ids=("source-error",),
+                ),
+            ),
+        )
+        binding = cast(
+            GovernanceAudienceBinding,
+            cast(
+                object,
+                SimpleNamespace(
+                    page_id="page-visible",
+                    object_ref="ko-billing-incident",
+                    variant_ref="enterprise-eu",
+                    channel="external-help",
+                    visibility="external",
+                    brands=(),
+                    product_lines=("billing",),
+                    plans=("enterprise",),
+                    regions=("eu",),
+                    languages=("en",),
+                    product_versions=(),
+                    lifecycle_state="active",
+                    binding_key="binding-visible",
+                    version=4,
+                ),
+            ),
+        )
+        publication = cast(
+            GovernancePublication,
+            cast(
+                object,
+                SimpleNamespace(
+                    id="publication-visible",
+                    page_id="page-visible",
+                    object_ref="ko-billing-incident",
+                ),
+            ),
+        )
+        same_ref_other_page = cast(
+            GovernancePublication,
+            cast(
+                object,
+                SimpleNamespace(
+                    id="publication-hidden",
+                    page_id="page-hidden",
+                    object_ref="ko-billing-incident",
+                ),
+            ),
+        )
+        visible_propagation = cast(
+            GovernancePropagation,
+            cast(
+                object,
+                SimpleNamespace(
+                    id="propagation-visible",
+                    publication_id="publication-visible",
+                    surface_id="external-help",
+                    status="failed",
+                    channel_refs=("external-help",),
+                    version=2,
+                ),
+            ),
+        )
+        hidden_propagation = cast(
+            GovernancePropagation,
+            cast(
+                object,
+                SimpleNamespace(
+                    id="propagation-hidden",
+                    publication_id="publication-hidden",
+                    surface_id="internal-copilot",
+                    status="synced",
+                    channel_refs=("internal-copilot",),
+                    version=1,
+                ),
+            ),
+        )
+
+        observation = build_source_failure_observations(
+            (source,),
+            (page,),
+            audience_bindings=(binding,),
+            publications=(publication, same_ref_other_page),
+            propagations=(visible_propagation, hidden_propagation),
+        )[0]
+        payload = observation.to_dict()
+
+        self.assertEqual(payload["impact_state"], "mapped")
+        self.assertEqual(len(observation.audience_impacts), 1)
+        self.assertEqual(observation.audience_impacts[0].binding_ref, "binding-visible")
+        self.assertEqual(
+            observation.audience_impacts[0].audience.product_lines,
+            ("billing",),
+        )
+        self.assertEqual(len(observation.propagation_impacts), 1)
+        self.assertEqual(
+            observation.propagation_impacts[0].propagation_ref,
+            "propagation-visible",
+        )
+        propagation_payloads = cast(
+            list[dict[str, object]], payload["propagation_impacts"]
+        )
+        self.assertEqual(propagation_payloads[0]["status"], "failed")
+
+    def test_unmapped_source_is_explicit_without_claiming_no_business_impact(
+        self,
+    ) -> None:
+        source = cast(
+            Source,
+            cast(
+                object,
+                SimpleNamespace(
+                    id="source-unmapped",
+                    status="error",
+                    title="Uncompiled feed",
+                    file_name=None,
+                    url=None,
+                    error_message="parse failure",
+                    updated_at=None,
+                ),
+            ),
+        )
+        observation = build_source_failure_observations((source,), ())[0]
+        surface = build_source_blindness_surface(
+            (),
+            observation=SurfaceObservation(
+                state=ObservationState.READY,
+                observed_count=1,
+                reason="source_impact_observed",
+                covered_signals=("source_status", "source_impact"),
+            ),
+            source_observations=(observation,),
+        )
+
+        self.assertEqual(observation.impact_state, SourceImpactState.UNMAPPED)
+        self.assertEqual(observation.linked_wiki_refs, ())
+        self.assertEqual(observation.audience_impacts, ())
+        self.assertEqual(observation.propagation_impacts, ())
+        self.assertIn("no governed Wiki impact mapped", surface.summary)
+        self.assertEqual(surface.available_commands, ())
 

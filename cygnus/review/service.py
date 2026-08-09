@@ -23,6 +23,7 @@ from cygnus.substrate.compilation_plan import (
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ReviewSignal:
     proposal_id: str
+    signal_ref: str
     risk_type: ReviewRiskType
     affected_audiences: tuple[AudienceFilter, ...]
     affected_surfaces: tuple[str, ...]
@@ -34,6 +35,8 @@ class ReviewSignal:
     def __post_init__(self) -> None:
         if not self.proposal_id.strip():
             raise ValueError("proposal_id must not be blank")
+        if not self.signal_ref.strip():
+            raise ValueError("signal_ref must not be blank")
         if not self.affected_audiences:
             raise ValueError("signal must include at least one affected audience")
         if not self.affected_surfaces:
@@ -43,9 +46,21 @@ class ReviewSignal:
         if self.title_override is not None and not self.title_override.strip():
             raise ValueError("title_override must not be blank when provided")
         object.__setattr__(self, "affected_audiences", tuple(self.affected_audiences))
-        object.__setattr__(self, "affected_surfaces", tuple(_normalize(self.affected_surfaces, label="affected surface")))
-        object.__setattr__(self, "trigger_signals", tuple(_normalize(self.trigger_signals, label="trigger signal")))
-        object.__setattr__(self, "recommended_actions", tuple(_normalize(self.recommended_actions, label="recommended action")))
+        object.__setattr__(
+            self,
+            "affected_surfaces",
+            tuple(_normalize(self.affected_surfaces, label="affected surface")),
+        )
+        object.__setattr__(
+            self,
+            "trigger_signals",
+            tuple(_normalize(self.trigger_signals, label="trigger signal")),
+        )
+        object.__setattr__(
+            self,
+            "recommended_actions",
+            tuple(_normalize(self.recommended_actions, label="recommended action")),
+        )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -54,9 +69,20 @@ class ProposalBundle:
     signal: ReviewSignal
     evidence: tuple[SupportEvidence, ...] = field(default_factory=tuple)
     owner_state: OwnerState | None = None
+    assignment_trace_ref: str | None = None
+    assignment_version: int | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "evidence", tuple(self.evidence))
+        if (self.assignment_trace_ref is None) != (self.assignment_version is None):
+            raise ValueError("assignment trace and version must be provided together")
+        if (
+            self.assignment_trace_ref is not None
+            and not self.assignment_trace_ref.strip()
+        ):
+            raise ValueError("assignment_trace_ref must not be blank when provided")
+        if self.assignment_version is not None and self.assignment_version < 1:
+            raise ValueError("assignment_version must be at least 1")
 
 
 RISK_PRIORITY = {
@@ -89,27 +115,44 @@ def assemble_review_command_brief(
     bundles: Iterable[ProposalBundle],
 ) -> dict[str, object]:
     items = tuple(build_review_risk_item(bundle) for bundle in bundles)
-    brief = build_review_command_brief(brief_id=brief_id, headline=headline, items=items)
+    brief = build_review_command_brief(
+        brief_id=brief_id, headline=headline, items=items
+    )
     return brief.to_dict()
 
 
 def build_review_risk_item(bundle: ProposalBundle) -> ReviewRiskItem:
     proposal = bundle.proposal
     signal = bundle.signal
-    owner_state = bundle.owner_state or derive_owner_state(proposal=proposal, signal=signal)
+    owner_state = bundle.owner_state or derive_owner_state(signal=signal)
     item = risk_item_from_proposal(
         proposal,
-        risk_id=_risk_id(signal=signal, proposal=proposal),
+        risk_id=_risk_id(signal),
+        signal_ref=signal.signal_ref,
         risk_type=signal.risk_type,
         affected_audiences=signal.affected_audiences,
         owner_state=owner_state,
         affected_surfaces=signal.affected_surfaces,
-        trigger_signals=_merge_trigger_signals(signal=signal, evidence=bundle.evidence, owner_state=owner_state),
+        trigger_signals=_merge_trigger_signals(
+            signal=signal, evidence=bundle.evidence, owner_state=owner_state
+        ),
         queue_owner=signal.queue_owner,
-        recommended_actions=_merge_recommended_actions(signal=signal, proposal=proposal, owner_state=owner_state, evidence=bundle.evidence),
+        recommended_actions=_merge_recommended_actions(
+            signal=signal,
+            proposal=proposal,
+            owner_state=owner_state,
+            evidence=bundle.evidence,
+        ),
+        assignment_trace_ref=bundle.assignment_trace_ref,
+        assignment_version=bundle.assignment_version,
     )
     why_now = WhyNowFrame(
-        summary=_compose_why_now_summary(signal=signal, proposal=proposal, evidence=bundle.evidence, owner_state=owner_state),
+        summary=_compose_why_now_summary(
+            signal=signal,
+            proposal=proposal,
+            evidence=bundle.evidence,
+            owner_state=owner_state,
+        ),
         trigger_signals=item.why_now.trigger_signals,
         evidence_ids=item.why_now.evidence_ids,
         affected_surfaces=item.why_now.affected_surfaces,
@@ -117,6 +160,7 @@ def build_review_risk_item(bundle: ProposalBundle) -> ReviewRiskItem:
     title = signal.title_override or item.title
     return ReviewRiskItem(
         risk_id=item.risk_id,
+        signal_ref=item.signal_ref,
         title=title,
         risk_type=item.risk_type,
         object_type=item.object_type,
@@ -127,20 +171,23 @@ def build_review_risk_item(bundle: ProposalBundle) -> ReviewRiskItem:
         why_now=why_now,
         recommended_actions=item.recommended_actions,
         queue_owner=item.queue_owner,
+        assignment_trace_ref=item.assignment_trace_ref,
+        assignment_version=item.assignment_version,
     )
 
 
-def derive_owner_state(*, proposal: CompilationProposal, signal: ReviewSignal) -> OwnerState:
+def derive_owner_state(*, signal: ReviewSignal) -> OwnerState:
     if signal.queue_owner:
-        return OwnerState.ASSIGNED
-    if proposal.review_owner.strip():
         return OwnerState.ASSIGNED
     return OwnerState.UNASSIGNED
 
 
 def rank_review_item(item: ReviewRiskItem) -> tuple[int, int, int, int, str]:
     freshness_penalty = 0
-    if "source_sync_failed" in item.why_now.trigger_signals or "stale_evidence" in item.why_now.trigger_signals:
+    if (
+        "source_sync_failed" in item.why_now.trigger_signals
+        or "stale_evidence" in item.why_now.trigger_signals
+    ):
         freshness_penalty = -1
     owner_penalty = 0 if item.owner_state is OwnerState.UNASSIGNED else 1
     return (
@@ -160,8 +207,12 @@ def _compose_why_now_summary(
     owner_state: OwnerState,
 ) -> str:
     parts = [proposal.why_now.rstrip("."), _risk_phrase(signal.risk_type)]
-    stale_count = sum(1 for record in evidence if record.freshness_state is FreshnessState.STALE)
-    unknown_count = sum(1 for record in evidence if record.freshness_state is FreshnessState.UNKNOWN)
+    stale_count = sum(
+        1 for record in evidence if record.freshness_state is FreshnessState.STALE
+    )
+    unknown_count = sum(
+        1 for record in evidence if record.freshness_state is FreshnessState.UNKNOWN
+    )
     if stale_count:
         parts.append(f"{stale_count} stale evidence source(s) increase answer risk")
     elif unknown_count:
@@ -210,9 +261,17 @@ def _merge_recommended_actions(
     owner_state: OwnerState,
     evidence: tuple[SupportEvidence, ...],
 ) -> tuple[str, ...]:
-    actions = list(signal.recommended_actions)
+    actions = [
+        action
+        for action in signal.recommended_actions
+        if action not in {"assign_owner", "escalate", "release_owner"}
+    ]
     if owner_state is OwnerState.UNASSIGNED:
         actions.append("assign_owner")
+    elif owner_state is OwnerState.ASSIGNED:
+        actions.extend(("assign_owner", "escalate", "release_owner"))
+    else:
+        actions.extend(("assign_owner", "release_owner"))
     if proposal.evidence_sufficiency is not EvidenceSufficiency.SUFFICIENT:
         actions.append("request_more_evidence")
     if any(record.freshness_state is FreshnessState.STALE for record in evidence):
@@ -222,8 +281,8 @@ def _merge_recommended_actions(
     return tuple(_dedupe(actions))
 
 
-def _risk_id(*, signal: ReviewSignal, proposal: CompilationProposal) -> str:
-    return f"{signal.risk_type.value}:{proposal.proposal_id}"
+def _risk_id(signal: ReviewSignal) -> str:
+    return f"{signal.risk_type.value}:{signal.signal_ref}"
 
 
 def _dedupe(values: Iterable[str]) -> list[str]:

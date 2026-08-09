@@ -8,7 +8,11 @@ from cygnus.domain.audience import AudienceFilter, Visibility
 from cygnus.domain.objects import KnowledgeObjectType
 from cygnus.evidence.records import EvidenceSourceType, FreshnessState, SupportEvidence
 from cygnus.review.home import ReviewHomeQuery, get_review_home_surface
-from cygnus.review.drilldown import ReviewQueueDrilldownQuery, ReviewQueueDrilldownSurface, get_review_queue_drilldown
+from cygnus.review.drilldown import (
+    ReviewQueueDrilldownQuery,
+    ReviewQueueDrilldownSurface,
+    get_review_queue_drilldown,
+)
 from cygnus.review.pressure import ReviewPressureSurface, build_review_pressure_surface
 from cygnus.review.source_blindness import (
     SourceBlindnessSurface,
@@ -18,7 +22,12 @@ from cygnus.review.source_blindness import (
 from cygnus.review.briefing import ReviewRiskType
 from cygnus.review.service import ProposalBundle, ReviewSignal
 from cygnus.review.surface import ReviewCommandSurface, SurfaceObservation
-from cygnus.substrate.compilation_plan import CompilationProposal, EvidenceSufficiency, PlanAction, UrgencyLevel
+from cygnus.substrate.compilation_plan import (
+    CompilationProposal,
+    EvidenceSufficiency,
+    PlanAction,
+    UrgencyLevel,
+)
 
 
 class PressureSignalType(str, Enum):
@@ -78,13 +87,29 @@ class PressureIntakeRecord:
             raise ValueError("affected_surfaces must not be empty")
         if self.queue_owner is not None and not self.queue_owner.strip():
             raise ValueError("queue_owner must not be blank when provided")
-        object.__setattr__(self, "affected_surfaces", _normalize(self.affected_surfaces, label="affected surface"))
-        object.__setattr__(self, "trigger_signals", _normalize(self.trigger_signals, label="trigger signal"))
-        object.__setattr__(self, "product_lines", _normalize(self.product_lines, label="product line"))
+        object.__setattr__(
+            self,
+            "affected_surfaces",
+            _normalize(self.affected_surfaces, label="affected surface"),
+        )
+        object.__setattr__(
+            self,
+            "trigger_signals",
+            _normalize(self.trigger_signals, label="trigger signal"),
+        )
+        object.__setattr__(
+            self, "product_lines", _normalize(self.product_lines, label="product line")
+        )
         object.__setattr__(self, "plans", _normalize(self.plans, label="plan"))
         object.__setattr__(self, "regions", _normalize(self.regions, label="region"))
-        object.__setattr__(self, "languages", _normalize(self.languages, label="language"))
-        object.__setattr__(self, "product_versions", _normalize(self.product_versions, label="product version"))
+        object.__setattr__(
+            self, "languages", _normalize(self.languages, label="language")
+        )
+        object.__setattr__(
+            self,
+            "product_versions",
+            _normalize(self.product_versions, label="product version"),
+        )
         if self.reason is not None and not self.reason.strip():
             raise ValueError("reason must not be blank when provided")
         if self.evidence_excerpt is not None and not self.evidence_excerpt.strip():
@@ -122,8 +147,12 @@ class PressureIntakeSurfaces:
         return {
             "bundles": [bundle.proposal.to_dict() for bundle in self.bundles],
             "review_home": self.review_home.to_dict(),
-            "pressure_surface": self.pressure_surface.to_dict() if self.pressure_surface is not None else None,
-            "source_blindness_surface": self.source_blindness_surface.to_dict() if self.source_blindness_surface is not None else None,
+            "pressure_surface": self.pressure_surface.to_dict()
+            if self.pressure_surface is not None
+            else None,
+            "source_blindness_surface": self.source_blindness_surface.to_dict()
+            if self.source_blindness_surface is not None
+            else None,
         }
 
 
@@ -139,12 +168,19 @@ def compile_pressure_intake(record: PressureIntakeRecord) -> PressureIntakeBundl
     )
 
 
-def compile_pressure_intake_bundle(records: Iterable[PressureIntakeRecord]) -> tuple[PressureIntakeBundle, ...]:
+def compile_pressure_intake_bundle(
+    records: Iterable[PressureIntakeRecord],
+) -> tuple[PressureIntakeBundle, ...]:
     return tuple(compile_pressure_intake(record) for record in records)
 
 
-def compile_pressure_proposal_bundles(records: Iterable[PressureIntakeRecord]) -> tuple[ProposalBundle, ...]:
-    return tuple(bundle.as_proposal_bundle() for bundle in compile_pressure_intake_bundle(records))
+def compile_pressure_proposal_bundles(
+    records: Iterable[PressureIntakeRecord],
+) -> tuple[ProposalBundle, ...]:
+    return tuple(
+        bundle.as_proposal_bundle()
+        for bundle in compile_pressure_intake_bundle(records)
+    )
 
 
 def build_pressure_intake_surfaces(
@@ -157,18 +193,26 @@ def build_pressure_intake_surfaces(
     source_observations: Iterable[SourceFailureObservation] = (),
 ) -> PressureIntakeSurfaces:
     if records is not None and bundles is not None:
-        raise ValueError("provide pressure intake records or proposal bundles, not both")
+        raise ValueError(
+            "provide pressure intake records or proposal bundles, not both"
+        )
 
     if bundles is not None:
         proposal_bundles = tuple(bundles)
     else:
-        source_records = tuple(records) if records is not None else sample_pressure_intake_records()
+        source_records = (
+            tuple(records) if records is not None else sample_pressure_intake_records()
+        )
         if not source_records and review_observation is None:
-            raise ValueError("empty pressure intake requires an explicit review observation")
+            raise ValueError(
+                "empty pressure intake requires an explicit review observation"
+            )
         proposal_bundles = compile_pressure_proposal_bundles(source_records)
 
     if not proposal_bundles and review_observation is None:
-        raise ValueError("empty pressure intake requires an explicit review observation")
+        raise ValueError(
+            "empty pressure intake requires an explicit review observation"
+        )
 
     review_home = get_review_home_surface(
         review_query,
@@ -189,7 +233,9 @@ def build_pressure_intake_surfaces(
     return PressureIntakeSurfaces(
         bundles=proposal_bundles,
         review_home=review_home,
-        pressure_surface=build_review_pressure_surface(pressure_bundles) if pressure_bundles else None,
+        pressure_surface=build_review_pressure_surface(pressure_bundles)
+        if pressure_bundles
+        else None,
         source_blindness_surface=(
             build_source_blindness_surface(
                 source_bundles,
@@ -207,8 +253,12 @@ def get_pressure_intake_review_brief_surface(
     records: Iterable[PressureIntakeRecord] | None = None,
     review_query: ReviewHomeQuery | None = None,
 ) -> ReviewCommandSurface:
-    source_records = tuple(records) if records is not None else sample_pressure_intake_records()
-    return build_pressure_intake_surfaces(source_records, review_query=review_query).review_home
+    source_records = (
+        tuple(records) if records is not None else sample_pressure_intake_records()
+    )
+    return build_pressure_intake_surfaces(
+        source_records, review_query=review_query
+    ).review_home
 
 
 def get_pressure_intake_review_queue_drilldown(
@@ -217,10 +267,14 @@ def get_pressure_intake_review_queue_drilldown(
     records: Iterable[PressureIntakeRecord] | None = None,
     review_query: ReviewHomeQuery | None = None,
 ) -> ReviewQueueDrilldownSurface:
-    source_records = tuple(records) if records is not None else sample_pressure_intake_records()
+    source_records = (
+        tuple(records) if records is not None else sample_pressure_intake_records()
+    )
     bundles = compile_pressure_proposal_bundles(source_records)
     return get_review_queue_drilldown(
-        ReviewQueueDrilldownQuery(selected_object_ref=selected_object_ref, home_query=review_query),
+        ReviewQueueDrilldownQuery(
+            selected_object_ref=selected_object_ref, home_query=review_query
+        ),
         bundles=bundles,
     )
 
@@ -340,11 +394,16 @@ def _proposal_for_record(record: PressureIntakeRecord) -> CompilationProposal:
     )
 
 
-def _signal_for_record(record: PressureIntakeRecord, *, proposal: CompilationProposal) -> ReviewSignal:
+def _signal_for_record(
+    record: PressureIntakeRecord, *, proposal: CompilationProposal
+) -> ReviewSignal:
     risk_type = _risk_type_for_signal(record.signal_type)
-    recommended_actions = _recommended_actions_for_signal(record.signal_type, record.queue_owner)
+    recommended_actions = _recommended_actions_for_signal(
+        record.signal_type, record.queue_owner
+    )
     return ReviewSignal(
         proposal_id=proposal.proposal_id,
+        signal_ref=record.signal_ref,
         risk_type=risk_type,
         affected_audiences=(record.audience_filter,),
         affected_surfaces=record.affected_surfaces,
@@ -382,7 +441,9 @@ def _risk_type_for_signal(signal_type: PressureSignalType) -> ReviewRiskType:
     }[signal_type]
 
 
-def _urgency_for_signal(signal_type: PressureSignalType, trigger_signals: tuple[str, ...]) -> UrgencyLevel:
+def _urgency_for_signal(
+    signal_type: PressureSignalType, trigger_signals: tuple[str, ...]
+) -> UrgencyLevel:
     if signal_type is PressureSignalType.SOURCE_FAILURE:
         return UrgencyLevel.URGENT
     if signal_type in (
@@ -395,7 +456,9 @@ def _urgency_for_signal(signal_type: PressureSignalType, trigger_signals: tuple[
     return UrgencyLevel.MEDIUM
 
 
-def _evidence_sufficiency_for_signal(signal_type: PressureSignalType, evidence_excerpt: str) -> EvidenceSufficiency:
+def _evidence_sufficiency_for_signal(
+    signal_type: PressureSignalType, evidence_excerpt: str
+) -> EvidenceSufficiency:
     if signal_type is PressureSignalType.SOURCE_FAILURE:
         return EvidenceSufficiency.PARTIAL
     if evidence_excerpt and evidence_excerpt.strip():
@@ -403,7 +466,9 @@ def _evidence_sufficiency_for_signal(signal_type: PressureSignalType, evidence_e
     return EvidenceSufficiency.PARTIAL
 
 
-def _recommended_actions_for_signal(signal_type: PressureSignalType, queue_owner: str | None) -> tuple[str, ...]:
+def _recommended_actions_for_signal(
+    signal_type: PressureSignalType, queue_owner: str | None
+) -> tuple[str, ...]:
     if signal_type is PressureSignalType.SOURCE_FAILURE:
         return ("open_review", "restrict_publish", "assign_owner")
     if signal_type in (
@@ -428,13 +493,21 @@ def _why_now_for_signal(record: PressureIntakeRecord) -> str:
     return "Source failure is weakening confidence in support propagation."
 
 
-def _audience_note(audience_filter: AudienceFilter, record: PressureIntakeRecord) -> str | None:
+def _audience_note(
+    audience_filter: AudienceFilter, record: PressureIntakeRecord
+) -> str | None:
     if audience_filter.visibility is Visibility.INTERNAL:
         scope = "internal"
     else:
         scope = "external"
     segments = [scope]
-    for values in (audience_filter.product_lines, audience_filter.plans, audience_filter.regions, audience_filter.languages, audience_filter.product_versions):
+    for values in (
+        audience_filter.product_lines,
+        audience_filter.plans,
+        audience_filter.regions,
+        audience_filter.languages,
+        audience_filter.product_versions,
+    ):
         if values:
             segments.append("/".join(values))
     if record.affected_surfaces:

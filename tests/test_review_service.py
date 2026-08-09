@@ -14,7 +14,12 @@ from cygnus.review import (
     build_review_risk_item,
     rank_review_item,
 )
-from cygnus.substrate import CompilationProposal, EvidenceSufficiency, PlanAction, UrgencyLevel
+from cygnus.substrate import (
+    CompilationProposal,
+    EvidenceSufficiency,
+    PlanAction,
+    UrgencyLevel,
+)
 
 
 class ReviewServiceTests(unittest.TestCase):
@@ -33,6 +38,7 @@ class ReviewServiceTests(unittest.TestCase):
         )
         signal = ReviewSignal(
             proposal_id="cp-risk-1",
+            signal_ref="cp-risk-1",
             risk_type=ReviewRiskType.SOURCE_BLINDNESS,
             affected_audiences=(AudienceFilter(visibility=Visibility.EXTERNAL),),
             affected_surfaces=("help_center", "copilot"),
@@ -50,11 +56,15 @@ class ReviewServiceTests(unittest.TestCase):
             freshness_state=FreshnessState.STALE,
         )
 
-        item = build_review_risk_item(ProposalBundle(proposal=proposal, signal=signal, evidence=(evidence,)))
+        item = build_review_risk_item(
+            ProposalBundle(proposal=proposal, signal=signal, evidence=(evidence,))
+        )
         payload = item.to_dict()
 
         self.assertEqual(payload["risk_id"], "source_blindness:cp-risk-1")
-        self.assertEqual(payload["owner_state"], "assigned")
+        self.assertEqual(payload["owner_state"], "unassigned")
+        self.assertIsNone(payload["queue_owner"])
+        self.assertIn("assign_owner", payload["recommended_actions"])
         self.assertIn("stale_evidence", payload["why_now"]["trigger_signals"])
         self.assertIn("request_more_evidence", payload["recommended_actions"])
         self.assertIn("refresh_sources", payload["recommended_actions"])
@@ -92,6 +102,7 @@ class ReviewServiceTests(unittest.TestCase):
                 proposal=proposal_low,
                 signal=ReviewSignal(
                     proposal_id="cp-low",
+                    signal_ref="cp-low",
                     risk_type=ReviewRiskType.TICKET_PRESSURE,
                     affected_audiences=(external,),
                     affected_surfaces=("copilot",),
@@ -102,6 +113,7 @@ class ReviewServiceTests(unittest.TestCase):
                 proposal=proposal_high,
                 signal=ReviewSignal(
                     proposal_id="cp-high",
+                    signal_ref="cp-high",
                     risk_type=ReviewRiskType.DRIFT,
                     affected_audiences=(external,),
                     affected_surfaces=("help_center", "copilot"),
@@ -120,7 +132,9 @@ class ReviewServiceTests(unittest.TestCase):
         self.assertEqual(payload["summary_counts"]["drift"], 1)
         self.assertEqual(payload["summary_counts"]["ticket_pressure"], 1)
 
-    def test_rank_review_item_prefers_unassigned_source_blindness_when_urgency_matches(self) -> None:
+    def test_rank_review_item_prefers_unassigned_source_blindness_when_urgency_matches(
+        self,
+    ) -> None:
         proposal_a = CompilationProposal(
             proposal_id="cp-a",
             object_type=KnowledgeObjectType.KNOWN_ISSUE_PAGE,
@@ -150,8 +164,11 @@ class ReviewServiceTests(unittest.TestCase):
                 proposal=proposal_a,
                 signal=ReviewSignal(
                     proposal_id="cp-a",
+                    signal_ref="cp-a",
                     risk_type=ReviewRiskType.SOURCE_BLINDNESS,
-                    affected_audiences=(AudienceFilter(visibility=Visibility.EXTERNAL),),
+                    affected_audiences=(
+                        AudienceFilter(visibility=Visibility.EXTERNAL),
+                    ),
                     affected_surfaces=("help_center",),
                     trigger_signals=("source_sync_failed",),
                 ),
@@ -163,8 +180,11 @@ class ReviewServiceTests(unittest.TestCase):
                 proposal=proposal_b,
                 signal=ReviewSignal(
                     proposal_id="cp-b",
+                    signal_ref="cp-b",
                     risk_type=ReviewRiskType.DRIFT,
-                    affected_audiences=(AudienceFilter(visibility=Visibility.EXTERNAL),),
+                    affected_audiences=(
+                        AudienceFilter(visibility=Visibility.EXTERNAL),
+                    ),
                     affected_surfaces=("copilot",),
                     trigger_signals=("release_delta",),
                     queue_owner="support-ops",

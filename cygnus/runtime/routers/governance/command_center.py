@@ -13,19 +13,29 @@ from cygnus.runtime.routers.governance.dependencies import (
 
 router = APIRouter()
 
+
 def _review_observation(snapshot: GovernanceReadSnapshot) -> SurfaceObservation:
-    missing_signals = [
-        "review_assignment",
-        "source_impact",
-    ]
-    if snapshot.uncompiled_signal_count:
-        missing_signals.append("audience_binding_resolution")
+    missing_signals = (
+        ("audience_binding_resolution",)
+        if snapshot.uncompiled_signal_count
+        else ()
+    )
     return SurfaceObservation(
-        state=ObservationState.PARTIAL,
-        observed_count=(
-            len(snapshot.governance_signals) + snapshot.audience_conflict_count
+        state=(
+            ObservationState.PARTIAL
+            if missing_signals
+            else ObservationState.READY
         ),
-        reason="persisted_governance_signal_provider_partial",
+        observed_count=(
+            len(snapshot.governance_signals)
+            + snapshot.audience_conflict_count
+            + len(snapshot.source_observations)
+        ),
+        reason=(
+            "persisted_governance_signal_provider_partial"
+            if missing_signals
+            else "persisted_governance_signal_provider_ready"
+        ),
         covered_signals=(
             "ticket_cluster",
             "human_rewrite",
@@ -33,15 +43,16 @@ def _review_observation(snapshot: GovernanceReadSnapshot) -> SurfaceObservation:
             "release_delta",
             "incident_delta",
             "audience_conflict",
+            "review_assignment",
+            "source_impact",
         ),
-        missing_signals=tuple(missing_signals),
+        missing_signals=missing_signals,
     )
 
 
 def _drift_observation(snapshot: GovernanceReadSnapshot) -> SurfaceObservation:
     drift_count = sum(
-        bundle.signal.risk_type.value == "drift"
-        for bundle in snapshot.review_bundles
+        bundle.signal.risk_type.value == "drift" for bundle in snapshot.review_bundles
     )
     missing_signals = (
         ("audience_binding_resolution",)
@@ -52,11 +63,7 @@ def _drift_observation(snapshot: GovernanceReadSnapshot) -> SurfaceObservation:
         else ()
     )
     return SurfaceObservation(
-        state=(
-            ObservationState.PARTIAL
-            if missing_signals
-            else ObservationState.READY
-        ),
+        state=(ObservationState.PARTIAL if missing_signals else ObservationState.READY),
         observed_count=drift_count,
         reason=(
             "persisted_drift_provider_partial"
@@ -69,27 +76,19 @@ def _drift_observation(snapshot: GovernanceReadSnapshot) -> SurfaceObservation:
 
 
 def _source_observation(snapshot: GovernanceReadSnapshot) -> SurfaceObservation:
-    has_unresolved_source_facts = bool(snapshot.source_observations)
+    source_risk_count = sum(
+        bundle.signal.risk_type.value == "source_blindness"
+        for bundle in snapshot.review_bundles
+    )
     return SurfaceObservation(
-        state=(
-            ObservationState.PARTIAL
-            if has_unresolved_source_facts
-            else ObservationState.READY
-        ),
-        observed_count=(
-            len(snapshot.source_observations)
-            + sum(
-                bundle.signal.risk_type.value == "source_blindness"
-                for bundle in snapshot.review_bundles
-            )
-        ),
+        state=ObservationState.READY,
+        observed_count=len(snapshot.source_observations) + source_risk_count,
         reason=(
-            "source_impact_coverage_partial"
-            if has_unresolved_source_facts
+            "source_impact_observed"
+            if snapshot.source_observations
             else "persisted_source_failure_provider_ready"
         ),
-        covered_signals=("source_status", "source_failure"),
-        missing_signals=("source_impact",) if has_unresolved_source_facts else (),
+        covered_signals=("source_status", "source_failure", "source_impact"),
     )
 
 

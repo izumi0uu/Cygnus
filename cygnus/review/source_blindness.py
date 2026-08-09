@@ -15,7 +15,11 @@ from cygnus.publish.actions import (
     apply_publish_governance_actions,
 )
 from cygnus.publish.preview import PublishActionType, PublishBinding, PublishPreviewCandidate
-from cygnus.publish.propagation import PublishPropagationLedger, build_publish_propagation_ledger
+from cygnus.publish.propagation import (
+    PropagationStatus,
+    PublishPropagationLedger,
+    build_publish_propagation_ledger,
+)
 from cygnus.review.briefing import OwnerState, ReviewRiskType
 from cygnus.review.fixtures import sample_review_bundles
 from cygnus.review.providers import build_review_command_surface_from_bundles
@@ -24,7 +28,13 @@ from cygnus.review.service import ProposalBundle
 from cygnus.review.surface import ObservationState, SurfaceObservation
 
 if TYPE_CHECKING:
-    from cygnus.runtime.database.models import Source, WikiPage
+    from cygnus.runtime.database.models import (
+        GovernanceAudienceBinding,
+        GovernancePropagation,
+        GovernancePublication,
+        Source,
+        WikiPage,
+    )
 
 
 def _normalize(values: Iterable[str] | None, *, label: str) -> tuple[str, ...]:
@@ -39,6 +49,98 @@ def _normalize(values: Iterable[str] | None, *, label: str) -> tuple[str, ...]:
     return tuple(out)
 
 
+class SourceImpactState(str, Enum):
+    MAPPED = "mapped"
+    UNMAPPED = "unmapped"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SourceAudienceImpact:
+    binding_ref: str
+    object_ref: str
+    variant_ref: str
+    channel: str
+    audience: AudienceFilter
+    version: int
+
+    def __post_init__(self) -> None:
+        binding_ref = self.binding_ref.strip()
+        object_ref = self.object_ref.strip()
+        variant_ref = self.variant_ref.strip()
+        channel = self.channel.strip()
+        for value, label in (
+            (binding_ref, "binding ref"),
+            (object_ref, "object ref"),
+            (variant_ref, "variant ref"),
+            (channel, "channel"),
+        ):
+            if not value:
+                raise ValueError(f"{label} must not be blank")
+        object.__setattr__(self, "binding_ref", binding_ref)
+        object.__setattr__(self, "object_ref", object_ref)
+        object.__setattr__(self, "variant_ref", variant_ref)
+        object.__setattr__(self, "channel", channel)
+        if self.version < 1:
+            raise ValueError("audience impact version must be positive")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "binding_ref": self.binding_ref,
+            "object_ref": self.object_ref,
+            "variant_ref": self.variant_ref,
+            "channel": self.channel,
+            "audience": self.audience.to_dict(),
+            "version": self.version,
+        }
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SourcePropagationImpact:
+    propagation_ref: str
+    publication_ref: str
+    object_ref: str
+    surface_id: str
+    status: PropagationStatus
+    channel_refs: tuple[str, ...]
+    version: int
+
+    def __post_init__(self) -> None:
+        propagation_ref = self.propagation_ref.strip()
+        publication_ref = self.publication_ref.strip()
+        object_ref = self.object_ref.strip()
+        surface_id = self.surface_id.strip()
+        for value, label in (
+            (propagation_ref, "propagation ref"),
+            (publication_ref, "publication ref"),
+            (object_ref, "object ref"),
+            (surface_id, "surface id"),
+        ):
+            if not value:
+                raise ValueError(f"{label} must not be blank")
+        object.__setattr__(self, "propagation_ref", propagation_ref)
+        object.__setattr__(self, "publication_ref", publication_ref)
+        object.__setattr__(self, "object_ref", object_ref)
+        object.__setattr__(self, "surface_id", surface_id)
+        object.__setattr__(
+            self,
+            "channel_refs",
+            tuple(dict.fromkeys(_normalize(self.channel_refs, label="channel ref"))),
+        )
+        if self.version < 1:
+            raise ValueError("propagation impact version must be positive")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "propagation_ref": self.propagation_ref,
+            "publication_ref": self.publication_ref,
+            "object_ref": self.object_ref,
+            "surface_id": self.surface_id,
+            "status": self.status.value,
+            "channel_refs": list(self.channel_refs),
+            "version": self.version,
+        }
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SourceFailureObservation:
     source_id: str
@@ -46,10 +148,12 @@ class SourceFailureObservation:
     source_ref: str
     status: str
     error_message: str
+    impact_state: SourceImpactState
     linked_wiki_refs: tuple[str, ...] = field(default_factory=tuple)
     linked_object_refs: tuple[str, ...] = field(default_factory=tuple)
+    audience_impacts: tuple[SourceAudienceImpact, ...] = field(default_factory=tuple)
+    propagation_impacts: tuple[SourcePropagationImpact, ...] = field(default_factory=tuple)
     observed_at: str | None = None
-    impact_state: str = "unknown"
 
     def __post_init__(self) -> None:
         for value, label in (
@@ -62,10 +166,9 @@ class SourceFailureObservation:
                 raise ValueError(f"{label} must not be blank")
         if self.status != "error":
             raise ValueError("source failure observation status must be error")
-        if self.impact_state != "unknown":
-            raise ValueError("source failure impact_state must remain unknown")
         if self.observed_at is not None and not self.observed_at.strip():
             raise ValueError("observed_at must not be blank when provided")
+        object.__setattr__(self, "impact_state", SourceImpactState(self.impact_state))
         object.__setattr__(
             self,
             "linked_wiki_refs",
@@ -76,6 +179,22 @@ class SourceFailureObservation:
             "linked_object_refs",
             tuple(dict.fromkeys(_normalize(self.linked_object_refs, label="linked object ref"))),
         )
+        object.__setattr__(self, "audience_impacts", tuple(self.audience_impacts))
+        object.__setattr__(self, "propagation_impacts", tuple(self.propagation_impacts))
+        if self.impact_state is SourceImpactState.MAPPED and not self.linked_wiki_refs:
+            raise ValueError("mapped source impact requires a linked Wiki page")
+        if self.impact_state is SourceImpactState.UNMAPPED and (
+            self.linked_wiki_refs
+            or self.linked_object_refs
+            or self.audience_impacts
+            or self.propagation_impacts
+        ):
+            raise ValueError("unmapped source impact cannot contain governed impact records")
+        linked_objects = set(self.linked_object_refs)
+        if any(item.object_ref not in linked_objects for item in self.audience_impacts):
+            raise ValueError("audience impact must reference a linked object")
+        if any(item.object_ref not in linked_objects for item in self.propagation_impacts):
+            raise ValueError("propagation impact must reference a linked object")
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -86,35 +205,132 @@ class SourceFailureObservation:
             "error_message": self.error_message,
             "linked_wiki_refs": list(self.linked_wiki_refs),
             "linked_object_refs": list(self.linked_object_refs),
+            "audience_impacts": [item.to_dict() for item in self.audience_impacts],
+            "propagation_impacts": [item.to_dict() for item in self.propagation_impacts],
             "observed_at": self.observed_at,
-            "impact_state": self.impact_state,
+            "impact_state": self.impact_state.value,
         }
 
 
 def build_source_failure_observations(
     sources: Iterable["Source"],
     linked_pages: Iterable["WikiPage"],
+    *,
+    audience_bindings: Iterable["GovernanceAudienceBinding"] = (),
+    publications: Iterable["GovernancePublication"] = (),
+    propagations: Iterable["GovernancePropagation"] = (),
 ) -> tuple[SourceFailureObservation, ...]:
-    page_refs_by_source: dict[object, list[tuple[str, str | None]]] = {}
+    page_refs_by_source: dict[object, list[tuple[object, str, str | None]]] = {}
     for page in linked_pages:
-        object_ref = f"ko-{page.slug}" if resolve_object_type(page.knowledge_type_slugs) is not None else None
+        object_ref = (
+            f"ko-{page.slug}"
+            if resolve_object_type(page.knowledge_type_slugs) is not None
+            else None
+        )
         for source_id in page.source_ids or ():
-            page_refs_by_source.setdefault(source_id, []).append((page.slug, object_ref))
+            page_refs_by_source.setdefault(source_id, []).append(
+                (page.id, page.slug, object_ref)
+            )
+
+    audience_impacts_by_page: dict[object, list[SourceAudienceImpact]] = {}
+    for binding in audience_bindings:
+        if binding.lifecycle_state != "active":
+            continue
+        audience_impacts_by_page.setdefault(binding.page_id, []).append(
+            SourceAudienceImpact(
+                binding_ref=binding.binding_key,
+                object_ref=binding.object_ref,
+                variant_ref=binding.variant_ref,
+                channel=binding.channel,
+                audience=AudienceFilter(
+                    visibility=Visibility(binding.visibility),
+                    brands=tuple(binding.brands),
+                    product_lines=tuple(binding.product_lines),
+                    plans=tuple(binding.plans),
+                    regions=tuple(binding.regions),
+                    languages=tuple(binding.languages),
+                    product_versions=tuple(binding.product_versions),
+                ),
+                version=binding.version,
+            )
+        )
+
+    publication_by_id = {publication.id: publication for publication in publications}
+    propagation_impacts_by_page: dict[object, list[SourcePropagationImpact]] = {}
+    for propagation in propagations:
+        publication = publication_by_id.get(propagation.publication_id)
+        if publication is None:
+            continue
+        propagation_impacts_by_page.setdefault(publication.page_id, []).append(
+            SourcePropagationImpact(
+                propagation_ref=str(propagation.id),
+                publication_ref=str(publication.id),
+                object_ref=publication.object_ref,
+                surface_id=propagation.surface_id,
+                status=PropagationStatus(propagation.status),
+                channel_refs=tuple(propagation.channel_refs),
+                version=propagation.version,
+            )
+        )
 
     observations: list[SourceFailureObservation] = []
     for source in sorted(sources, key=lambda row: str(row.id)):
         if source.status != "error":
             continue
-        linked_refs = page_refs_by_source.get(source.id, ())
+        linked_refs = tuple(page_refs_by_source.get(source.id, ()))
+        linked_page_ids = {page_id for page_id, _slug, _object_ref in linked_refs}
+        linked_object_refs = tuple(
+            sorted(
+                {
+                    object_ref
+                    for _page_id, _slug, object_ref in linked_refs
+                    if object_ref is not None
+                }
+            )
+        )
+        audience_impacts = tuple(
+            sorted(
+                (
+                    impact
+                    for page_id in linked_page_ids
+                    for impact in audience_impacts_by_page.get(page_id, ())
+                    if impact.object_ref in linked_object_refs
+                ),
+                key=lambda item: (item.object_ref, item.channel, item.binding_ref),
+            )
+        )
+        propagation_impacts = tuple(
+            sorted(
+                (
+                    impact
+                    for page_id in linked_page_ids
+                    for impact in propagation_impacts_by_page.get(page_id, ())
+                    if impact.object_ref in linked_object_refs
+                ),
+                key=lambda item: (item.object_ref, item.surface_id, item.propagation_ref),
+            )
+        )
         observations.append(
             SourceFailureObservation(
                 source_id=str(source.id),
-                title=(source.title or "").strip() or source.file_name or f"source:{source.id}",
+                title=(source.title or "").strip()
+                or source.file_name
+                or f"source:{source.id}",
                 source_ref=source.url or source.file_name or f"source:{source.id}",
                 status=source.status,
-                error_message=(source.error_message or "").strip() or "source_error_detail_unavailable",
-                linked_wiki_refs=tuple(sorted({slug for slug, _object_ref in linked_refs})),
-                linked_object_refs=tuple(sorted({object_ref for _slug, object_ref in linked_refs if object_ref is not None})),
+                error_message=(source.error_message or "").strip()
+                or "source_error_detail_unavailable",
+                impact_state=(
+                    SourceImpactState.MAPPED
+                    if linked_refs
+                    else SourceImpactState.UNMAPPED
+                ),
+                linked_wiki_refs=tuple(
+                    sorted({slug for _page_id, slug, _object_ref in linked_refs})
+                ),
+                linked_object_refs=linked_object_refs,
+                audience_impacts=audience_impacts,
+                propagation_impacts=propagation_impacts,
                 observed_at=source.updated_at.isoformat() if source.updated_at else None,
             )
         )
@@ -306,6 +522,7 @@ def build_source_blindness_surface(
     observation: SurfaceObservation | None = None,
     source_observations: Iterable[SourceFailureObservation] = (),
 ) -> SourceBlindnessSurface:
+    source_facts = tuple(source_observations)
     blindness_bundles = tuple(bundle for bundle in bundles if _is_source_blindness_bundle(bundle))
     if not blindness_bundles and observation is None:
         raise ValueError("empty source blindness surfaces require an explicit observation")
@@ -319,14 +536,10 @@ def build_source_blindness_surface(
     return SourceBlindnessSurface(
         surface_id="source-health",
         headline="Source health governance",
-        summary=(
-            _build_summary(contexts)
-            if contexts
-            else "Source failures are observable; downstream impact is not yet modeled."
-        ),
+        summary=_source_surface_summary(contexts, source_facts),
         observation=resolved_observation,
         contexts=contexts,
-        source_observations=tuple(source_observations),
+        source_observations=source_facts,
         available_commands=(
             (
                 SourceBlindnessCommandType.REPAIR_SOURCE.value,
@@ -338,6 +551,28 @@ def build_source_blindness_surface(
         ),
         proposal_lane=tuple(context.proposal_ref for context in contexts),
         bundles=blindness_bundles,
+    )
+
+
+def _source_surface_summary(
+    contexts: tuple[SourceBlindnessContext, ...],
+    source_facts: tuple[SourceFailureObservation, ...],
+) -> str:
+    if contexts:
+        return _build_summary(contexts)
+    if not source_facts:
+        return "No failed sources are observed; durable source-impact relations were checked in this scope."
+    mapped_count = sum(
+        fact.impact_state is SourceImpactState.MAPPED for fact in source_facts
+    )
+    if mapped_count:
+        return (
+            f"{mapped_count} failed source(s) map to governed downstream impact; "
+            "no executable persisted source-failure signal is currently available."
+        )
+    return (
+        f"{len(source_facts)} failed source(s) have no governed Wiki impact mapped "
+        "in the current scope."
     )
 
 

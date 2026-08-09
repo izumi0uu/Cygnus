@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from typing import cast
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 import uuid
@@ -21,7 +22,7 @@ from cygnus.governance.signals import (
     resolve_governance_signal,
 )
 from cygnus.review import PressureSignalType
-from cygnus.runtime.database.models import GovernanceSignal
+from cygnus.runtime.database.models import Employee, GovernanceSignal
 
 
 _NOW = datetime(2026, 8, 8, 12, 0, tzinfo=timezone.utc)
@@ -61,7 +62,6 @@ def _signal(
         summary="Repeated tickets show a governed knowledge gap.",
         reason="The recurring intent crossed the review threshold.",
         evidence_excerpt="Agents reconstruct the same verification sequence.",
-        queue_owner="support-ops",
         status="active",
         observed_at=_NOW,
         resolved_at=None,
@@ -93,7 +93,6 @@ def _signal_input(
         summary="Repeated tickets show a governed knowledge gap.",
         reason="The recurring intent crossed the review threshold.",
         evidence_excerpt="Agents reconstruct the same verification sequence.",
-        queue_owner="support-ops",
     )
 
 
@@ -135,6 +134,40 @@ class GovernanceSignalServiceTests(unittest.TestCase):
 
         self.assertEqual(record.audience_filter.product_lines, ("billing",))
         self.assertEqual(record.proposal_id, "ko-billing-verification")
+
+    def test_create_initializes_one_durable_review_assignment(self) -> None:
+        session = MagicMock()
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = None
+        session.execute = AsyncMock(return_value=result)
+        session.flush = AsyncMock()
+        actor_id = uuid.uuid4()
+
+        with (
+            patch(
+                "cygnus.governance.signals.lock_governance_command",
+                AsyncMock(return_value=None),
+            ),
+            patch(
+                "cygnus.governance.signals.initialize_review_assignment",
+                AsyncMock(return_value=None),
+            ) as initialize_assignment,
+        ):
+            created = asyncio.run(
+                create_governance_signal(
+                    session,
+                    _signal_input(),
+                    created_by_id=actor_id,
+                )
+            )
+
+        session.add.assert_called_once_with(created)
+        session.flush.assert_awaited_once_with()
+        initialize_assignment.assert_awaited_once_with(
+            session,
+            created,
+            actor_id=actor_id,
+        )
 
     def test_create_returns_exact_idempotent_signal_ref_replay(self) -> None:
         session = AsyncMock()
@@ -196,9 +229,7 @@ class GovernanceSignalServiceTests(unittest.TestCase):
                     resolved_at=_NOW,
                 )
             )
-            replay = asyncio.run(
-                resolve_governance_signal(session, signal.signal_ref)
-            )
+            replay = asyncio.run(resolve_governance_signal(session, signal.signal_ref))
 
         self.assertIs(resolved, signal)
         self.assertIs(replay, signal)
@@ -219,7 +250,10 @@ class GovernanceSignalServiceTests(unittest.TestCase):
         )
 
         rows = asyncio.run(
-            list_governance_signals(session, current_user=user)
+            list_governance_signals(
+                session,
+                current_user=cast(Employee, cast(object, user)),
+            )
         )
 
         statement = session.execute.await_args.args[0]

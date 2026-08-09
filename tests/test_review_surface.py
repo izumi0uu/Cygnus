@@ -20,9 +20,12 @@ from cygnus.substrate import UrgencyLevel
 
 
 class ReviewSurfaceTests(unittest.TestCase):
-    def test_review_command_surface_to_dict_includes_situation_frame_and_priority_stack(self) -> None:
+    def test_review_command_surface_to_dict_includes_situation_frame_and_priority_stack(
+        self,
+    ) -> None:
         item = ReviewRiskItem(
             risk_id="risk-1",
+            signal_ref="risk-1",
             title="Source blindness",
             risk_type=ReviewRiskType.SOURCE_BLINDNESS,
             object_type=KnowledgeObjectType.KNOWN_ISSUE_PAGE,
@@ -62,6 +65,7 @@ class ReviewSurfaceTests(unittest.TestCase):
             priority_stack=(
                 PriorityStackCard(
                     risk_id="risk-1",
+                    signal_ref="risk-1",
                     title="Source blindness",
                     risk_type=ReviewRiskType.SOURCE_BLINDNESS,
                     urgency=UrgencyLevel.URGENT,
@@ -69,7 +73,9 @@ class ReviewSurfaceTests(unittest.TestCase):
                     object_ref="cp-1",
                     why_now_summary="Incident feed failed during active support pressure.",
                     audience_labels=("external · global",),
-                    affected_audiences=(AudienceFilter(visibility=Visibility.EXTERNAL),),
+                    affected_audiences=(
+                        AudienceFilter(visibility=Visibility.EXTERNAL),
+                    ),
                     affected_surfaces=("help_center", "copilot"),
                     owner_state=OwnerState.UNASSIGNED,
                     queue_owner=None,

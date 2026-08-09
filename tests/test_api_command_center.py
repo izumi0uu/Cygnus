@@ -19,7 +19,7 @@ from cygnus.review import (
     compile_pressure_proposal_bundles,
     sample_pressure_intake_records,
 )
-from cygnus.review.source_blindness import SourceFailureObservation
+from cygnus.review.source_blindness import SourceFailureObservation, SourceImpactState
 from cygnus.runtime.routers.governance.dependencies import (
     GovernanceReadSnapshot,
     get_durable_publish_projection,
@@ -140,10 +140,10 @@ class CommandCenterApiTests(unittest.TestCase):
         self.assertIn("available_commands", payload)
         self.assertEqual(payload["priority_stack"], [])
         self.assertEqual(payload["situation_frame"]["urgent_items"], 0)
-        self.assertEqual(payload["observation"]["state"], "partial")
+        self.assertEqual(payload["observation"]["state"], "ready")
         self.assertEqual(
             payload["observation"]["reason"],
-            "persisted_governance_signal_provider_partial",
+            "persisted_governance_signal_provider_ready",
         )
         self.assertIn("ticket_cluster", payload["observation"]["covered_signals"])
 
@@ -218,6 +218,7 @@ class CommandCenterApiTests(unittest.TestCase):
                     source_ref="https://status.example/feed",
                     status="error",
                     error_message="upstream timeout",
+                    impact_state=SourceImpactState.MAPPED,
                     linked_wiki_refs=("wiki-incident",),
                     linked_object_refs=("ko-incident",),
                     observed_at="2026-07-26T10:00:00Z",
@@ -230,15 +231,15 @@ class CommandCenterApiTests(unittest.TestCase):
         source_payload = self.client.get("/api/source-blindness").json()
         self.assertEqual(source_payload["contexts"], [])
         self.assertEqual(source_payload["available_commands"], [])
-        self.assertEqual(source_payload["observation"]["state"], "partial")
+        self.assertEqual(source_payload["observation"]["state"], "ready")
         self.assertEqual(
-            source_payload["observation"]["missing_signals"], ["source_impact"]
+            source_payload["observation"]["missing_signals"], []
         )
         self.assertEqual(
             source_payload["source_observations"][0]["source_id"], "source-failed"
         )
         self.assertEqual(
-            source_payload["source_observations"][0]["impact_state"], "unknown"
+            source_payload["source_observations"][0]["impact_state"], "mapped"
         )
 
         intake_payload = self.client.get("/api/review-intake").json()

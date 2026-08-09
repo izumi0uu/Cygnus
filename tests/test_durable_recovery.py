@@ -53,7 +53,21 @@ class _RecoverySession:
     ) -> None:
         results = [_Result(publication)]
         if publication is not None:
-            results.extend((_Result(propagations), _Result(signals)))
+            results.extend(
+                (
+                    _Result(propagations),
+                    _Result(signals),
+                    _Result(
+                        tuple(
+                            SimpleNamespace(
+                                signal_id=signal.id,
+                                owner_ref=signal.queue_owner,
+                            )
+                            for signal in signals
+                        )
+                    ),
+                )
+            )
         self.execute: AsyncMock = AsyncMock(side_effect=results)
 
         async def get(model: object, _key: object) -> object | None:
@@ -226,7 +240,9 @@ def test_durable_recovery_uses_signal_snapshots_and_propagation_blockers() -> No
     assert "external_bot propagation is manual_action_required" in residual_labels
 
 
-def test_synced_propagation_and_zero_active_signals_can_close_without_fake_risk() -> None:
+def test_synced_propagation_and_zero_active_signals_can_close_without_fake_risk() -> (
+    None
+):
     published_at = datetime(2026, 8, 8, 12, 0, tzinfo=timezone.utc)
     publication = _publication(published_at)
 
@@ -246,7 +262,9 @@ def test_synced_propagation_and_zero_active_signals_can_close_without_fake_risk(
     assert surface["closure_judge"]["recommendation"] == "close_and_monitor"
 
 
-def test_durable_downstream_feedback_uses_only_post_publication_supported_signals() -> None:
+def test_durable_downstream_feedback_uses_only_post_publication_supported_signals() -> (
+    None
+):
     published_at = datetime(2026, 8, 8, 12, 0, tzinfo=timezone.utc)
     publication = _publication(published_at)
     feedback = _signal(
@@ -337,9 +355,7 @@ def test_unknown_command_is_not_resolved_from_sample_fixtures() -> None:
     session = cast(AsyncSession, cast(object, fake))
 
     try:
-        asyncio.run(
-            get_durable_recovery_window(session, command_id="missing-command")
-        )
+        asyncio.run(get_durable_recovery_window(session, command_id="missing-command"))
     except DurableRecoveryNotFound as exc:
         assert "missing-command" in str(exc)
     else:

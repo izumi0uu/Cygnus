@@ -5,6 +5,10 @@ Ownership:
 - this package owns publish governance semantics, not runtime app-shell wiring
 """
 
+from importlib import import_module
+from typing import TYPE_CHECKING
+
+
 from cygnus.publish.actions import (
     PublishGovernanceAction,
     PublishGovernanceActionType,
@@ -51,17 +55,19 @@ from cygnus.publish.preview import (
     build_publish_blast_radius_preview,
     build_publish_preview_candidate,
 )
-from cygnus.publish.surface import (
-    PublishActionEcho,
-    PublishActionPreset,
-    PublishPropagationSurface,
-    PublishPreviewSurface,
-    PublishSituationFrame,
-    PropagationStatusLane,
-    apply_pressure_intake_publish_action,
-    get_pressure_intake_publish_propagation_surface,
-    get_pressure_intake_publish_preview_surface,
-)
+
+if TYPE_CHECKING:
+    from cygnus.publish.surface import (
+        PublishActionEcho,
+        PublishActionPreset,
+        PublishPropagationSurface,
+        PublishPreviewSurface,
+        PublishSituationFrame,
+        PropagationStatusLane,
+        apply_pressure_intake_publish_action,
+        get_pressure_intake_publish_propagation_surface,
+        get_pressure_intake_publish_preview_surface,
+    )
 from cygnus.publish.session_projection import (
     clear_publish_projections,
     get_publish_projection,
@@ -70,6 +76,27 @@ from cygnus.publish.session_projection import (
     projection_store,
     remember_publish_projection,
 )
+
+_SURFACE_EXPORTS = {
+    "PublishActionEcho",
+    "PublishActionPreset",
+    "PublishPropagationSurface",
+    "PublishPreviewSurface",
+    "PublishSituationFrame",
+    "PropagationStatusLane",
+    "apply_pressure_intake_publish_action",
+    "get_pressure_intake_publish_propagation_surface",
+    "get_pressure_intake_publish_preview_surface",
+}
+
+
+def __getattr__(name: str):
+    if name not in _SURFACE_EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module("cygnus.publish.surface"), name)
+    globals()[name] = value
+    return value
+
 
 __all__ = [
     "AudienceScopeSummary",

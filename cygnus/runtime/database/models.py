@@ -1100,6 +1100,7 @@ class AuditLog(Base):
 # Governed write ledger and publication truth
 # ---------------------------------------------------------------------------
 
+
 class GovernanceSignal(Base):
     """Durable, scoped input fact compiled into governance review surfaces."""
 
@@ -1141,7 +1142,6 @@ class GovernanceSignal(Base):
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     evidence_excerpt: Mapped[str] = mapped_column(Text, nullable=False)
-    queue_owner: Mapped[Optional[str]] = mapped_column(String(220), nullable=True)
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="active", server_default="active"
     )
@@ -1201,6 +1201,115 @@ class GovernanceSignal(Base):
         Index("ix_governance_signals_page", "page_id"),
         Index("ix_governance_signals_source", "source_id"),
         Index("ix_governance_signals_object", "object_ref"),
+    )
+
+
+class GovernanceReviewAssignment(Base):
+    """Current durable owner state for one governance review signal."""
+
+    __tablename__ = "governance_review_assignments"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    signal_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("governance_signals.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    lifecycle_state: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="unassigned", server_default="unassigned"
+    )
+    owner_ref: Mapped[Optional[str]] = mapped_column(String(220), nullable=True)
+    escalation_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "(lifecycle_state = 'unassigned' AND owner_ref IS NULL "
+            "AND escalation_reason IS NULL) OR "
+            "(lifecycle_state = 'assigned' AND owner_ref IS NOT NULL "
+            "AND escalation_reason IS NULL) OR "
+            "(lifecycle_state = 'escalated' AND owner_ref IS NOT NULL "
+            "AND escalation_reason IS NOT NULL "
+            "AND char_length(escalation_reason) BETWEEN 1 AND 2000)",
+            name="ck_governance_review_assignments_state",
+        ),
+        Index(
+            "ix_governance_review_assignments_state",
+            "lifecycle_state",
+            "updated_at",
+        ),
+        Index("ix_governance_review_assignments_owner", "owner_ref"),
+    )
+
+
+class GovernanceReviewAssignmentEvent(Base):
+    """Append-only owner transition for one governance review assignment."""
+
+    __tablename__ = "governance_review_assignment_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    assignment_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("governance_review_assignments.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    command_id: Mapped[str] = mapped_column(String(220), nullable=False, unique=True)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    from_state: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    to_state: Mapped[str] = mapped_column(String(20), nullable=False)
+    actor_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+    )
+    owner_ref: Mapped[Optional[str]] = mapped_column(String(220), nullable=True)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "event_type IN ('initialized', 'assigned', 'reassigned', "
+            "'escalated', 'released')",
+            name="ck_governance_review_assignment_events_type",
+        ),
+        CheckConstraint(
+            "to_state IN ('unassigned', 'assigned', 'escalated')",
+            name="ck_governance_review_assignment_events_state",
+        ),
+        CheckConstraint(
+            "char_length(reason) BETWEEN 1 AND 2000",
+            name="ck_governance_review_assignment_events_reason",
+        ),
+        UniqueConstraint(
+            "assignment_id",
+            "sequence",
+            name="uq_governance_review_assignment_events_sequence",
+        ),
+        Index(
+            "ix_governance_review_assignment_events_assignment",
+            "assignment_id",
+            "occurred_at",
+        ),
+        Index("ix_governance_review_assignment_events_type", "event_type"),
     )
 
 

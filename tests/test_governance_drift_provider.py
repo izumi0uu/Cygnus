@@ -48,7 +48,6 @@ def _drift_signal(
         summary="Published guidance may no longer match current behavior.",
         reason="The upstream state changed after the last governed review.",
         evidence_excerpt="The changed behavior affects the current workaround.",
-        queue_owner="support-ops",
         status="active",
         observed_at=_NOW,
         resolved_at=None,
@@ -84,7 +83,11 @@ class GovernanceDriftProviderTests(unittest.TestCase):
         surface = build_drift_governance_surface(bundles).to_dict()
         self.assertEqual(len(surface["contexts"]), 2)
         self.assertEqual(
-            {event for context in surface["contexts"] for event in context["event_types"]},
+            {
+                event
+                for context in surface["contexts"]
+                for event in context["event_types"]
+            },
             {"release_note", "incident_update"},
         )
 

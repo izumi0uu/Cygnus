@@ -5,7 +5,11 @@ from typing import Iterable
 from cygnus.domain.audience import AudienceFilter
 from cygnus.review.briefing import OwnerState, ReviewCommandBrief, ReviewRiskItem
 from cygnus.review.queries import build_review_command_brief
-from cygnus.review.service import ProposalBundle, build_review_risk_item, rank_review_item
+from cygnus.review.service import (
+    ProposalBundle,
+    build_review_risk_item,
+    rank_review_item,
+)
 from cygnus.review.surface import (
     ObservationState,
     PriorityStackCard,
@@ -24,7 +28,9 @@ def build_review_command_surface(
     observation: SurfaceObservation | None = None,
 ) -> ReviewCommandSurface:
     cards = tuple(_card_from_item(item) for item in brief.priority_items)
-    situation_frame = _build_situation_frame(briefing_note=briefing_note, items=brief.priority_items)
+    situation_frame = _build_situation_frame(
+        briefing_note=briefing_note, items=brief.priority_items
+    )
     return ReviewCommandSurface(
         surface_id=surface_id,
         headline=brief.headline,
@@ -44,10 +50,16 @@ def build_review_command_surface_from_bundles(
     bundles: Iterable[ProposalBundle],
     observation: SurfaceObservation | None = None,
 ) -> ReviewCommandSurface:
-    items = tuple(sorted((build_review_risk_item(bundle) for bundle in bundles), key=rank_review_item))
+    items = tuple(
+        sorted(
+            (build_review_risk_item(bundle) for bundle in bundles), key=rank_review_item
+        )
+    )
     if not items:
         if observation is None:
-            raise ValueError("empty review command surfaces require an explicit observation")
+            raise ValueError(
+                "empty review command surfaces require an explicit observation"
+            )
         return build_empty_review_command_surface(
             surface_id=surface_id,
             headline=headline,
@@ -128,9 +140,7 @@ def _build_situation_frame(
     urgent_items = sum(1 for item in items if item.urgency is UrgencyLevel.URGENT)
     owner_gaps = sum(1 for item in items if item.owner_state is OwnerState.UNASSIGNED)
     affected_surfaces = _dedupe_strings(
-        surface
-        for item in items
-        for surface in item.why_now.affected_surfaces
+        surface for item in items for surface in item.why_now.affected_surfaces
     )
     summary = (
         f"{len(items)} governance risk(s) are currently stacked; "
@@ -144,9 +154,7 @@ def _build_situation_frame(
         owner_gaps=owner_gaps,
         affected_surfaces=tuple(affected_surfaces),
         recommended_commands=_dedupe_strings(
-            command
-            for item in items[:3]
-            for command in item.recommended_actions
+            command for item in items[:3] for command in item.recommended_actions
         ),
     )
 
@@ -154,19 +162,24 @@ def _build_situation_frame(
 def _card_from_item(item: ReviewRiskItem) -> PriorityStackCard:
     return PriorityStackCard(
         risk_id=item.risk_id,
+        signal_ref=item.signal_ref,
         title=item.title,
         risk_type=item.risk_type,
         urgency=item.urgency,
         object_type=item.object_type,
         object_ref=item.object_ref,
         why_now_summary=item.why_now.summary,
-        audience_labels=tuple(_audience_label(audience) for audience in item.affected_audiences),
+        audience_labels=tuple(
+            _audience_label(audience) for audience in item.affected_audiences
+        ),
         affected_audiences=item.affected_audiences,
         affected_surfaces=item.why_now.affected_surfaces,
         owner_state=item.owner_state,
         queue_owner=item.queue_owner,
         command_actions=item.recommended_actions,
         primary_command=_primary_command(item),
+        assignment_trace_ref=item.assignment_trace_ref,
+        assignment_version=item.assignment_version,
     )
 
 
@@ -187,11 +200,7 @@ def _primary_command(item: ReviewRiskItem) -> str:
 
 def _available_commands(cards: tuple[PriorityStackCard, ...]) -> tuple[str, ...]:
     return tuple(
-        _dedupe_strings(
-            command
-            for card in cards
-            for command in card.command_actions
-        )
+        _dedupe_strings(command for card in cards for command in card.command_actions)
     )
 
 

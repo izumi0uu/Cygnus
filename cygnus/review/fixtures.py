@@ -5,7 +5,11 @@ from cygnus.domain.objects import KnowledgeObjectType
 from cygnus.evidence.records import EvidenceSourceType, FreshnessState, SupportEvidence
 from cygnus.review.briefing import OwnerState, ReviewRiskType
 from cygnus.review.providers import build_review_command_surface_from_bundles
-from cygnus.review.service import ProposalBundle, ReviewSignal, assemble_review_command_brief
+from cygnus.review.service import (
+    ProposalBundle,
+    ReviewSignal,
+    assemble_review_command_brief,
+)
 from cygnus.substrate.compilation_plan import (
     CompilationProposal,
     EvidenceSufficiency,
@@ -86,6 +90,7 @@ def sample_review_bundles() -> tuple[ProposalBundle, ...]:
             proposal=source_proposal,
             signal=ReviewSignal(
                 proposal_id="cp-source-1",
+                signal_ref="cp-source-1",
                 risk_type=ReviewRiskType.SOURCE_BLINDNESS,
                 affected_audiences=(eu_enterprise, internal_billing),
                 affected_surfaces=("help_center", "copilot"),
@@ -109,11 +114,16 @@ def sample_review_bundles() -> tuple[ProposalBundle, ...]:
             proposal=audience_mismatch_proposal,
             signal=ReviewSignal(
                 proposal_id="cp-audience-1",
+                signal_ref="cp-audience-1",
                 risk_type=ReviewRiskType.AUDIENCE_MISMATCH,
                 affected_audiences=(us_free, eu_enterprise),
                 affected_surfaces=("help_center", "copilot", "macro"),
                 trigger_signals=("rewrite_cluster", "audience_boundary_conflict"),
-                recommended_actions=("open_review", "restrict_publish", "split_variant"),
+                recommended_actions=(
+                    "open_review",
+                    "restrict_publish",
+                    "split_variant",
+                ),
             ),
             evidence=(
                 SupportEvidence(
@@ -132,6 +142,7 @@ def sample_review_bundles() -> tuple[ProposalBundle, ...]:
             proposal=drift_proposal,
             signal=ReviewSignal(
                 proposal_id="cp-drift-1",
+                signal_ref="cp-drift-1",
                 risk_type=ReviewRiskType.DRIFT,
                 affected_audiences=(eu_enterprise,),
                 affected_surfaces=("copilot", "help_center"),
@@ -155,11 +166,16 @@ def sample_review_bundles() -> tuple[ProposalBundle, ...]:
             proposal=ticket_pressure_proposal,
             signal=ReviewSignal(
                 proposal_id="cp-ticket-1",
+                signal_ref="cp-ticket-1",
                 risk_type=ReviewRiskType.TICKET_PRESSURE,
                 affected_audiences=(internal_billing,),
                 affected_surfaces=("copilot", "queue-sidebar"),
                 trigger_signals=("ticket_pressure", "rewrite_cluster"),
-                recommended_actions=("open_review", "assign_owner", "request_more_evidence"),
+                recommended_actions=(
+                    "open_review",
+                    "assign_owner",
+                    "request_more_evidence",
+                ),
             ),
             evidence=(
                 SupportEvidence(
@@ -177,14 +193,12 @@ def sample_review_bundles() -> tuple[ProposalBundle, ...]:
     )
 
 
-
 def sample_review_command_brief() -> dict[str, object]:
     return assemble_review_command_brief(
         brief_id="brief-1",
         headline="Today’s highest-leverage governance risks",
         bundles=sample_review_bundles(),
     )
-
 
 
 def sample_review_command_surface() -> dict[str, object]:

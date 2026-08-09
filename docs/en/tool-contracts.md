@@ -586,15 +586,15 @@ So the accurate current statement is not “Cygnus has finished approval governa
 - the contract says approval should belong to Cygnus
 - the code has not yet fully substantiated that governance truth
 
-### 13.5 Implemented governed-observation boundary (CYG-97)
+### 13.5 Implemented governed-observation boundary (CYG-97, CYG-101–104, CYG-108)
 `/api/command-center`, `/api/review-intake`, `/api/drift`, and `/api/source-blindness` now read from a request-scoped, permission-filtered `GovernanceReadSnapshot`; those runtime paths must not implicitly call `sample_*` fixtures.
 
 - Every governance-risk surface returns `observation`: `ready` means complete coverage, `partial` names both covered and missing detectors, and `unavailable` means a detector is not connected—not that there is no risk. Reasons and signals are machine codes rendered through client i18n.
 - Without a complete proposal bundle, Review Queue, drift, and source-blindness contexts must be empty and offer no governance command. Ordinary `WikiPageDraft` rows must not be projected into an owner, audience, surface, or risk.
-- A `Source.status="error"` row projects only to a `SourceFailureObservation` fact: visible linked refs may be returned, but `impact_state` is fixed to `unknown`, with no invented audience, surface, owner, or command.
-- `/api/recovery/overview` explicitly returns `rehearsal: true`; this read surface is not durable recovery truth.
+- A `Source.status="error"` row remains a source-failure fact, but the CYG-108 provider now projects impact inside the same request permission scope through visible `WikiPage.source_ids`, active audience bindings, and each object's latest durable publication and propagation. `impact_state="mapped"` means at least one visible Wiki relationship exists; `unmapped` means no governed Wiki impact is mapped in the current scope, not that there is no business impact. `audience_impacts` and `propagation_impacts` may come only from those persisted records; a raw source row cannot imply an owner, risk rank, or executable command.
+- `/api/recovery/overview`, `/api/recovery/window/{command_id}`, and `/api/recovery/downstream-reality-check/{command_id}` read permission-scoped persisted publication / propagation truth and return `persisted: true, rehearsal: false`; they do not fall back to rehearsal fixtures.
 
-The durable providers still missing for ticket pressure, release/incident drift, audience conflict, review assignment, and source impact remain explicit follow-up work. An empty array or green UI must never stand in for their health.
+CYG-101–104 and CYG-108 connect ticket/rewrite pressure, release/incident drift, audience conflict, review assignment, and source impact to persisted or persistently derived providers. A surface may return `ready` only after its detectors run completely with no unresolved relationship; an unresolved audience binding still requires `partial`, and provider failures must surface as `5xx` rather than an empty array or green UI.
 
 ### 13.6 Implemented governed session seam (CYG-92–96)
 Nanobot can now hand `request_ref`, optional `session_ref`, the support query, `audience_context`, and an optional prior `governance_context` to Cygnus through `POST /api/session-bridge/query`. Cygnus reloads the substrate-backed knowledge snapshot inside the request permission scope and returns one envelope containing `answer`, `source_trace`, `tool_trace`, `governance`, `continuity`, and the next portable `governance_context`.

@@ -79,7 +79,7 @@ Key views:
 
 ### H. Command Center / Morning Brief
 Purpose: act as the governance command entry to review, re-ranking today's highest-leverage items by risk instead of listing drafts by creation time. It is the risk-ranked entry to the Review Console (A), not a separate content store.
-Status: domain logic implemented (`cygnus/review/briefing.py`); UI not built.
+Status: implemented. Persisted governance data comes from command-center / recovery providers; the frontend entry is the `/console` Overview.
 
 Key views:
 - Situation Frame (today's system tension)
@@ -88,7 +88,7 @@ Key views:
 
 ### I. Propagation Ledger
 Purpose: after publish, show where a command propagated and where it is blocked. It is the post-publish view of Publication & Channel Rules (F).
-Status: domain logic implemented (`cygnus/publish/propagation.py`); UI not built.
+Status: implemented. The backend owns the durable publication / propagation ledger; the frontend entry is `/console/propagation`.
 
 Key views:
 - Propagation Status per supporting surface (synced / pending / failed / manual_action_required)
@@ -97,7 +97,7 @@ Key views:
 
 ### J. Recovery Window
 Purpose: around a single governance action, answer "did the system become more consistent?", showing before/after deltas and unresolved points. It verifies whether governance actually took effect.
-Status: planned (maps to Jira E4 / CYG-16, CYG-17); not yet implemented.
+Status: implemented. `/api/recovery/window/{command_id}` and the downstream reality check read only persisted recovery truth; the frontend entry is `/console/recovery/:commandId`.
 
 Key views:
 - before/after deltas (changes in rewrites / escalations / coverage gap / drift / publish conflict)
@@ -147,16 +147,16 @@ Key views:
 
 ## 6. V1 IA boundary
 ### Included in V1 depth
-- Command Center / Morning Brief (command entry; domain logic implemented, UI not built)
+- Command Center / Morning Brief (command entry; implemented)
 - Review Queue
 - Knowledge Objects
 - Ticket Insights
 - Coverage dashboard
 - basic Source Connector views
 - basic Publish Rule controls
-- Propagation Ledger (domain logic implemented, UI not built)
+- Propagation Ledger (implemented)
 - Copilot answer-consumption surface
-- Recovery Window (planned, not yet implemented — maps to Jira E4)
+- Recovery Window (implemented)
 
 ### Deferred from V1 depth
 - full customer-bot conversation builder

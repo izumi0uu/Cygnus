@@ -586,15 +586,15 @@ Cygnus 域层已实现、但**尚未作为工具暴露**的能力：
 - contract 已声明审批应属于 Cygnus
 - 代码尚未完整兑现这一治理真相
 
-### 13.5 已落地的 governed observation 边界（CYG-97）
+### 13.5 已落地的 governed observation 边界（CYG-97、CYG-101～104、CYG-108）
 `/api/command-center`、`/api/review-intake`、`/api/drift` 与 `/api/source-blindness` 现在都从请求级、权限已过滤的 `GovernanceReadSnapshot` 读取；这些 runtime path 不得隐式调用 `sample_*` fixture。
 
 - 每个治理 risk surface 返回 `observation`：`ready` 表示覆盖完整，`partial` 表示同时列出已覆盖和缺失 detector，`unavailable` 表示 detector 尚未接入而不是“没有风险”。`reason` 和 signal 均为 machine code，由客户端 i18n 展示。
 - 没有完整 proposal bundle 时，审阅队列、drift 与 source-blindness contexts 必须为空且没有治理命令；不得从普通 `WikiPageDraft` 推导 owner、audience、surface 或风险。
-- `Source.status="error"` 只能投影为 `SourceFailureObservation` 事实：可返回权限内关联 refs，但 `impact_state` 固定为 `unknown`，不能生成 audience、surface、owner 或命令。
-- `/api/recovery/overview` 显式返回 `rehearsal: true`；该 read surface 不是持久化恢复真相。
+- `Source.status="error"` 仍只产生来源失败事实，但 CYG-108 provider 会在同一请求权限作用域内沿可见 `WikiPage.source_ids`、active audience bindings、每对象最新 durable publication 与 propagation 投影影响：`impact_state="mapped"` 表示至少存在一条可见 Wiki 关联，`unmapped` 表示当前作用域内没有已映射的治理 Wiki 影响，并不代表没有业务影响。`audience_impacts` 与 `propagation_impacts` 只能来自这些持久化记录；不得从原始 source row 推导 owner、risk rank 或执行命令。
+- `/api/recovery/overview`、`/api/recovery/window/{command_id}` 与 `/api/recovery/downstream-reality-check/{command_id}` 读取权限内的持久化 publication / propagation 真相并返回 `persisted: true, rehearsal: false`；这些 read surface 不会回退到 rehearsal fixture。
 
-仍未接入的 durable provider（工单压力、发布/事故 drift、受众冲突、审阅分配、source impact）必须保持显式 follow-up，不能用空数组或绿色 UI 冒充健康状态。
+CYG-101～104 与 CYG-108 已把工单/改写压力、发布/事故 drift、受众冲突、审阅分配和 source impact 接入持久化或持久化派生 provider。只有 detector 完整执行且没有未解析关系时才可返回 `ready`；例如未解析 audience binding 仍必须返回 `partial`，provider 异常必须作为 `5xx` 暴露，不能用空数组或绿色 UI 冒充健康状态。
 
 ### 13.6 已落地的 governed session seam（CYG-92～96）
 Nanobot 现在可以通过 `POST /api/session-bridge/query` 把 `request_ref`、可选 `session_ref`、support query、`audience_context` 与可选的前一轮 `governance_context` 交给 Cygnus。Cygnus 在请求级权限范围内重新装载 substrate-backed knowledge snapshot，并返回统一 envelope：`answer`、`source_trace`、`tool_trace`、`governance`、`continuity` 与下一轮可携带的 `governance_context`。

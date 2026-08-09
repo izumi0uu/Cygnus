@@ -79,7 +79,7 @@
 
 ### H. Command Center / Morning Brief（指挥简报）
 用途：作为审阅的“治理指挥入口”，按风险重排今天最值得介入的项，而不是按创建时间列草稿。它是 Review Console（A）的风险排序入口，而非独立内容库。
-状态：域逻辑已实现（`cygnus/review/briefing.py`），UI 未建。
+状态：已实现。持久化治理数据由 command-center / recovery providers 提供，前端入口为 `/console` Overview。
 
 关键视图：
 - Situation Frame（今日系统 tension）
@@ -88,7 +88,7 @@
 
 ### I. Propagation Ledger（传播账本）
 用途：发布后显示命令传播到了哪里、卡在了哪里。它是 Publication & Channel Rules（F）的发布后视图。
-状态：域逻辑已实现（`cygnus/publish/propagation.py`），UI 未建。
+状态：已实现。durable publication / propagation ledger 由后端持有，前端入口为 `/console/propagation`。
 
 关键视图：
 - 各 supporting surface 的 Propagation Status（synced / pending / failed / manual_action_required）
@@ -97,7 +97,7 @@
 
 ### J. Recovery Window（恢复窗口）
 用途：围绕一次治理动作回答“系统是否因此更一致”，提供前后对比与未闭合点，用于验证治理是否真正生效。
-状态：规划中（对应 Jira E4 / CYG-16、CYG-17），尚未实现。
+状态：已实现。`/api/recovery/window/{command_id}` 与 downstream reality check 均只读取持久化恢复真相，前端入口为 `/console/recovery/:commandId`。
 
 关键视图：
 - 前后对比（rewrites / escalations / coverage gap / drift / publish conflict 的变化）
@@ -147,16 +147,16 @@
 
 ## 6. V1 页面边界
 ### Included in V1 IA
-- Command Center / Morning Brief（指挥入口；域逻辑已实现，UI 未建）
+- Command Center / Morning Brief（指挥入口；已实现）
 - Review Queue
 - Knowledge Objects
 - Ticket Insights
 - Coverage dashboard
 - Source connectors basic views
 - Publish rules basic controls
-- Propagation Ledger（域逻辑已实现，UI 未建）
+- Propagation Ledger（已实现）
 - Copilot answer consumption surface
-- Recovery Window（规划中，尚未实现 — 对应 Jira E4）
+- Recovery Window（已实现）
 
 ### Deferred from V1 IA depth
 - full customer bot conversation builder

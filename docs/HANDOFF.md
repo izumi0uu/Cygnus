@@ -1,4 +1,4 @@
-# HANDOFF — Cygnus Frontend (rebuilt 2026-06-22; trimmed 2026-06-27; synced 2026-07-26)
+# HANDOFF — Cygnus Frontend (rebuilt 2026-06-22; trimmed 2026-06-27; synced 2026-07-26; status refreshed 2026-08-09)
 
 > **Frontend-only handoff.** Backend governance/architecture is mentioned only where the
 > frontend depends on it as an API contract. Status reflects the working tree as of this
@@ -35,51 +35,60 @@ drawing numbers, `SEC-*` section codes, tolerance chips. i18n is **zh-first, en 
 | SourcesEvidence | `/console/sources` | ✅ | 14 | Source-blindness health board |
 | RecoveryDetail | `/console/recovery/:commandId` | ✅ | 13 | Recovery window + reality check (dimension lines) |
 | Login | `/login` | ✅ | 20 | DWG-000 access-control sheet, PlotterPanel reveal, bp-cmd submit |
-| Placeholder | `/console/audit` | ✅ | 7 | SEC-G reserved-sheet (no backend endpoint yet) |
+| Audit | `/console/audit` | ✅ | 8 | SEC-G durable governance transition ledger with scoped phase filters and bounded pagination |
 | PlotterDemo | `/demo/plotter` | ✅ | 8 | Standalone PlotterPanel demo, auth-gated |
 | Mastermind | `/demo/mastermind` | ✅ | 30 | Blueprint game page, auth-gated (engine in `@/game/mastermind`) |
 | Landing | `/` | ❌ (by design) | 0 | Independent dark brand page, framer-motion skiper6 roll, intentionally not blueprint |
 
 13 routed pages total: 2 public (`/`, `/login`); both `/demo` pages and all 9 console
 pages sit behind `RequireAuth` (demos gated in `7ee23eb`). The full drawing set is
-visually consistent: every console surface + Login + Placeholder + both demos is
-blueprint. Only Landing stays dark-brand on purpose.
+visually consistent: every console surface + Login + Audit + both demos is blueprint.
+Only Landing stays dark-brand on purpose.
 
 ## 3. Governance write path (the contract that must stay honest)
 
 `PublishPreviewModal` → `POST /api/publish/apply` → returns `PublishApplyResult`
 (`opened/removed/held` bindings + `action_log`, `rehearsal`, `persisted`).
 
-**Critical honesty contract:** `persisted: false, rehearsal: true`. The UI must never
-claim durable post-publish state. Enforced in three places:
+The endpoint has two explicit paths, and the server-owned flags are authoritative:
+- **durable publish:** a qualified preview carries `durable_command`; the SPA sends its
+  `draft_id`, `approval_ref`, `command_id`, action, channels, and reason unchanged. A
+  committed result is `persisted: true, rehearsal: false` and includes durable receipt IDs.
+- **explicit rehearsal:** `object_ref + action_key` without a durable envelope remains
+  `persisted: false, rehearsal: true`; it must never be presented as published truth.
+
+The UI enforces the distinction in three places:
 - type: `PublishApplyResult.rehearsal: boolean` / `.persisted: boolean` (`api.ts`)
-- result panel: renders the `notPersisted` note only when `!applyResult.persisted`
-  (`PublishPreviewModal`, i18n key `publish.notPersisted = "未持久化（演练）" / "not persisted (rehearsal)"`)
-- traceability drawer: PROJECTION block carries `persisted={trace.projection.persisted}`
+- result panel: durable results use the persisted label and past-tense verbs; rehearsal
+  results render `publish.notPersisted` and conditional verbs
+- traceability drawer: the backend result keeps its `persisted` / `rehearsal` flags, and
+  the drawer labels durable truth as an execution result rather than a projection
 
-- `POST /api/publish/apply` requires **admin**; all other `/api/*` require only an
-  authenticated user. (How the backend enforces this is backend's concern — the SPA just
-  sends the bearer token and treats the response shape as the contract.)
-- `applyPublishAction(objectRef, actionKey)` in `api.ts` is the only write caller.
+- `POST /api/publish/apply` requires **admin**; reads require an authenticated user.
+- `applyPublishAction(objectRef, actionKey, durableCommand)` in `api.ts` is the only SPA
+  publish write caller.
 
-## 4. Traceability + projection (post-apply what-if)
+## 4. Traceability + latest publish result
 
 `GET /api/traceability/{object_id}` returns the object→evidence→source→freshness chain,
-**plus an inline `projection` field** (`projection: PublishApplyResult | null`).
+plus an inline `projection` field (`PublishApplyResult | null`). The field name is retained
+for the SPA contract, but its flags define the truth class:
 
-- `projection = null` if no apply, or the snapshot for that object after an apply.
-- `KnowledgeObjects` drawer's `TraceabilitySection` renders a **PROJECTION** block
-  (opened/removed/held, tagged `not-persisted/rehearsal`) when `trace.projection` is present.
+- latest durable publication wins and returns `persisted: true, rehearsal: false`
+- only when no durable publication exists may the explicit rehearsal snapshot return
+  `persisted: false, rehearsal: true`
+- no durable publication and no rehearsal returns `projection = null`
+- `KnowledgeObjects` renders durable truth as **EXECUTION RESULT / 已持久化** and renders
+  only the non-persisted path as **PROJECTION / 演练**
 
-This is the correct shape per the invariant **"approval truth lives in Cygnus"**: projection
-truth is backend-held, not SPA session state. (An earlier attempt used a frontend
-`PublishActionProvider` context — that was deleted in `97a0fde` because it violated the
-invariant. Do not reintroduce SPA-held governance truth.)
+This preserves **"approval truth lives in Cygnus"**: both durable publication truth and
+explicit rehearsal state are backend-held, never promoted from SPA session state. An
+earlier frontend `PublishActionProvider` context was deleted in `97a0fde`; do not
+reintroduce SPA-held governance truth.
 
-> How projection truth is held server-side, and the proposal-id↔object-id bridge, are
-> backend implementation details and are intentionally not documented here. The SPA-facing
-> contract is only: call `applyPublishAction`, then `fetchTraceability(objectId)` may
-> return a `projection` snapshot for that object.
+The backend owns result precedence and the proposal-id↔object-id bridge. The SPA contract
+is only: apply the server-qualified command, then render the server-returned traceability
+result according to `persisted` and `rehearsal`.
 
 ## 5. Auth model (SPA-facing)
 
@@ -105,7 +114,7 @@ the command-center `priority_stack` (read-first by severity via `commandCenterSo
 
 ## 7. Component map
 
-- `components/layout/AppShell.tsx` (341 LOC) — directory panel + coordinate bar + canvas + zoom + clouds.
+- `components/layout/AppShell.tsx` (419 LOC) — desktop directory/coordinate/title-block shell; below 768px, an accessible one-column shell with modal navigation drawer, compact global controls, and no fixed title-block overlap.
 - `PublishPreviewModal.tsx` (367 LOC) — blast-radius modal (portal); APPLY + propagation link; result panel.
 - `CmdButton.tsx` (57 LOC) — opens PublishPreviewModal for publish-family commands (`PUBLISH_COMMANDS`).
 - `RevisionClouds.tsx` (224 LOC) — see §6; also exports `CloudSummaryButton`.
@@ -117,7 +126,7 @@ the command-center `priority_stack` (read-first by severity via `commandCenterSo
 - `mastermind/` — 4 files: `GuessRow`, `Palette`, `Peg`, `ResultOverlay` (framer-motion).
 - `ui/button.tsx`, `Segmented`, `Stat`, `Skeleton` (+`PageSkeleton`), `ThemeToggle`,
   `LangToggle`, `RequireAuth`.
-- `lib/`: `api.ts` (613 LOC, all fetchers via `authApi`), `auth.tsx`/`authApi.ts`,
+- `lib/`: `api.ts` (940 LOC, all fetchers via `authApi`), `auth.tsx`/`authApi.ts`,
   `vocab.ts`, `notifications.ts`, `theme.tsx`, `zoom.tsx`, `toast.tsx`, `useFocusTrap.ts`, `utils.ts` (`cn`).
 - `game/mastermind.ts` (172 LOC) — framework-agnostic game logic (secret code, feedback, types).
 
@@ -126,11 +135,9 @@ the command-center `priority_stack` (read-first by severity via `commandCenterSo
 1. **Projection is single-object, single-process** — acceptable only because
    `persisted:false` is explicit; do not treat projection as a truth source.
    (Backend storage details are out of scope here.)
-2. **Browser-level verification still owed** — APPLY→drawer→projection render and
-   revision-cloud click-outside/5-cap are API-level verified only (no browser-automation
-   dep installed).
-3. **Placeholder audit page** — blueprint-styled but has no backend endpoint; it's a
-   reserved sheet (SEC-G) by design until that surface exists.
+2. **Browser-level verification remains scoped** — APPLY→drawer→projection render and
+   revision-cloud click-outside/5-cap still need dedicated browser proof; the durable audit
+   ledger was browser-verified in CYG-109.
 
 ### 8.1 Governed observation truth (CYG-97)
 
@@ -138,9 +145,9 @@ The SPA consumes typed, machine-code `observation` payloads from `api.ts`; `Obse
 
 - `/console/queue`: partial review coverage; source failure facts and complete governance risks render in separate sections. An empty stack under partial coverage does **not** mean every detector is clear.
 - `/console/drift`: unavailable detector coverage; never render the old “no drift risk” copy unless the API is `ready`.
-- `/console/sources`: `SourceFailureObservation` cards display error, visible linked refs, timestamp, and `IMPACT · UNKNOWN`; they have no audience, surface, owner, or command affordance.
+- `/console/sources`: `SourceFailureObservation` cards display error, visible linked refs, timestamp, impact-mapping state (`IMPACT · MAPPED` or `IMPACT · UNMAPPED`), and any visible audience/propagation impacts; they have no command affordance.
 - `/console/objects`: an empty `nodes` array renders a same-size blueprint explanation instead of mounting `ForceGraph2D`.
-- `/console`: API-driven `rehearsal:true` renders a prominent non-dismissible banner before recovery loops.
+- `/console`: the recovery API returns persisted truth (`persisted:true`, `rehearsal:false`); the non-dismissible rehearsal banner remains conditional and must not appear for durable data.
 
 Compose-backed DB smoke passed on 2026-07-26 with the seeded administrator. Deterministic global ready/error sources plus a support Wiki page proved nonempty graph, partial queue/source observations, unavailable drift, and the rehearsal banner; a zero-department viewer did not receive the cross-department node/source or its traceability record (404). After seed cleanup, `/console/objects` rendered its same-size no-canvas explanation. Browser checks found no page-console errors; dark-mode toggle and keyboard focus both worked. `scripts/docker_smoke.sh` now bypasses ambient proxies for its loopback-only health checks.
 
@@ -213,6 +220,11 @@ Verified against `AppShell.tsx` + `zoom.tsx` + `CommandPalette.tsx`.
 - `g`-key chord: press `g` then `o/q/k/s/a/d/p/t` to jump to the 8 console sections.
 - `/` opens the command palette; `⌘K`/`CtrlK` toggles it.
 
+**Responsive shell (CYG-110):**
+- Below 768px, the single existing directory becomes a modal drawer; the menu trigger, close button, backdrop, route selection, focus trap, and Escape path all close predictably without duplicating `NAV` or the language-toggle id.
+- The compact coordinate bar keeps section identity, search, theme, language, and notifications. Mouse-centric readout/zoom metadata and the fixed title block are hidden; the canvas owns the full viewport width.
+- Browser proof covered 320px, 390×844, the 767/768px boundary, 900px, 1024px, and 1344×810. `/console` and `/console/audit` had no document-level horizontal overflow; desktop zoom (100% → 115% → FIT), command palette, mobile routing, backdrop, Tab trapping, Escape, notification popover, theme, and language controls remained operable with no console error or Vite overlay.
+
 **P4: Revision Cloud Notifications** — see §6.
 - SVG clouds at deterministic positions (hashed from notification ID).
 - Unread: high opacity + pulse for urgent; read: low opacity grayscale.
@@ -222,15 +234,16 @@ Verified against `AppShell.tsx` + `zoom.tsx` + `CommandPalette.tsx`.
 
 ## 13. API Consumption Status (SPA-facing contract)
 
-Verified against `lib/api.ts` (11 fetchers) + `lib/auth.tsx` (2 auth calls). Every fetcher
-routes through `authApi()`. 13 live endpoints total, no strays.
+Verified against `lib/api.ts`, `lib/auth.tsx`, and `lib/notifications.ts`. Every fetcher
+routes through `authApi()`.
 
 | Endpoint | Fetcher | Consumed by |
 |----------|---------|-------------|
 | `POST /api/auth/login` | — (`auth.tsx`) | Login |
 | `GET /api/auth/me` | — (`auth.tsx`) | auth identity + refresh |
-| `GET /api/command-center` | `fetchCommandCenter` | CommandPalette, `notifications.ts` (clouds/feed) |
+| `GET /api/command-center` | `fetchCommandCenter` | CommandPalette + Overview |
 | `GET /api/review-intake` | `fetchReviewIntake` | ReviewQueue |
+| `POST /api/review-assignments/{signal_ref}/commands` | `applyReviewAssignmentCommand` | AssignOwnerModal |
 | `GET /api/knowledge-graph` | `fetchKnowledgeGraph` | KnowledgeObjects |
 | `GET /api/traceability/{id}` | `fetchTraceability` | KnowledgeObjects drawer |
 | `GET /api/drift` | `fetchDriftSurface` | CoverageDrift |
@@ -238,24 +251,26 @@ routes through `authApi()`. 13 live endpoints total, no strays.
 | `GET /api/recovery/overview` | `fetchGovernanceOverview` | Overview |
 | `GET /api/recovery/window/{id}` | `fetchRecoveryWindow` | RecoveryDetail |
 | `GET /api/recovery/downstream-reality-check/{id}` | `fetchDownstreamRealityCheck` | RecoveryDetail |
-| `GET /api/publish-preview` | `fetchPublishPreview` | PublishPreviewModal, AudiencePublish |
+| `GET /api/publish-preview` | `fetchPublishPreview` | PublishPreviewModal + AudiencePublish |
+| `POST /api/publish/apply` | `applyPublishAction` | PublishPreviewModal (only SPA publish write caller) |
 | `GET /api/publish-propagation` | `fetchPublishPropagation` | Propagation |
-| `POST /api/publish/apply` | `applyPublishAction` | PublishPreviewModal (only write caller) |
-
-`/api/notifications` appears only as a comment in `notifications.ts` (a future persisted
-source); it is NOT called — notifications are derived from `command-center`'s
-`priority_stack` today.
+| `GET /api/notifications` | `fetchNotifications` | NotificationBell + revision clouds |
+| `POST /api/notifications/{id}/read` | `markNotificationRead` | NotificationBell |
+| `POST /api/notifications/read-all` | `markAllNotificationsRead` | NotificationBell |
+| `GET /api/governance/audit` | `fetchGovernanceAudit` | Audit (SEC-G) |
 
 ## 14. Governance Loop Status (frontend surfaces)
 
 ```
 看见风险     ✅ Overview + ReviewQueue
-审阅风险     ✅ ReviewQueue drawer
+审阅风险     ✅ ReviewQueue drawer + durable owner commands
 预览爆炸半径 ✅ PublishPreviewModal
-执行发布     ✅ POST /api/publish/apply (rehearsal, not persisted)
-跟踪传播     ✅ Propagation page
-验证恢复     ✅ RecoveryDetail page
-追溯证据     ✅ Traceability drawer in KnowledgeObjects (+ projection)
+执行发布     ✅ qualified durable publish; explicit fixture rehearsal stays labelled
+跟踪传播     ✅ Propagation page + durable propagation ledger
+验证恢复     ✅ RecoveryDetail + durable restart recovery reads
+追溯证据     ✅ KnowledgeObjects drawer (durable result takes precedence over rehearsal)
+通知修订     ✅ recipient-scoped persisted notification inbox + revision clouds
+审计治理事件 ✅ Audit page (`GET /api/governance/audit`) — durable, scoped, traceable ledger
 ```
 
 ## 15. Key Design Decisions

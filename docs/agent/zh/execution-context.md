@@ -70,8 +70,8 @@ Agent 必须保留以下纪律：
 ### 4.1.1 Governed observation truth
 - 治理读取必须先按权限作用域查询，再投影；不能用 `sample_*` 或 session memory 填充 runtime 结果。
 - `ready`、`partial`、`unavailable` 是 detector 覆盖状态，不是异常吞噬机制；`partial`/`unavailable` 的空数组不得写成“无风险”。
-- `SourceFailureObservation` 是来源失败事实，`impact_state="unknown"` 前不得推导风险、owner、audience、surface 或执行命令。
-- recovery overview 的 `rehearsal:true` 必须在任何客户端/agent summary 中保留；它不是持久化恢复真相。
+- `SourceFailureObservation` 仍是来源失败事实。CYG-108 只允许从权限内可见 `WikiPage.source_ids`、active audience bindings、最新 durable publication / propagation 投影 `impact_state="mapped|unmapped"`、`audience_impacts` 与 `propagation_impacts`；`unmapped` 仅表示当前权限作用域内没有已映射的治理 Wiki 影响，不等于没有业务影响，也不得从原始 source row 推导 risk、owner 或执行命令。
+- `/api/recovery/overview`、`/api/recovery/window/{command_id}` 与 downstream reality check 只读取权限内的持久化 publication / propagation 真相并返回 `persisted:true, rehearsal:false`；缺少 durable recovery truth 时必须保持 unavailable，不能回退到 fixture。
 - publish response / publish projection 的 `persisted:true` 只能来自已审批 typed `WikiPageDraft`、ready evidence、显式 channels 与 durable IDs 同事务落库；仅 `object_ref` 的 fixture 路径必须保持 `persisted:false`、`rehearsal:true`。
 - governance audit 的 `persisted:true` 只证明 append-only ledger event 已落库，不代表知识对象已发布或 propagation 已完成；audit read 必须在 SQL 内按 Wiki read scope 过滤，并对不存在与越权的 event 统一返回 `404`。
 - `/api/notifications` 是 durable recipient-scoped inbox：`read_at` 只投影为 `unread|read`，所有读取与状态迁移都在 SQL 内限制当前 recipient；前端不得从 command-center fixture 或 localStorage 派生通知。

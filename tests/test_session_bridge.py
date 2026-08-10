@@ -244,6 +244,7 @@ class GovernedSessionBridgeTests(unittest.TestCase):
                 "read_knowledge_object",
                 "search_support_evidence",
                 "get_source_trace",
+                "list_drift_alerts",
                 "propose_knowledge_object",
                 "update_draft_object",
                 "request_review",
@@ -257,10 +258,7 @@ class GovernedSessionBridgeTests(unittest.TestCase):
             {definition.name for definition in governed_session_tool_definitions()},
         )
         unavailable_names = {tool["name"] for tool in not_exposed}
-        self.assertEqual(
-            unavailable_names,
-            {"list_drift_alerts", "record_feedback_signal"},
-        )
+        self.assertEqual(unavailable_names, {"record_feedback_signal"})
         self.assertFalse(query_handoff["session_memory_is_truth"])
 
     def test_http_query_handoff_serializes_the_same_contract(self) -> None:

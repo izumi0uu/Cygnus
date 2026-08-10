@@ -18,6 +18,11 @@ from cygnus.integrations.governed_draft_review_tools import (
     draft_review_tool_bindings,
     draft_review_tool_definitions,
 )
+from cygnus.integrations.governed_drift_tools import (
+    GovernedDriftTools,
+    drift_tool_bindings,
+    drift_tool_definitions,
+)
 from cygnus.integrations.governed_session_tools import (
     governed_session_tool_definition,
     governed_session_tool_definitions,
@@ -48,6 +53,7 @@ __all__ = [
     "GovernanceDisposition",
     "GovernedKnowledgeTools",
     "GovernedDraftReviewTools",
+    "GovernedDriftTools",
     "GovernedPublishTools",
     "GovernedQueryRequest",
     "GovernedSessionBridge",
@@ -59,6 +65,8 @@ __all__ = [
     "build_governed_tool_registry",
     "draft_review_tool_bindings",
     "draft_review_tool_definitions",
+    "drift_tool_bindings",
+    "drift_tool_definitions",
     "governed_session_tool_definition",
     "governed_session_tool_definitions",
     "publish_tool_bindings",

@@ -104,7 +104,10 @@ class AudienceBindingConflictRecord:
     @property
     def conflict_ref(self) -> str:
         ordered = sorted((str(self.left.id), str(self.right.id)))
-        return "audience-conflict:" + hashlib.sha256(":".join(ordered).encode()).hexdigest()
+        return (
+            "audience-conflict:"
+            + hashlib.sha256(":".join(ordered).encode()).hexdigest()
+        )
 
     @property
     def reason(self) -> str:
@@ -228,6 +231,7 @@ async def list_audience_bindings(
     *,
     page_id: uuid.UUID | None = None,
     object_ref: str | None = None,
+    binding_keys: Iterable[str] | None = None,
     channel: str | None = None,
     lifecycle_state: AudienceBindingLifecycle | None = None,
     page_scope_clause: ColumnElement[bool] | None = None,
@@ -240,6 +244,13 @@ async def list_audience_bindings(
         statement = statement.where(GovernanceAudienceBinding.page_id == page_id)
     if object_ref is not None:
         statement = statement.where(GovernanceAudienceBinding.object_ref == object_ref)
+    if binding_keys is not None:
+        requested_binding_keys = tuple(dict.fromkeys(binding_keys))
+        if not requested_binding_keys:
+            return ()
+        statement = statement.where(
+            GovernanceAudienceBinding.binding_key.in_(requested_binding_keys)
+        )
     if channel is not None:
         statement = statement.where(GovernanceAudienceBinding.channel == channel)
     if lifecycle_state is not None:
@@ -272,6 +283,7 @@ def audience_filter_from_binding(record: GovernanceAudienceBinding) -> AudienceF
 
 def publish_binding_from_record(record: GovernanceAudienceBinding) -> PublishBinding:
     from cygnus.publish.preview import PublishBinding
+
     return PublishBinding(
         audience_filter=audience_filter_from_binding(record),
         channel=record.channel,
@@ -339,6 +351,7 @@ def publish_conflicts_from_records(
     bindings: Iterable[GovernanceAudienceBinding],
 ) -> tuple[PublishConflict, ...]:
     from cygnus.publish.preview import PublishConflict
+
     by_key: dict[tuple[AudienceFilter, str], PublishConflict] = {}
     for conflict in detect_audience_binding_conflicts(bindings):
         for record in (conflict.left, conflict.right):

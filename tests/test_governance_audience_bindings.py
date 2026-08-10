@@ -206,7 +206,9 @@ class AudienceBindingServiceTests(unittest.TestCase):
                     )
                 )
 
-    def test_overlap_detection_uses_wildcards_and_ignores_inactive_bindings(self) -> None:
+    def test_overlap_detection_uses_wildcards_and_ignores_inactive_bindings(
+        self,
+    ) -> None:
         broad = _binding(variant_ref="broad", binding_key="broad")
         enterprise = _binding(
             variant_ref="enterprise",
@@ -294,6 +296,7 @@ class AudienceBindingServiceTests(unittest.TestCase):
             list_audience_bindings(
                 session,
                 object_ref="ko-billing-policy",
+                binding_keys=("binding-a", "binding-b"),
                 page_scope_clause=WikiPage.id.is_(None),
             )
         )
@@ -311,6 +314,8 @@ class AudienceBindingServiceTests(unittest.TestCase):
         self.assertIn("JOIN wiki_pages", sql)
         self.assertIn("wiki_pages.id IS NULL", sql)
         self.assertIn("ko-billing-policy", sql)
+        self.assertIn("binding-a", sql)
+        self.assertIn("binding-b", sql)
 
     def test_publish_candidate_comes_only_from_persisted_active_bindings(self) -> None:
         binding = _binding(
@@ -378,6 +383,7 @@ class AudienceBindingApiTests(unittest.TestCase):
     startup_patches: list[Any]
     client: TestClient
     admin: SimpleNamespace
+
     def setUp(self) -> None:
         self.startup_patches = [
             patch(

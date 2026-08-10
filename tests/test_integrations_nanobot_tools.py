@@ -145,6 +145,7 @@ class NanobotToolIntegrationTests(unittest.TestCase):
             "search_knowledge_objects",
             "search_support_evidence",
             "validate_publish_policy",
+            "list_drift_alerts",
         }
         restricted_writer_names = {
             "propose_knowledge_object",
@@ -163,6 +164,7 @@ class NanobotToolIntegrationTests(unittest.TestCase):
         update_tool = registered_tools["update_draft_object"]
         review_tool = registered_tools["request_review"]
         feedback_tool = registered_tools["read_review_feedback"]
+        drift_tool = registered_tools["list_drift_alerts"]
         if (
             validate_tool is None
             or publish_tool is None
@@ -170,6 +172,7 @@ class NanobotToolIntegrationTests(unittest.TestCase):
             or update_tool is None
             or review_tool is None
             or feedback_tool is None
+            or drift_tool is None
         ):
             raise AssertionError("governed session tools were not registered")
         self.assertIs(requirement_for(validate_tool.fn), ANY_AUTHENTICATED)
@@ -178,4 +181,5 @@ class NanobotToolIntegrationTests(unittest.TestCase):
         self.assertIs(requirement_for(update_tool.fn), CAN_CONTRIBUTE_WIKI)
         self.assertIs(requirement_for(review_tool.fn), CAN_CONTRIBUTE_WIKI)
         self.assertIs(requirement_for(feedback_tool.fn), ANY_AUTHENTICATED)
+        self.assertIs(requirement_for(drift_tool.fn), ANY_AUTHENTICATED)
         self.assertIn("Never treat chat history", mcp.instructions)

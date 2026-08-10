@@ -237,10 +237,7 @@ def session_bridge_capabilities(
                 "availability": "not_exposed",
                 "reason": "durable_governance_command_adapter_required",
             }
-            for name in (
-                "list_drift_alerts",
-                "record_feedback_signal",
-            )
+            for name in ("record_feedback_signal",)
         ],
     }
 

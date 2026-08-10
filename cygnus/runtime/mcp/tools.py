@@ -12,12 +12,17 @@ All tools verify the employee's MCP token and enforce knowledge_type scope:
     get_knowledge_type_docs: enforce per-source scope via apply_scope_filter.
 """
 
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
 from fastmcp import FastMCP
+from pydantic.json_schema import WithJsonSchema
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.integrations.governed_draft_review_tools import GovernedDraftReviewTools
+from cygnus.integrations.governed_drift_tools import (
+    GovernedDriftTools,
+    normalize_drift_alert_arguments,
+)
 from cygnus.integrations.governed_publish_tools import GovernedPublishTools
 from cygnus.integrations.governed_session_tools import governed_session_tool_definition
 from cygnus.integrations.mcp_auth import ResolvedIdentity
@@ -31,6 +36,18 @@ from cygnus.runtime.mcp.permissions import (
     CAN_REVIEW_WIKI,
     kb_tool,
 )
+
+_DRIFT_TOOL_PARAMETERS = governed_session_tool_definition(
+    "list_drift_alerts"
+).parameters["properties"]
+_DriftFiltersInput = Annotated[
+    object | None,
+    WithJsonSchema(_DRIFT_TOOL_PARAMETERS["filters"]),
+]
+_DriftLimitInput = Annotated[
+    object,
+    WithJsonSchema(_DRIFT_TOOL_PARAMETERS["limit"]),
+]
 
 # ---------------------------------------------------------------------------
 # Auth helpers
@@ -146,12 +163,31 @@ async def _get_governed_draft_review_tools(
     return GovernedDraftReviewTools(session, actor=employee), None
 
 
-def _structured_tool_error(summary: str, *, code: str = "scope_denied") -> str:
+async def _get_governed_drift_tools(
+    identity: ResolvedIdentity,
+    session: AsyncSession,
+) -> tuple[GovernedDriftTools | None, str | None]:
+    """Resolve scoped durable drift truth within this MCP request session."""
+    from cygnus.governance.drift_signals import load_drift_signal_provider
+
+    employee = await _load_identity_employee(identity, session)
+    if employee is None:
+        return None, "Authenticated employee no longer exists."
+    provider = await load_drift_signal_provider(session, current_user=employee)
+    return GovernedDriftTools(provider), None
+
+
+def _structured_tool_error(
+    summary: str,
+    *,
+    code: str = "scope_denied",
+    status: str = "denied",
+) -> str:
     import json
 
     return json.dumps(
         {
-            "status": "denied",
+            "status": status,
             "summary": summary,
             "data": {},
             "warnings": [],
@@ -424,6 +460,48 @@ def register_tools(mcp: FastMCP):
         if tools is None:
             return _structured_tool_error(error or "Governed retrieval is unavailable.")
         return _serialize_tool_result(tools.get_source_trace(object_id=object_id))
+
+    @kb_tool(
+        mcp,
+        requires=ANY_AUTHENTICATED,
+        name=governed_session_tool_definition("list_drift_alerts").name,
+        description=governed_session_tool_definition("list_drift_alerts").description,
+    )
+    @logged_tool("list_drift_alerts")
+    async def list_drift_alerts(
+        filters: _DriftFiltersInput = None,
+        limit: _DriftLimitInput = 20,
+    ) -> str:
+        """Read current durable release and incident drift alerts in scope."""
+        try:
+            normalized_filters, normalized_limit = normalize_drift_alert_arguments(
+                filters=filters,
+                limit=limit,
+            )
+        except ValueError as exc:
+            return _structured_tool_error(
+                str(exc),
+                code="invalid_arguments",
+                status="invalid",
+            )
+
+        identity, error = await _get_identity()
+        if identity is None:
+            return _structured_tool_error(error or "Authentication required.")
+
+        from cygnus.runtime.database import async_session_factory
+
+        async with async_session_factory() as session:
+            tools, error = await _get_governed_drift_tools(identity, session)
+            if tools is None:
+                return _structured_tool_error(
+                    error or "Governed drift alerts are unavailable."
+                )
+            payload = tools.list_drift_alerts(
+                filters=normalized_filters,
+                limit=normalized_limit,
+            )
+        return _serialize_tool_result(payload)
 
     @kb_tool(
         mcp,

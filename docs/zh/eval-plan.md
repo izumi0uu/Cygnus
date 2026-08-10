@@ -87,57 +87,72 @@ Cygnus 最应该重投的是这一层。
 - known-issue answer routing
 
 ## 6. Eval 方法组合
-Cygnus 不应依赖单一评估方法。
+Cygnus 应使用能证明相关真相的最窄评估方法。CYG-117 只实现离线、确定性的领域层。
 
 ### 6.1 Deterministic verifiers
-当真相足够清晰时，优先使用确定性校验。
+当真相足够清晰时，使用确定性检查。
 
 例如：
-- required citations present
-- trace refs resolve
-- audience visibility is legal
-- publication state transition is legal
-- unapproved publish is blocked
+- required citations 存在
+- trace refs 可解析
+- audience visibility 合法
+- stale guidance 冲突时选择 fresh evidence
+- unsupported request 返回 fallback、restricted 或 escalate，而不是暴露直接答案
+- approval 与 publish-policy 结果符合既有 governance 路径
 
-### 6.2 Fixture-based offline tasks
-使用固定 task fixtures 做可重复的回归检测。
+### 6.2 CYG-117 固定的 production-shaped corpus
+`production_eval_cases()` 返回十个按稳定 `case_id` 排序的 case；以下五个 family 各有且仅有两个 case。
 
-建议 fixture 家族：
-- 不同 plan tier 下的 refund policy
-- 不同 product version 下的 known issue
-- region-specific feature availability
-- stale article 与新 release note 冲突
-- ticket-cluster 到 troubleshooting-flow 的转化
+| Family identifier | Fixture 范围 |
+|---|---|
+| `plan_tier_refund` | 按 plan tier 区分的退款政策 |
+| `product_version_known_issue` | 按 product version 区分的 known issue |
+| `region_feature_availability` | 区域特定的 feature availability |
+| `freshness_conflict` | stale guidance 与 fresh evidence 的冲突 |
+| `ticket_cluster_draft` | 支持 unpublished troubleshooting draft 的 ticket-cluster evidence 及其 policy expectations |
 
-### 6.3 Judge-assisted checks
-只有在 deterministic truth 不够时，才用 evaluator model。
+corpus 包含正向与负向 audience boundary、supported 与 unsupported query、fresh/stale 冲突、unpublished troubleshooting draft，以及 publish-policy expectations。“Production-shaped”表示 fixture 使用 Cygnus domain object 与 evidence contract；不表示它读取生产数据或调用 provider。
 
-适合的使用场景：
-- answer clarity
-- troubleshooting usefulness
-- escalation explanation 是否可理解
+### 6.3 CYG-117 gate 之外的方法
+当 deterministic truth 不足时，judge-assisted check 仍可能适用于 answer clarity 或 troubleshooting usefulness 等维度。但它不属于 CYG-117：该 gate 不调用 evaluator model，也不产生 judge-model score。
 
-重要规则：
-- judge-assisted eval 必须尽量基于 retrieved evidence 与 trace，而不是只看输出文本
+以后若增加 judge-assisted evaluation，应基于 retrieved evidence 与 trace，而不是只看原始输出文本。
 
-## 7. 推荐的 starter regression gates
-这些是推荐的**初始** gate，不是最终永久阈值。
+## 7. CYG-117 确定性领域 eval gate
 
-### 7.1 Merge-blocking gates
-- publish-policy suite 必须 100% 通过
-- approval-required fixture set 必须 100% 通过
-- wrong-audience fixture set 必须 100% 通过
-- retrieval relevance suite 不允许超过约定容忍度的回归
+### 7.1 命令与 report contract
+在仓库根目录运行：
 
-### 7.2 Pre-rollout gates
-- external answers 的 citation coverage 应保持在约定最低值以上
-- unsupported / unsafe answer cases 应该 escalate，而不是猜
-- freshness-sensitive fixtures 在存在新证据时，不应继续提供 stale variant
+```bash
+uv run python scripts/domain_eval_gate.py
+```
 
-## 8. Business-layer metrics
-当 workflow 已经技术上正确后，真正重要的是这些指标。
+stdout 是 `EvalReport.to_dict()` 的稳定、排序后 JSON 序列化结果：包括 suite 状态、case/check 汇总，以及按 `case_id` 排序的 case result；每个 result 包含适用的 check 与失败细节。`--quiet` 会抑制 stdout，但不改变状态契约。
 
-推荐业务指标：
+仅当 `report.passed` 为 true，即所有 case 和所有适用 check 都通过时，命令才退出 `0`。任一 case 或 check 失败时退出 `1`。CI 应使用该进程状态作为 merge-blocking signal，而不是解析说明文字。
+
+### 7.2 Merge-blocking checks
+CYG-117 没有容忍区间或 judge-model threshold。所有适用的确定性 check 都必须通过：
+- `object_retrieval`
+- `audience_restriction`
+- `trace_resolution`
+- `citation_grounding`
+- `freshness_preference`
+- `unsupported_escalation`
+- `approval_required`
+- `publish_policy`
+
+预期 object/evidence ref 是必须出现的子集；forbidden object ref 不得出现在 answer 或 alternatives 中。supported answer 缺少要求的 trace/evidence ID 时，trace/citation check 失败。unsupported case 必须返回 fallback、escalation 或 restricted truth，且不能暴露直接答案。
+
+### 7.3 Runtime 与 truth boundaries
+- retrieval 经过既有 `GovernedSessionBridge`；publish-policy expectation 经过既有 `GovernedPublishTools.validate_publish_policy`。gate 不会重新定义 audience、lifecycle、freshness、escalation、approval 或 publish rule。
+- fixture 直接构造 domain object 与 evidence。它们不导入 `sample_*`、不使用替代性的 fallback fixture、不读取数据库，也不调用 live network/provider。预期的 fallback/restricted/escalation disposition 是可观察结果，不是 fixture source fallback。
+- session memory 不是 retrieval 或 policy truth。
+- judge model 不属于该 gate。
+- report 只提供确定性回归证据。它不证明 feedback routing、在线 business KPI instrumentation 或 business-impact evidence 已存在。
+
+## 8. 该 gate 之外的 Business-layer metrics
+以下指标仍是独立在线层的推荐业务度量：
 - human rewrite rate
 - suggestion acceptance rate
 - unsupported answer rate
@@ -146,7 +161,7 @@ Cygnus 不应依赖单一评估方法。
 - ticket-cluster to draft conversion rate
 - review-to-publish cycle time
 
-这是 Cygnus 证明价值的位置，而不是“agent 看起来很聪明”。
+CYG-117 既不路由 feedback，也不测量这些 KPI。domain report 通过不能被表述为 business impact 的证据。
 
 ## 9. Failure-to-eval loop
 每个真实失败，最终都应该进入下面某一种结果：
@@ -170,22 +185,16 @@ Cygnus 应至少保留足够结构来回答：
 
 缺少这些信息，evaluator 输出也会越来越不可信。
 
-## 11. 推荐第一阶段实施顺序
-1. deterministic publish / approval / audience fixtures
-2. retrieval + traceability offline fixtures
-3. drafting fixtures
-4. online support KPIs 与 alerts
-5. judge-assisted 的模糊质量层
+## 11. 推荐的后续评估层
+1. 从观察到的失败中扩充 deterministic case，同时不弱化固定 gate contract
+2. 在存在可观察契约时，增加更广的 drafting fixture
+3. 只有在 durable evidence path 存在后，才对 online support KPI 与 feedback routing 做 instrumentation
+4. 仅对 deterministic check 无法证明的质量维度考虑 judge-assisted layer
 
 ## 12. 当前结论
-对 Cygnus 来说，最重要的 eval 不是 generic “agent benchmark” 分数。
+CYG-117 gate 把确定性的 governance correctness 和领域专用离线 fixture 变成 merge-blocking check。它通过既有 governed retrieval 与 publish-policy path 评估 Cygnus domain control plane；不会把 Cygnus 变成另一个 agent loop，也不会把真相移入 Nanobot session memory。
 
-更强的 eval 结构是：
-- 确定性的 governance correctness
-- domain-specific offline fixtures
-- online business feedback
-
-这比追 benchmark 更贴合产品定义。
+generic agent benchmark、judge-model quality score、feedback routing 与在线 business impact 均不属于该 gate，也不能由该 report 证明。
 
 ## 13. 参考资料
 - AI Engineering from Scratch — Eval-Driven Agent Development  

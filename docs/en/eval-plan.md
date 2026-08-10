@@ -87,57 +87,72 @@ Suggested checks:
 - known-issue answer routing
 
 ## 6. Evaluation method mix
-Cygnus should not depend on a single evaluation method.
+Cygnus should use the narrowest evaluation method that can establish the relevant truth. CYG-117 implements the offline deterministic domain layer only.
 
 ### 6.1 Deterministic verifiers
-Prefer deterministic checks when the truth is crisp.
+Use deterministic checks when the truth is crisp.
 
 Examples:
-- required citations present
+- required citations are present
 - trace refs resolve
 - audience visibility is legal
-- publication state transition is legal
-- unapproved publish is blocked
+- fresh evidence wins when stale guidance conflicts
+- unsupported requests fall back, restrict, or escalate instead of exposing a direct answer
+- approval and publish-policy outcomes match the existing governance path
 
-### 6.2 Fixture-based offline tasks
-Use fixed task fixtures for repeatable regression detection.
+### 6.2 CYG-117 fixed production-shaped corpus
+`production_eval_cases()` returns ten cases, sorted by stable `case_id`: exactly two cases in each of these five families.
 
-Suggested fixture families:
-- refund policy by plan tier
-- known issue by product version
-- region-specific feature availability
-- stale article vs new release note conflict
-- ticket-cluster to troubleshooting-flow conversion
+| Family identifier | Fixture scope |
+|---|---|
+| `plan_tier_refund` | refund policy by plan tier |
+| `product_version_known_issue` | known issue by product version |
+| `region_feature_availability` | region-specific feature availability |
+| `freshness_conflict` | stale guidance conflicting with fresher evidence |
+| `ticket_cluster_draft` | ticket-cluster evidence supporting an unpublished troubleshooting draft and its policy expectations |
 
-### 6.3 Judge-assisted checks
-Use an evaluator model only where deterministic truth is insufficient.
+The corpus includes positive and negative audience boundaries, supported and unsupported queries, fresh/stale conflicts, an unpublished troubleshooting draft, and publish-policy expectations. “Production-shaped” means the fixtures use Cygnus domain objects and evidence contracts; it does not mean they read production data or call a provider.
 
-Good uses:
-- answer clarity
-- troubleshooting usefulness
-- whether an escalation explanation is understandable
+### 6.3 Methods outside the CYG-117 gate
+Judge-assisted checks may remain useful where deterministic truth is insufficient, such as answer clarity or troubleshooting usefulness. They are not part of CYG-117: the gate invokes no evaluator model and produces no judge-model score.
 
-Important rule:
-- judge-assisted evals should be grounded on the retrieved evidence and trace, not only on raw output text
+Any later judge-assisted evaluation should be grounded on retrieved evidence and trace rather than raw output text alone.
 
-## 7. Recommended starter regression gates
-These are recommended **initial** gates, not final permanent thresholds.
+## 7. CYG-117 deterministic domain eval gate
 
-### 7.1 Merge-blocking gates
-- publish-policy suite must pass 100%
-- approval-required fixture set must pass 100%
-- wrong-audience fixture set must pass 100%
-- retrieval relevance suite must not regress beyond an agreed tolerance
+### 7.1 Command and report contract
+Run the gate from the repository root:
 
-### 7.2 Pre-rollout gates
-- citation coverage for external answers should stay above the agreed minimum
-- unsupported / unsafe answer cases should escalate rather than guess
-- freshness-sensitive fixtures should not serve stale variants when fresh evidence exists
+```bash
+uv run python scripts/domain_eval_gate.py
+```
 
-## 8. Business-layer metrics
-These are the metrics that matter after the workflow is technically correct.
+Stdout is the stable, sorted JSON serialization of `EvalReport.to_dict()`: suite status, aggregate case/check totals, and case results ordered by `case_id`, including each applicable check and failure detail. `--quiet` suppresses stdout without changing the status contract.
 
-Recommended business metrics:
+The command exits `0` only when `report.passed` is true—every case and every applicable check passed. It exits `1` when any case or check fails. CI should use that process status as the merge-blocking signal rather than parsing prose.
+
+### 7.2 Merge-blocking checks
+CYG-117 has no tolerance band or judge-model threshold. Every applicable deterministic check must pass:
+- `object_retrieval`
+- `audience_restriction`
+- `trace_resolution`
+- `citation_grounding`
+- `freshness_preference`
+- `unsupported_escalation`
+- `approval_required`
+- `publish_policy`
+
+Expected object and evidence refs are required subsets; forbidden object refs must not appear in either the answer or alternatives. Supported answers fail trace/citation checks when required trace or evidence IDs are absent. Unsupported cases must return fallback, escalation, or restricted truth without exposing a direct answer.
+
+### 7.3 Runtime and truth boundaries
+- Retrieval runs through the existing `GovernedSessionBridge`; publish-policy expectations run through the existing `GovernedPublishTools.validate_publish_policy`. The gate does not restate audience, lifecycle, freshness, escalation, approval, or publish rules.
+- Fixtures build domain objects and evidence directly. They do not import `sample_*`, use substitute fallback fixtures, read the database, or call live networks/providers. Expected fallback/restricted/escalation dispositions are observable outcomes, not fixture-source fallbacks.
+- Session memory is not retrieval or policy truth.
+- Judge models are outside this gate.
+- The report is deterministic regression evidence only. It does not establish that feedback routing, online business KPI instrumentation, or business-impact evidence exists.
+
+## 8. Business-layer metrics outside this gate
+The following remain recommended business measures for a separately instrumented online layer:
 - human rewrite rate
 - suggestion acceptance rate
 - unsupported answer rate
@@ -146,7 +161,7 @@ Recommended business metrics:
 - ticket-cluster to draft conversion rate
 - review-to-publish cycle time
 
-This is where Cygnus proves value beyond “the agent looked smart.”
+CYG-117 neither routes feedback nor measures these KPIs. A passing domain report must not be presented as evidence of business impact.
 
 ## 9. Failure-to-eval loop
 Every real failure should produce one of these outcomes:
@@ -170,22 +185,16 @@ Cygnus should retain enough trace structure to answer:
 
 Without that, evaluator outputs become hard to trust.
 
-## 11. Suggested first implementation order
-1. deterministic publish / approval / audience fixtures
-2. retrieval + traceability offline fixtures
-3. drafting fixtures
-4. online support KPIs and alerts
-5. judge-assisted quality layer for fuzzy answer quality
+## 11. Recommended next evaluation layers
+1. grow deterministic cases from observed failures without weakening the fixed gate contract
+2. add broader drafting fixtures where observable contracts exist
+3. instrument online support KPIs and feedback routing only when their durable evidence paths exist
+4. consider a judge-assisted layer only for quality dimensions deterministic checks cannot establish
 
 ## 12. Current conclusion
-The most important Cygnus evals are not generic “agent benchmark” scores.
+The CYG-117 gate makes deterministic governance correctness and domain-specific offline fixtures merge-blocking. It evaluates the Cygnus domain control plane through existing governed retrieval and publish-policy paths; it does not turn Cygnus into another agent loop or move truth into Nanobot session memory.
 
-The strongest eval shape is:
-- deterministic governance correctness
-- domain-specific offline fixtures
-- online business feedback
-
-That matches the product definition much better than benchmark-chasing.
+Generic agent benchmarks, judge-model quality scores, feedback routing, and online business impact remain outside this gate and are not evidenced by its report.
 
 ## 13. References
 - AI Engineering from Scratch — Eval-Driven Agent Development  

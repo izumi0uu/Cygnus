@@ -16,7 +16,7 @@ The intended relationship is:
 Current engineering strategy (status as of 2026-08):
 - P1/P2/P2.5—the Arkon full-port baseline, runability recovery, and post-P2 internalization/upstream-cutover lane—and the first support-verticalization waves are complete (CYG-6–17, CYG-23, CYG-24, CYG-69–91)
 - CYG-92–96 implements a request-scoped governed Nanobot ↔ Cygnus session seam that reloads and revalidates Cygnus truth on every turn without treating session memory as knowledge truth
-- CYG-98–105 plus CYG-108/109/111/112/113/114/115/116 provide durable ledger/audit, notifications, ticket/rewrite pressure, release/incident drift, audience bindings/conflicts, review assignments, source impact, publish/propagation, golden-path proof, durable publish and draft/review tools, scoped durable drift alerts, durable consumption feedback, and truthful source-evidence observation presentation
+- CYG-98–105 plus CYG-108/109/111/112/113/114/115/116/117 provide durable ledger/audit, notifications, ticket/rewrite pressure, release/incident drift, audience bindings/conflicts, review assignments, source impact, publish/propagation, golden-path proof, durable publish and draft/review tools, scoped durable drift alerts, durable consumption feedback, truthful source-evidence observation presentation, and a deterministic production-shaped domain eval gate
 - the shared session/MCP contract marks twelve governed tools `ready`: four retrieval tools; `list_drift_alerts`; `propose_knowledge_object`, `update_draft_object`, `request_review`, and `read_review_feedback`; `record_feedback_signal`; `validate_publish_policy`; and `publish_knowledge_object`; capabilities reports `not_exposed:[]`
 - keep product-shell parity as a deferred non-roadmap lane by default
 - classify `auth / admin / wiki` shell candidates before any shell-parity implementation, and keep non-support pages isolated unless they directly unblock support verticalization
@@ -41,7 +41,7 @@ Current engineering strategy (status as of 2026-08):
 - [`docs/zh/tool-contracts.md`](./zh/tool-contracts.md) — Tool Contracts（Nanobot ↔ Cygnus）
 - [`docs/zh/loop-boundaries.md`](./zh/loop-boundaries.md) — Loop Boundaries
 - [`docs/zh/agent-harness.md`](./zh/agent-harness.md) — Agent Harness（Cygnus 如何借 agent harness，而不漂成 generic agent framework）
-- [`docs/zh/eval-plan.md`](./zh/eval-plan.md) — Eval Plan（评估、回归门禁、业务指标）
+- [`docs/zh/eval-plan.md`](./zh/eval-plan.md) — Eval Plan（CYG-117 确定性领域门禁、评估层、回归门禁与业务指标边界）
 - [`docs/zh/rag-strategy.md`](./zh/rag-strategy.md) — RAG Strategy（Arkon-style LLM wiki retrieval substrate 如何服务 support knowledge objects）
 - [`docs/zh/product-story.md`](./zh/product-story.md) — 完整产品 Story
 - [`docs/zh/frontend-story.md`](./zh/frontend-story.md) — 前端行为 Story
@@ -72,7 +72,7 @@ Current engineering strategy (status as of 2026-08):
 - [`docs/en/tool-contracts.md`](./en/tool-contracts.md) — Tool Contracts (Nanobot ↔ Cygnus)
 - [`docs/en/loop-boundaries.md`](./en/loop-boundaries.md) — Loop Boundaries
 - [`docs/en/agent-harness.md`](./en/agent-harness.md) — Agent Harness (how Cygnus borrows harness discipline without becoming a generic agent framework)
-- [`docs/en/eval-plan.md`](./en/eval-plan.md) — Eval Plan (evaluation layers, regression gates, business metrics)
+- [`docs/en/eval-plan.md`](./en/eval-plan.md) — Eval Plan (CYG-117 deterministic domain gate, evaluation layers, regression gates, and business-metric boundaries)
 - [`docs/en/rag-strategy.md`](./en/rag-strategy.md) — RAG Strategy (how the Arkon-style LLM-wiki retrieval substrate serves support knowledge objects)
 - [`docs/en/product-story.md`](./en/product-story.md) — Complete Product Story
 - [`docs/en/frontend-story.md`](./en/frontend-story.md) — Frontend Behavior Story
@@ -138,6 +138,7 @@ This package is intentionally focused on:
 - a governed Nanobot ↔ Cygnus session seam that revalidates substrate truth on every turn and never treats session memory as knowledge truth
 - a governed Nanobot ↔ Cygnus draft/review and publish seam for the durable draft/review lifecycle, policy validation, and approval-backed publication, with explicit versioning, idempotency, and propagation state
 - an authenticated R1 consumption-feedback seam that persists a dedicated `GovernanceFeedbackSignal` plus runtime mutation `AuditLog` while keeping review and refresh routing explicitly unqueued
+- a deterministic, offline CYG-117 domain eval gate, run with `uv run python scripts/domain_eval_gate.py`, whose stable JSON report and process status cover retrieval, audience, trace/citation, freshness, unsupported/escalation, approval, and publish-policy checks without using live providers, fallback fixtures, or session memory as truth
 
 This package intentionally does **not** expand into:
 - GTM / pricing / sales collateral
@@ -155,4 +156,4 @@ Cygnus is no longer only a documentation package. It now combines:
 
 So downstream readers should not treat this repo as docs-only, and should not assume the visual/product-story pack is the current engineering entry point. P1/P2/P2.5 and the first support-verticalization waves are complete; CYG-92–96 provides a request-scoped governed session seam that revalidates Cygnus truth.
 
-CYG-98–105 plus CYG-108/109/111/112/113/114/115/116 now provide durable ledger/audit, notifications, ticket/rewrite pressure, release/incident drift, audience bindings/conflicts, review assignments, source impact, publish/propagation, golden-path proof, durable publish and draft/review tools, scoped durable drift alerts, durable consumption feedback, and truthful source-evidence observation presentation. The shared session/MCP contract marks twelve governed tools `ready`: four retrieval tools; `list_drift_alerts`; `propose_knowledge_object`, `update_draft_object`, `request_review`, and `read_review_feedback`; `record_feedback_signal`; `validate_publish_policy`; and `publish_knowledge_object`; capabilities reports `not_exposed:[]`.
+CYG-98–105 plus CYG-108/109/111/112/113/114/115/116/117 now provide durable ledger/audit, notifications, ticket/rewrite pressure, release/incident drift, audience bindings/conflicts, review assignments, source impact, publish/propagation, golden-path proof, durable publish and draft/review tools, scoped durable drift alerts, durable consumption feedback, truthful source-evidence observation presentation, and the deterministic production-shaped domain eval gate. The eval command is `uv run python scripts/domain_eval_gate.py`; its exit status is merge-blocking evidence for the deterministic checks only, not evidence that feedback routing or business KPI instrumentation exists. The shared session/MCP contract marks twelve governed tools `ready`: four retrieval tools; `list_drift_alerts`; `propose_knowledge_object`, `update_draft_object`, `request_review`, and `read_review_feedback`; `record_feedback_signal`; `validate_publish_policy`; and `publish_knowledge_object`; capabilities reports `not_exposed:[]`.

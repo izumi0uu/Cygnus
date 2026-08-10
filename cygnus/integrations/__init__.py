@@ -8,6 +8,12 @@ Ownership:
 - this package is an adapter boundary, not the core governance domain itself
 """
 
+from cygnus.integrations.governed_feedback_tools import (
+    GovernedFeedbackTools,
+    feedback_tool_bindings,
+    feedback_tool_definitions,
+    normalize_feedback_arguments,
+)
 from cygnus.integrations.governed_publish_tools import (
     GovernedPublishTools,
     publish_tool_bindings,
@@ -54,6 +60,7 @@ __all__ = [
     "GovernedKnowledgeTools",
     "GovernedDraftReviewTools",
     "GovernedDriftTools",
+    "GovernedFeedbackTools",
     "GovernedPublishTools",
     "GovernedQueryRequest",
     "GovernedSessionBridge",
@@ -66,6 +73,9 @@ __all__ = [
     "draft_review_tool_bindings",
     "draft_review_tool_definitions",
     "drift_tool_bindings",
+    "feedback_tool_bindings",
+    "feedback_tool_definitions",
+    "normalize_feedback_arguments",
     "drift_tool_definitions",
     "governed_session_tool_definition",
     "governed_session_tool_definitions",

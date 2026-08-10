@@ -57,6 +57,14 @@ from cygnus.governance.signals import (
     list_governance_signals,
     resolve_governance_signal,
 )
+from cygnus.governance.feedback import (
+    FeedbackSignalInput,
+    FeedbackSignalType,
+    GovernanceFeedbackSignal,
+    create_feedback_signal,
+    feedback_signal_to_dict,
+    normalize_audience_context,
+)
 
 __all__ = [
     "AudienceBindingConflict",
@@ -74,6 +82,9 @@ __all__ = [
     "DriftSignalProviderResult",
     "GovernanceSignalConflict",
     "GovernanceSignalInput",
+    "FeedbackSignalInput",
+    "FeedbackSignalType",
+    "GovernanceFeedbackSignal",
     "GovernanceSignalStatus",
     "GovernanceLedgerConflict",
     "append_draft_event",
@@ -90,6 +101,9 @@ __all__ = [
     "lock_draft_aggregate",
     "lock_governance_command",
     "record_created_draft",
+    "create_feedback_signal",
+    "feedback_signal_to_dict",
+    "normalize_audience_context",
     "audience_binding_to_dict",
     "audience_filter_from_binding",
     "audience_filters_overlap",

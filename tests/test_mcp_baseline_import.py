@@ -60,8 +60,9 @@ REQUIRED_MCP_SURFACE_TOKENS = {
     "cygnus/runtime/mcp/logging.py": ["logged_tool", "MCPQueryLog", "_classify_status"],
     "cygnus/runtime/mcp/tools.py": [
         "validate_publish_policy",
-        "list_drift_alerts",
         "publish_knowledge_object",
+        "list_drift_alerts",
+        "record_feedback_signal",
         "search_wiki",
         "read_wiki_index",
         "read_wiki_page",

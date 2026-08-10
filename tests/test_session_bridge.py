@@ -236,6 +236,21 @@ class GovernedSessionBridgeTests(unittest.TestCase):
         governed_tools = cast(list[dict[str, object]], payload["governed_tools"])
         not_exposed = cast(list[dict[str, object]], payload["not_exposed"])
         query_handoff = cast(dict[str, object], payload["query_handoff"])
+        definitions = governed_session_tool_definitions()
+        self.assertEqual(len(definitions), 12)
+        self.assertEqual(
+            governed_tools,
+            [
+                {
+                    "name": definition.name,
+                    "description": definition.description,
+                    "risk_level": definition.risk_level,
+                    "parameters": definition.parameters,
+                    "availability": "ready",
+                }
+                for definition in definitions
+            ],
+        )
 
         self.assertEqual(
             {tool["name"] for tool in governed_tools},
@@ -251,14 +266,10 @@ class GovernedSessionBridgeTests(unittest.TestCase):
                 "read_review_feedback",
                 "validate_publish_policy",
                 "publish_knowledge_object",
+                "record_feedback_signal",
             },
         )
-        self.assertEqual(
-            {tool["name"] for tool in governed_tools},
-            {definition.name for definition in governed_session_tool_definitions()},
-        )
-        unavailable_names = {tool["name"] for tool in not_exposed}
-        self.assertEqual(unavailable_names, {"record_feedback_signal"})
+        self.assertEqual(not_exposed, [])
         self.assertFalse(query_handoff["session_memory_is_truth"])
 
     def test_http_query_handoff_serializes_the_same_contract(self) -> None:

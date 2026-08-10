@@ -231,14 +231,7 @@ def session_bridge_capabilities(
             }
             for definition in definitions
         ],
-        "not_exposed": [
-            {
-                "name": name,
-                "availability": "not_exposed",
-                "reason": "durable_governance_command_adapter_required",
-            }
-            for name in ("record_feedback_signal",)
-        ],
+        "not_exposed": [],
     }
 
 

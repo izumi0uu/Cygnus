@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from cygnus.integrations.governed_feedback_tools import feedback_tool_definitions
 from cygnus.integrations.governed_draft_review_tools import (
     draft_review_tool_definitions,
 )
@@ -13,6 +14,7 @@ _GOVERNED_SESSION_TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     *knowledge_tool_definitions(),
     *draft_review_tool_definitions(),
     *publish_tool_definitions(),
+    *feedback_tool_definitions(),
     *drift_tool_definitions(),
 )
 if len({definition.name for definition in _GOVERNED_SESSION_TOOL_DEFINITIONS}) != len(

@@ -16,9 +16,8 @@ The intended relationship is:
 Current engineering strategy (status as of 2026-08):
 - P1/P2/P2.5—the Arkon full-port baseline, runability recovery, and post-P2 internalization/upstream-cutover lane—and the first support-verticalization waves are complete (CYG-6–17, CYG-23, CYG-24, CYG-69–91)
 - CYG-92–96 implements a request-scoped governed Nanobot ↔ Cygnus session seam that reloads and revalidates Cygnus truth on every turn without treating session memory as knowledge truth
-- CYG-98–105 plus CYG-108/109/111/112/113/114 provide durable ledger/audit, notifications, ticket/rewrite pressure, release/incident drift, audience bindings/conflicts, review assignments, source impact, publish/propagation, golden-path proof, durable publish and draft/review tools, and scoped durable drift alerts
-- the shared session/MCP contract marks eleven governed tools `ready`: four retrieval tools; `list_drift_alerts`; `propose_knowledge_object`, `update_draft_object`, `request_review`, and `read_review_feedback`; `validate_publish_policy`; and `publish_knowledge_object`
-- only `record_feedback_signal` remains explicitly `not_exposed`
+- CYG-98–105 plus CYG-108/109/111/112/113/114/115/116 provide durable ledger/audit, notifications, ticket/rewrite pressure, release/incident drift, audience bindings/conflicts, review assignments, source impact, publish/propagation, golden-path proof, durable publish and draft/review tools, scoped durable drift alerts, durable consumption feedback, and truthful source-evidence observation presentation
+- the shared session/MCP contract marks twelve governed tools `ready`: four retrieval tools; `list_drift_alerts`; `propose_knowledge_object`, `update_draft_object`, `request_review`, and `read_review_feedback`; `record_feedback_signal`; `validate_publish_policy`; and `publish_knowledge_object`; capabilities reports `not_exposed:[]`
 - keep product-shell parity as a deferred non-roadmap lane by default
 - classify `auth / admin / wiki` shell candidates before any shell-parity implementation, and keep non-support pages isolated unless they directly unblock support verticalization
 
@@ -135,9 +134,10 @@ This package is intentionally focused on:
 - review + publish + audience-aware distribution
 - governance command framing (risk-ranked review, blast-radius publish, propagation + recovery)
 - human/AI shared source of truth
-- request-scoped governed reads whose explicit observation coverage prevents empty risk arrays from being interpreted as healthy truth
+- request-scoped governed reads whose explicit observation coverage and scoped source-impact facts prevent empty arrays, `unmapped` sources, or client-side arithmetic from being interpreted as healthy truth
 - a governed Nanobot ↔ Cygnus session seam that revalidates substrate truth on every turn and never treats session memory as knowledge truth
 - a governed Nanobot ↔ Cygnus draft/review and publish seam for the durable draft/review lifecycle, policy validation, and approval-backed publication, with explicit versioning, idempotency, and propagation state
+- an authenticated R1 consumption-feedback seam that persists a dedicated `GovernanceFeedbackSignal` plus runtime mutation `AuditLog` while keeping review and refresh routing explicitly unqueued
 
 This package intentionally does **not** expand into:
 - GTM / pricing / sales collateral
@@ -155,4 +155,4 @@ Cygnus is no longer only a documentation package. It now combines:
 
 So downstream readers should not treat this repo as docs-only, and should not assume the visual/product-story pack is the current engineering entry point. P1/P2/P2.5 and the first support-verticalization waves are complete; CYG-92–96 provides a request-scoped governed session seam that revalidates Cygnus truth.
 
-CYG-98–105 plus CYG-108/109/111/112/113/114 now provide durable ledger/audit, notifications, ticket/rewrite pressure, release/incident drift, audience bindings/conflicts, review assignments, source impact, publish/propagation, golden-path proof, durable publish and draft/review tools, and scoped durable drift alerts. The shared session/MCP contract marks eleven governed tools `ready`: four retrieval tools; `list_drift_alerts`; `propose_knowledge_object`, `update_draft_object`, `request_review`, and `read_review_feedback`; `validate_publish_policy`; and `publish_knowledge_object`. Only `record_feedback_signal` remains explicitly `not_exposed`.
+CYG-98–105 plus CYG-108/109/111/112/113/114/115/116 now provide durable ledger/audit, notifications, ticket/rewrite pressure, release/incident drift, audience bindings/conflicts, review assignments, source impact, publish/propagation, golden-path proof, durable publish and draft/review tools, scoped durable drift alerts, durable consumption feedback, and truthful source-evidence observation presentation. The shared session/MCP contract marks twelve governed tools `ready`: four retrieval tools; `list_drift_alerts`; `propose_knowledge_object`, `update_draft_object`, `request_review`, and `read_review_feedback`; `record_feedback_signal`; `validate_publish_policy`; and `publish_knowledge_object`; capabilities reports `not_exposed:[]`.

@@ -4,7 +4,9 @@ import asyncio
 
 import unittest
 
+from cygnus.integrations.governed_feedback_tools import feedback_tool_definitions
 from cygnus.integrations.governed_session_tools import (
+    governed_session_tool_definition,
     governed_session_tool_definitions,
 )
 from cygnus.integrations.nanobot_tools import (
@@ -146,6 +148,7 @@ class NanobotToolIntegrationTests(unittest.TestCase):
             "search_support_evidence",
             "validate_publish_policy",
             "list_drift_alerts",
+            "record_feedback_signal",
         }
         restricted_writer_names = {
             "propose_knowledge_object",
@@ -164,6 +167,7 @@ class NanobotToolIntegrationTests(unittest.TestCase):
         update_tool = registered_tools["update_draft_object"]
         review_tool = registered_tools["request_review"]
         feedback_tool = registered_tools["read_review_feedback"]
+        record_feedback_tool = registered_tools["record_feedback_signal"]
         drift_tool = registered_tools["list_drift_alerts"]
         if (
             validate_tool is None
@@ -172,14 +176,37 @@ class NanobotToolIntegrationTests(unittest.TestCase):
             or update_tool is None
             or review_tool is None
             or feedback_tool is None
+            or record_feedback_tool is None
             or drift_tool is None
         ):
             raise AssertionError("governed session tools were not registered")
+        feedback_definition = governed_session_tool_definition(
+            "record_feedback_signal"
+        )
+        self.assertIs(feedback_definition, feedback_tool_definitions()[0])
+        self.assertEqual(record_feedback_tool.name, feedback_definition.name)
+        self.assertEqual(
+            record_feedback_tool.description,
+            feedback_definition.description,
+        )
+        # Callable defaults are FastMCP metadata; all validation constraints
+        # must still come from the shared ToolDefinition unchanged.
+        runtime_feedback_parameters = dict(record_feedback_tool.parameters)
+        runtime_feedback_parameters["properties"] = {
+            name: {
+                key: value
+                for key, value in schema.items()
+                if key != "default"
+            }
+            for name, schema in record_feedback_tool.parameters["properties"].items()
+        }
+        self.assertEqual(runtime_feedback_parameters, feedback_definition.parameters)
         self.assertIs(requirement_for(validate_tool.fn), ANY_AUTHENTICATED)
         self.assertIs(requirement_for(publish_tool.fn), ADMIN_ONLY)
         self.assertIs(requirement_for(propose_tool.fn), CAN_CONTRIBUTE_WIKI)
         self.assertIs(requirement_for(update_tool.fn), CAN_CONTRIBUTE_WIKI)
         self.assertIs(requirement_for(review_tool.fn), CAN_CONTRIBUTE_WIKI)
         self.assertIs(requirement_for(feedback_tool.fn), ANY_AUTHENTICATED)
+        self.assertIs(requirement_for(record_feedback_tool.fn), ANY_AUTHENTICATED)
         self.assertIs(requirement_for(drift_tool.fn), ANY_AUTHENTICATED)
         self.assertIn("Never treat chat history", mcp.instructions)

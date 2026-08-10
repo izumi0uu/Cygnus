@@ -1313,6 +1313,123 @@ class GovernanceSignal(Base):
         Index("ix_governance_signals_object", "object_ref"),
     )
 
+class GovernanceFeedbackSignal(Base):
+    """Durable consumption feedback recorded from a governed session."""
+
+    __tablename__ = "governance_feedback_signals"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    signal_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    actor_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("employees.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    audience_context: Mapped[dict[str, str | None]] = mapped_column(
+        JSONB, nullable=False
+    )
+    object_id: Mapped[Optional[str]] = mapped_column(String(320), nullable=True)
+    page_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("wiki_pages.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    draft_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("wiki_page_drafts.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    source_context_ref: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "signal_type IN ('answer_accepted', 'human_rewrite', 'escalated', "
+            "'low_rating', 'unsupported_answer', 'stale_answer')",
+            name="ck_governance_feedback_signals_type",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(audience_context) = 'object' "
+            "AND audience_context ?& ARRAY["
+            "'visibility', 'brand', 'product_line', 'plan_tier', 'region', "
+            "'language', 'product_version'] "
+            "AND audience_context - ARRAY["
+            "'visibility', 'brand', 'product_line', 'plan_tier', 'region', "
+            "'language', 'product_version'] = '{}'::jsonb "
+            "AND jsonb_typeof(audience_context -> 'visibility') = 'string' "
+            "AND (audience_context ->> 'visibility') IN ('internal', 'external') "
+            "AND (jsonb_typeof(audience_context -> 'brand') = 'null' OR "
+            "(jsonb_typeof(audience_context -> 'brand') = 'string' "
+            "AND (audience_context ->> 'brand') = "
+            "btrim(audience_context ->> 'brand') "
+            "AND char_length(audience_context ->> 'brand') BETWEEN 1 AND 200)) "
+            "AND (jsonb_typeof(audience_context -> 'product_line') = 'null' OR "
+            "(jsonb_typeof(audience_context -> 'product_line') = 'string' "
+            "AND (audience_context ->> 'product_line') = "
+            "btrim(audience_context ->> 'product_line') "
+            "AND char_length(audience_context ->> 'product_line') BETWEEN 1 AND 200)) "
+            "AND (jsonb_typeof(audience_context -> 'plan_tier') = 'null' OR "
+            "(jsonb_typeof(audience_context -> 'plan_tier') = 'string' "
+            "AND (audience_context ->> 'plan_tier') = "
+            "btrim(audience_context ->> 'plan_tier') "
+            "AND char_length(audience_context ->> 'plan_tier') BETWEEN 1 AND 200)) "
+            "AND (jsonb_typeof(audience_context -> 'region') = 'null' OR "
+            "(jsonb_typeof(audience_context -> 'region') = 'string' "
+            "AND (audience_context ->> 'region') = "
+            "btrim(audience_context ->> 'region') "
+            "AND char_length(audience_context ->> 'region') BETWEEN 1 AND 200)) "
+            "AND (jsonb_typeof(audience_context -> 'language') = 'null' OR "
+            "(jsonb_typeof(audience_context -> 'language') = 'string' "
+            "AND (audience_context ->> 'language') = "
+            "btrim(audience_context ->> 'language') "
+            "AND char_length(audience_context ->> 'language') BETWEEN 1 AND 200)) "
+            "AND (jsonb_typeof(audience_context -> 'product_version') = 'null' OR "
+            "(jsonb_typeof(audience_context -> 'product_version') = 'string' "
+            "AND (audience_context ->> 'product_version') = "
+            "btrim(audience_context ->> 'product_version') "
+            "AND char_length(audience_context ->> 'product_version') "
+            "BETWEEN 1 AND 200))",
+            name="ck_governance_feedback_signals_audience_context",
+        ),
+        CheckConstraint(
+            "object_id IS NULL OR (object_id = btrim(object_id) "
+            "AND char_length(object_id) BETWEEN 1 AND 320)",
+            name="ck_governance_feedback_signals_object_id",
+        ),
+        CheckConstraint(
+            "source_context_ref IS NULL OR (source_context_ref = "
+            "btrim(source_context_ref) AND char_length(source_context_ref) "
+            "BETWEEN 1 AND 500)",
+            name="ck_governance_feedback_signals_source_context_ref",
+        ),
+        CheckConstraint(
+            "notes IS NULL OR (notes = btrim(notes) "
+            "AND char_length(notes) BETWEEN 1 AND 10000)",
+            name="ck_governance_feedback_signals_notes",
+        ),
+        Index(
+            "ix_governance_feedback_signals_actor_created",
+            "actor_id",
+            "created_at",
+        ),
+        Index("ix_governance_feedback_signals_object", "object_id"),
+        Index("ix_governance_feedback_signals_page", "page_id"),
+        Index("ix_governance_feedback_signals_draft", "draft_id"),
+    )
+
 
 class GovernanceReviewAssignment(Base):
     """Current durable owner state for one governance review signal."""

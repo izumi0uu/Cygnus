@@ -18,6 +18,11 @@ from fastmcp import FastMCP
 from pydantic.json_schema import WithJsonSchema
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cygnus.integrations.governed_feedback_tools import (
+    GovernedFeedbackTools,
+    normalize_feedback_arguments,
+)
+from cygnus.governance.feedback import FeedbackSignalType
 from cygnus.integrations.governed_draft_review_tools import GovernedDraftReviewTools
 from cygnus.integrations.governed_drift_tools import (
     GovernedDriftTools,
@@ -47,6 +52,33 @@ _DriftFiltersInput = Annotated[
 _DriftLimitInput = Annotated[
     object,
     WithJsonSchema(_DRIFT_TOOL_PARAMETERS["limit"]),
+]
+_FEEDBACK_TOOL_PARAMETERS = governed_session_tool_definition(
+    "record_feedback_signal"
+).parameters["properties"]
+_FeedbackSignalTypeInput = Annotated[
+    object,
+    WithJsonSchema(_FEEDBACK_TOOL_PARAMETERS["signal_type"]),
+]
+_FeedbackAudienceInput = Annotated[
+    object,
+    WithJsonSchema(_FEEDBACK_TOOL_PARAMETERS["audience_context"]),
+]
+_FeedbackObjectIdInput = Annotated[
+    object,
+    WithJsonSchema(_FEEDBACK_TOOL_PARAMETERS["object_id"]),
+]
+_FeedbackDraftIdInput = Annotated[
+    object,
+    WithJsonSchema(_FEEDBACK_TOOL_PARAMETERS["draft_id"]),
+]
+_FeedbackNotesInput = Annotated[
+    object,
+    WithJsonSchema(_FEEDBACK_TOOL_PARAMETERS["notes"]),
+]
+_FeedbackSourceContextInput = Annotated[
+    object,
+    WithJsonSchema(_FEEDBACK_TOOL_PARAMETERS["source_context_ref"]),
 ]
 
 # ---------------------------------------------------------------------------
@@ -175,6 +207,16 @@ async def _get_governed_drift_tools(
         return None, "Authenticated employee no longer exists."
     provider = await load_drift_signal_provider(session, current_user=employee)
     return GovernedDriftTools(provider), None
+
+async def _get_governed_feedback_tools(
+    identity: ResolvedIdentity,
+    session: AsyncSession,
+) -> tuple[GovernedFeedbackTools | None, str | None]:
+    """Resolve feedback writes against the current employee and DB session."""
+    employee = await _load_identity_employee(identity, session)
+    if employee is None:
+        return None, "Authenticated employee no longer exists."
+    return GovernedFeedbackTools(session, actor=employee), None
 
 
 def _structured_tool_error(
@@ -503,6 +545,70 @@ def register_tools(mcp: FastMCP):
             )
         return _serialize_tool_result(payload)
 
+    @kb_tool(
+        mcp,
+        requires=ANY_AUTHENTICATED,
+        name=governed_session_tool_definition("record_feedback_signal").name,
+        description=governed_session_tool_definition(
+            "record_feedback_signal"
+        ).description,
+    )
+    @logged_tool("record_feedback_signal", query_arg="object_id")
+    async def record_feedback_signal(
+        signal_type: _FeedbackSignalTypeInput,
+        audience_context: _FeedbackAudienceInput,
+        object_id: _FeedbackObjectIdInput = None,
+        draft_id: _FeedbackDraftIdInput = None,
+        notes: _FeedbackNotesInput = None,
+        source_context_ref: _FeedbackSourceContextInput = None,
+    ) -> str:
+        """Record durable feedback after validating arguments locally."""
+        try:
+            normalized = normalize_feedback_arguments(
+                signal_type=signal_type,
+                audience_context=audience_context,
+                object_id=object_id,
+                draft_id=draft_id,
+                notes=notes,
+                source_context_ref=source_context_ref,
+            )
+        except (TypeError, ValueError, AttributeError) as exc:
+            return _structured_tool_error(
+                str(exc),
+                code="invalid_arguments",
+                status="invalid",
+            )
+
+        identity, error = await _get_identity()
+        if identity is None:
+            return _structured_tool_error(error or "Authentication required.")
+
+        from cygnus.runtime.database import async_session_factory
+
+        async with async_session_factory() as session:
+            tools, error = await _get_governed_feedback_tools(identity, session)
+            if tools is None:
+                return _structured_tool_error(
+                    error or "Governed feedback is unavailable."
+                )
+            payload = await tools.record_feedback_signal(
+                signal_type=FeedbackSignalType(normalized.signal_type).value,
+                audience_context=dict(normalized.audience_context),
+                object_id=normalized.object_id,
+                draft_id=(
+                    str(normalized.draft_id)
+                    if normalized.draft_id is not None
+                    else None
+                ),
+                notes=normalized.notes,
+                source_context_ref=normalized.source_context_ref,
+            )
+            if (
+                payload.get("status") == "success"
+                and payload.get("persisted") is True
+            ):
+                await session.commit()
+        return _serialize_tool_result(payload)
     @kb_tool(
         mcp,
         requires=ANY_AUTHENTICATED,

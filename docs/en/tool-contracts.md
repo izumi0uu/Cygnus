@@ -104,7 +104,7 @@ All tools should ideally share this top-level result shape:
 Pure read, no side effects.
 
 ### R1 — Draft write
-Writes drafts, signals, or queues without making externally visible commits.
+Creates durable drafts or signals, or explicitly requests a governed queue transition, without making an externally visible commit.
 
 ### R2 — Governance check
 Evaluates policy/review/publication readiness without publishing.
@@ -450,7 +450,7 @@ Read current durable release and incident drift alerts without turning an empty 
 
 ## 8.4 `record_feedback_signal`
 ### Purpose
-Write back consumption feedback so the system can improve knowledge objects.
+Record authenticated consumption feedback as a durable fact. Recording itself does not route review or refresh work.
 
 ### Risk class
 `R1`
@@ -460,17 +460,24 @@ Write back consumption feedback so the system can improve knowledge objects.
 {
   "signal_type": "answer_accepted|human_rewrite|escalated|low_rating|unsupported_answer|stale_answer",
   "object_id": "optional-string",
-  "draft_id": "optional-string",
-  "audience_context": {},
+  "draft_id": "optional-uuid",
+  "audience_context": {
+    "visibility": "internal|external"
+  },
   "notes": "optional-string",
   "source_context_ref": "optional-string"
 }
 ```
 
-### Output highlights
-- signal id
-- whether refresh/review was queued
-- linked object or draft refs
+### Output and truth boundary
+
+- the accepted signal types are fixed to `answer_accepted`, `human_rewrite`, `escalated`, `low_rating`, `unsupported_answer`, and `stale_answer`
+- a successful call writes a dedicated `GovernanceFeedbackSignal` with the authenticated actor, normalized audience context, optional governed refs, notes, and timestamps
+- `actor_id` and resolved `page_id` / `draft_id` are `RESTRICT` foreign keys. `object_id` and `source_context_ref` are stored context rather than database foreign keys; `source_context_ref` is not resolved to a `Source` row
+- the authenticated adapter adds a runtime mutation `AuditLog` entry in the same caller transaction. The feedback persistence owner only flushes; the caller must commit both records or neither
+- `persisted:true` and `rehearsal:false`; `trace_ref` identifies the durable feedback row, not a source row, governance-ledger event, or routing transition
+- `routing_state:"recorded_only"`, `review_queued:false`, and `refresh_queued:false`; no signal type implies routing
+- hidden, absent, or ambiguous object/draft refs share a structured `not_found`; conflicting object/draft refs return structured `conflict` without resource disclosure or a write
 
 ## 8.5 Governance audit read surface
 ### Purpose
@@ -483,7 +490,7 @@ Read durable review, approval, publish, and recovery transitions from append-onl
 - `GET /api/governance/audit`
 - `GET /api/governance/audit/{event_id}`
 - The list accepts `phase`, `event_type`, `draft_id`, `page_id`, and `actor_id` filters plus `page` / `page_size` pagination; `page_size` is capped at `100`.
-- This slice is an authenticated HTTP read surface. It does not automatically expand the four approved R0 retrieval tools exposed by runtime MCP.
+- This authenticated HTTP read surface remains separate from the shared twelve-tool Runtime MCP/session ready contract; it adds no tool definition.
 
 ### Output highlights
 - `event_id` and stable `trace_ref=governance-event:{event_id}`
@@ -515,7 +522,7 @@ Read in-app notifications produced by governance lifecycles and advance unread �
 - Every response includes `trace_ref=notification:{id}` and `persisted:true`. That proves the notification record is durable, not that external email/webhook delivery succeeded.
 - External fan-out must run after the response transaction commits and reload the still-existing notification IDs in a fresh session; rolled-back records must not be sent.
 - Every list / count / transition query includes `recipient_id=current_user.id`; absent and another-user records share `404`, preventing cross-user ID disclosure.
-- This is a runtime HTTP inbox and does not expand Nanobot's four current R0 governed retrieval tools.
+- This runtime HTTP inbox remains separate from the shared twelve-tool Runtime MCP/session ready contract; it adds no tool definition.
 
 
 
@@ -565,20 +572,21 @@ It is successful if:
 - later workflow orchestration, eval, and UI work can grow on top of the same contract surface
 
 ## 13. Current implementation status (reconciled with code)
-This section reconciles `cygnus/integrations/nanobot_tools.py`, `cygnus/integrations/governed_draft_review_tools.py`, `cygnus/integrations/governed_publish_tools.py`, and `cygnus/integrations/governed_drift_tools.py`. It explicitly separates:
+This section reconciles `cygnus/integrations/nanobot_tools.py`, `cygnus/integrations/governed_draft_review_tools.py`, `cygnus/integrations/governed_publish_tools.py`, `cygnus/integrations/governed_drift_tools.py`, and `cygnus/integrations/governed_feedback_tools.py`. It explicitly separates:
 - the **target contract** above
 - the **currently callable durable interface** below
-- governance semantics that remain intentionally unavailable
+- routing semantics that remain intentionally recorded-only
 
 ### 13.1 Capabilities actually fulfilled today
 - **Group A — Retrieval (4/4):** `search_knowledge_objects`, `read_knowledge_object`, `search_support_evidence`, and `get_source_trace` use the substrate-backed, request-scoped governed retrieval surface.
-- **Group B — Draft/Review (4/4):** `propose_knowledge_object`, `update_draft_object`, `request_review`, and `read_review_feedback` use the durable `WikiPageDraft` lifecycle, review queue, source/evidence metadata, ledger events, notification path, and scoped feedback truth.
-- **Group C — Governance (3/4 exposed):** `validate_publish_policy` and `publish_knowledge_object` use durable draft, approval, audience-binding, and publication services. `list_drift_alerts` reads scoped durable release/incident signal truth with explicit observation coverage. Only `record_feedback_signal` remains intentionally unexposed.
+- **Group B — Draft/Review (4/4):** `propose_knowledge_object`, `update_draft_object`, `request_review`, and `read_review_feedback` use the durable `WikiPageDraft` lifecycle, review queue, source/evidence metadata, ledger events, notification path, and scoped review feedback truth.
+- **Group C — Governance (4/4):** `validate_publish_policy` and `publish_knowledge_object` use durable draft, approval, audience-binding, and publication services; `list_drift_alerts` reads scoped durable release/incident signal truth with explicit observation coverage; `record_feedback_signal` writes dedicated durable consumption-feedback truth with actor and audience provenance.
 
-### 13.2 Target interface intentionally not exposed
-- `record_feedback_signal` (Group C, R1)
-
-It remains intentionally unavailable because this session seam has no corresponding governed adapter. Existing fixture or observation surfaces must not be represented as session-domain tool truth.
+### 13.2 Implemented recorded-only feedback seam
+- `record_feedback_signal` is an authenticated R1 request-scoped adapter backed by the dedicated `GovernanceFeedbackSignal`; it accepts only the six fixed consumption-feedback types and never overloads `GovernanceSignal` pressure facts or fixture observations.
+- The adapter stages the feedback row and a runtime mutation `AuditLog` entry in the same caller transaction. `actor_id`, `page_id`, and `draft_id` are durable `RESTRICT` foreign-key links; `object_id` and `source_context_ref` remain stored context, and the latter is not a `Source` foreign key.
+- Object and draft refs resolve through SQL Wiki scope before projection. Hidden, absent, or ambiguous refs share `not_found`; mismatched refs return `conflict` without disclosure, feedback, or audit writes.
+- The current routing owner is deliberately absent: every successful write returns `routing_state:"recorded_only"`, `review_queued:false`, and `refresh_queued:false`. A future queue owner must be durable and explicit.
 
 ### 13.3 Implemented durable draft/review seam
 - `propose_knowledge_object` creates a typed create-kind `WikiPageDraft` in durable `draft` state, records only `proposal_created`, and stores the proposed object type, audience context, source refs, evidence refs, and source IDs for later materialization.
@@ -606,6 +614,7 @@ This seam does not create a second session loop or memory store. Nanobot still o
 - Every governance-risk surface returns `observation`: `ready` means complete coverage, `partial` names both covered and missing detectors, and `unavailable` means a detector is not connected—not that there is no risk. Reasons and signals are machine codes rendered through client i18n.
 - Without a complete proposal bundle, Review Queue, drift, and source-blindness contexts must be empty and offer no governance command. Ordinary `WikiPageDraft` rows must not be projected into an owner, audience, surface, or risk.
 - A `Source.status="error"` row remains a source-failure fact, but the CYG-108 provider now projects impact inside the same request permission scope through visible `WikiPage.source_ids`, active audience bindings, and each object's latest durable publication and propagation. `impact_state="mapped"` means at least one visible Wiki relationship exists; `unmapped` means no governed Wiki impact is mapped in the current scope, not that there is no business impact. `audience_impacts` and `propagation_impacts` may come only from those persisted records; a raw source row cannot imply an owner, risk rank, or executable command.
+- The Sources Evidence client renders returned source-failure facts, complete-risk contexts, and durable mapped/unmapped impact fields directly. It must not infer watched or healthy counts through client-side subtraction, and neither `unmapped` nor an incomplete empty result is a health claim.
 - `/api/recovery/overview`, `/api/recovery/window/{command_id}`, and `/api/recovery/downstream-reality-check/{command_id}` read permission-scoped persisted publication / propagation truth and return `persisted: true, rehearsal: false`; they do not fall back to rehearsal fixtures.
 
 CYG-101–104 and CYG-108 connect ticket/rewrite pressure, release/incident drift, audience conflict, review assignment, and source impact to persisted or persistently derived providers. A surface may return `ready` only after its detectors run completely with no unresolved relationship; an unresolved audience binding still requires `partial`, and provider failures must surface as `5xx` rather than an empty array or green UI.
@@ -613,8 +622,8 @@ CYG-101–104 and CYG-108 connect ticket/rewrite pressure, release/incident drif
 ### 13.7 Implemented governed session seam (CYG-92–96)
 Nanobot can now hand `request_ref`, optional `session_ref`, the support query, `audience_context`, and an optional prior `governance_context` to Cygnus through `POST /api/session-bridge/query`. Cygnus reloads the substrate-backed knowledge snapshot inside the request permission scope and returns one envelope containing `answer`, `source_trace`, `tool_trace`, `governance`, `continuity`, and the next portable `governance_context`.
 
-- `GET /api/session-bridge/capabilities` and Runtime MCP consume the same shared adapter-definition contract. They mark eleven governed tools ready: four R0 retrieval tools, R0 `list_drift_alerts`, the R1 durable draft/review write tools, scoped R0 `read_review_feedback`, request-scoped `validate_publish_policy`, and administrator/approval-gated `publish_knowledge_object`. Only `record_feedback_signal` remains `not_exposed`.
-- Runtime MCP uses an authenticated visibility gate for `list_drift_alerts` and feedback, contributor visibility gates for the three R1 draft/review writes, and an administrator gate for publication. Drift alerts reload current employee-scoped durable truth in the request DB session and never fall back to fixtures, chat history, or an unscoped global index; every state-changing adapter re-checks identity, scoped draft/source visibility, author/reviewer authority, and optimistic version server-side.
+- `GET /api/session-bridge/capabilities` and Runtime MCP consume the same shared adapter-definition contract and mark exactly twelve governed tools `ready` with `not_exposed:[]`: `search_knowledge_objects`, `read_knowledge_object`, `search_support_evidence`, `get_source_trace`, `list_drift_alerts`, `propose_knowledge_object`, `update_draft_object`, `request_review`, `read_review_feedback`, `record_feedback_signal`, `validate_publish_policy`, and `publish_knowledge_object`.
+- Runtime MCP uses authenticated visibility gates for `list_drift_alerts`, `read_review_feedback`, and `record_feedback_signal`, contributor gates for the three R1 draft/review writes, and an administrator gate for publication. For feedback, it commits the dedicated row and runtime audit together only after a successful persisted result; it never claims review or refresh queueing.
 - Audience mismatch, pending review, stale or unknown freshness, source blindness, and no match all return structured governance states. They converge to `restricted`, `escalate`, or `fallback` rather than fabricating an externally usable answer.
 - Continuity re-queries Cygnus truth on every turn. An audience, object, version, trace, or freshness change invalidates the prior context; an unchanged context is only `revalidated`, and the response always carries `session_memory_used_as_truth:false`.
 

@@ -32,7 +32,7 @@ drawing numbers, `SEC-*` section codes, tolerance chips. i18n is **zh-first, en 
 | AudiencePublish | `/console/audience` | ✅ | 29 | Audience × risk, action presets |
 | Propagation | `/console/propagation` | ✅ | 29 | Propagation ledger + status lanes (SEC-F) |
 | CoverageDrift | `/console/drift` | ✅ | 16 | Drift watch cards |
-| SourcesEvidence | `/console/sources` | ✅ | 14 | Source-blindness health board |
+| SourcesEvidence | `/console/sources` | ✅ | 14 | Scoped source-failure facts + durable `MAPPED` / `UNMAPPED` impact projections |
 | RecoveryDetail | `/console/recovery/:commandId` | ✅ | 13 | Recovery window + reality check (dimension lines) |
 | Login | `/login` | ✅ | 20 | DWG-000 access-control sheet, PlotterPanel reveal, bp-cmd submit |
 | Audit | `/console/audit` | ✅ | 8 | SEC-G durable governance transition ledger with scoped phase filters and bounded pagination |
@@ -143,9 +143,9 @@ the command-center `priority_stack` (read-first by severity via `commandCenterSo
 
 The SPA consumes typed, machine-code `observation` payloads from `api.ts`; `ObservationBanner` localizes state/reason/signal codes in both zh and en. It is presentation-only and must not derive risk or issue commands.
 
-- `/console/queue`: partial review coverage; source failure facts and complete governance risks render in separate sections. An empty stack under partial coverage does **not** mean every detector is clear.
-- `/console/drift`: unavailable detector coverage; never render the old “no drift risk” copy unless the API is `ready`.
-- `/console/sources`: `SourceFailureObservation` cards display error, visible linked refs, timestamp, impact-mapping state (`IMPACT · MAPPED` or `IMPACT · UNMAPPED`), and any visible audience/propagation impacts; they have no command affordance.
+- `/console/queue`: render the API's `ready` or `partial` coverage instead of assuming one state; source-failure facts and complete governance risks remain separate. An empty stack under `partial` does **not** mean every detector is clear.
+- `/console/drift`: render only complete-risk contexts and counts returned by the API. Empty copy follows `ready`, `partial`, or `unavailable`; the page must not derive watched or healthy counts by subtracting unrelated identifiers.
+- `/console/sources`: `SourceFailureObservation` cards display observed errors, visible linked refs, timestamps, scoped impact-mapping state (`IMPACT · MAPPED` or `IMPACT · UNMAPPED`), and returned audience/propagation impacts. `UNMAPPED` means no governed Wiki impact is mapped in the current scope, not no business impact. The page must not infer source health or offer a command from these facts.
 - `/console/objects`: an empty `nodes` array renders a same-size blueprint explanation instead of mounting `ForceGraph2D`.
 - `/console`: the recovery API returns persisted truth (`persisted:true`, `rehearsal:false`); the non-dismissible rehearsal banner remains conditional and must not appear for durable data.
 
@@ -380,7 +380,7 @@ that have partial surfaces are noted.
 | 4 | Freshness Heatmap | Health | Medium | ◐ Partial — freshness color on cards |
 | 5 | Audience Coverage Matrix | Audience | Medium | ❌ Not implemented |
 | 5 | Approval Gate Sign-Off | Governance | High | ❌ Not implemented |
-| 5 | Health Report Card | Health | Medium | ◐ Partial — source-health board only |
+| 5 | Health Report Card | Health | Medium | ❌ Not implemented — scoped source facts and impact mapping are not a health grade |
 | 6 | RAG Retrieval Inspector | RAG | High | ❌ Not implemented |
 | 6 | Command Sequence Diagram | Governance | High | ❌ Not implemented |
 | 6 | Ticket Cluster Converter | Flow | Medium | ❌ Not implemented |
@@ -394,8 +394,7 @@ that have partial surfaces are noted.
   (`KnowledgeObjects`, 3 states: published/in_review/draft). No state-machine diagram.
 - **Idea 22 (Freshness Heatmap)** — only freshness color/tol on `SourcesEvidence` cards.
   No time×object grid heatmap.
-- **Idea 23 (Health Report Card)** — only a source-blindness health *board*. No per-object
-  A-F graded card.
+- **Idea 23 (Health Report Card)** — not implemented. `SourcesEvidence` presents scoped failure facts and mapped/unmapped durable impact, with no per-object grade or inferred health score.
 - **Idea 25 (Copilot Feedback Loop)** — only a flat feedback feed (`FeedbackRow`) in
   RecoveryDetail's reality-check. No circular write-back loop diagram.
 

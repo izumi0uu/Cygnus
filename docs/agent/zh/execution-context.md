@@ -71,6 +71,7 @@ Agent 必须保留以下纪律：
 - 治理读取必须先按权限作用域查询，再投影；不能用 `sample_*` 或 session memory 填充 runtime 结果。
 - `ready`、`partial`、`unavailable` 是 detector 覆盖状态，不是异常吞噬机制；`partial`/`unavailable` 的空数组不得写成“无风险”。
 - `SourceFailureObservation` 仍是来源失败事实。CYG-108 只允许从权限内可见 `WikiPage.source_ids`、active audience bindings、最新 durable publication / propagation 投影 `impact_state="mapped|unmapped"`、`audience_impacts` 与 `propagation_impacts`；`unmapped` 仅表示当前权限作用域内没有已映射的治理 Wiki 影响，不等于没有业务影响，也不得从原始 source row 推导 risk、owner 或执行命令。
+- Sources Evidence 必须直接呈现 API 返回的来源失败事实、完整风险 context 与 durable mapping 字段。不得通过不相干集合的减法计算 watched 或 healthy 数量，也不得把 `unmapped` 或覆盖不完整时的空结果写成健康状态。
 - `/api/recovery/overview`、`/api/recovery/window/{command_id}` 与 downstream reality check 只读取权限内的持久化 publication / propagation 真相并返回 `persisted:true, rehearsal:false`；缺少 durable recovery truth 时必须保持 unavailable，不能回退到 fixture。
 - publish response / publish projection 的 `persisted:true` 只能来自已审批 typed `WikiPageDraft`、ready evidence、显式 channels 与 durable IDs 同事务落库；仅 `object_ref` 的 fixture 路径必须保持 `persisted:false`、`rehearsal:true`。
 - governance audit 的 `persisted:true` 只证明 append-only ledger event 已落库，不代表知识对象已发布或 propagation 已完成；audit read 必须在 SQL 内按 Wiki read scope 过滤，并对不存在与越权的 event 统一返回 `404`。
@@ -83,7 +84,9 @@ Agent 必须保留以下纪律：
 ### 4.1.2 Governed session seam
 - `/api/session-bridge/query` 必须在当前用户权限范围内重新装载 substrate truth；前一轮 `governance_context` 只能用于判断 continuity，不能作为回答依据。
 - `session_memory_used_as_truth` 必须保持 `false`。audience/object/version/trace/freshness 变化时返回 `invalidated`；未变化时也必须重新检索后才能返回 `revalidated`。
-- Runtime MCP 与 session capabilities 为四个 R0 governed retrieval tools、R0 `list_drift_alerts`、R1 `propose_knowledge_object` / `update_draft_object` / `request_review` 生命周期 adapter、R0 `read_review_feedback` 以及 durable-core `validate_publish_policy` / `publish_knowledge_object` 共用一份 adapter-definition contract。`list_drift_alerts` 会重新读取权限作用域内 durable release/incident signal、批量解析 active 且可见的 audience binding，并以 `ready`/`partial`/显式 coverage `unavailable` 返回，绝不隐藏 provider failure；只有 `record_feedback_signal` 仍显式为 `not_exposed`。R1 tools 在 catalog 中受 contributor gate 约束，drift alert 和 feedback read 受 authenticated gate 约束；每个 state-changing adapter 都必须在服务端重新检查作用域内 identity、author authority、source visibility 与 optimistic draft version。
+- Runtime MCP 与 session capabilities 共用恰好十二个 `ready` adapter definition，并返回 `not_exposed:[]`：`search_knowledge_objects`、`read_knowledge_object`、`search_support_evidence`、`get_source_trace`、`list_drift_alerts`、`propose_knowledge_object`、`update_draft_object`、`request_review`、`read_review_feedback`、`record_feedback_signal`、`validate_publish_policy`、`publish_knowledge_object`。
+- `list_drift_alerts` 在请求 DB session 内重新读取作用域内 durable signal truth。Authenticated R1 `record_feedback_signal` 只接受六种固定 feedback type，并在 caller transaction 内暂存独立 `GovernanceFeedbackSignal` 与 runtime mutation `AuditLog`。该 runtime audit 不是 `GovernanceLedgerEvent`；Runtime MCP 只有在成功返回 persisted output 后才一起提交两条 feedback 记录。
+- feedback 以 `RESTRICT` 外键保留 `actor_id`、`page_id`、`draft_id` 链接；`object_id` 与 `source_context_ref` 是持久化上下文，source context 不是 `Source` 外键。object/draft 解析在 SQL 内按作用域执行；隐藏、缺失或有歧义的 ref 统一返回 `not_found`，冲突 ref 返回不泄露资源的 `conflict` 且不写入记录。成功结果保持 `recorded_only`，两个 queue flag 都为 false。每个 state-changing adapter 都必须在服务端重新检查 identity、作用域和资源权限。
 - no match、pending review、audience mismatch、stale/unknown evidence 与 source blindness 必须返回结构化 `fallback`、`restricted` 或 `escalate`，不得补写答案。
 
 ### 4.1.3 工程执行控制权

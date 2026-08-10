@@ -19,6 +19,14 @@ from arq.connections import ArqRedis, RedisSettings, create_pool
 from loguru import logger
 from sqlalchemy import select
 
+from cygnus.governance.feedback_execution import (
+    FeedbackRouteClaim,
+    FeedbackRouteLeaseLost,
+    claim_feedback_routes,
+    execute_feedback_route,
+    record_feedback_route_failure,
+)
+
 from cygnus.runtime.config import get_settings
 from cygnus.runtime.source_state import (
     attach_source_runtime_job,
@@ -31,6 +39,8 @@ from cygnus.runtime.source_state import (
 )
 
 settings = get_settings()
+
+_FEEDBACK_ROUTE_SWEEP_LIMIT = 25
 
 
 def get_redis_settings() -> RedisSettings:
@@ -1214,6 +1224,125 @@ async def regenerate_plan_task(ctx: dict, source_id: str, user_note: str):
                 await session.commit()
 
 
+async def _execute_feedback_route_claim(
+    session_factory,
+    claim: FeedbackRouteClaim,
+    *,
+    now=None,
+) -> None:
+    """Execute one leased route without sharing its transaction with another."""
+    route_id = str(claim.route_id)
+    execution_error: Exception | None = None
+
+    try:
+        async with session_factory() as execution_session:
+            try:
+                await execute_feedback_route(execution_session, claim, now=now)
+                await execution_session.commit()
+            except FeedbackRouteLeaseLost:
+                await execution_session.rollback()
+                logger.info("Feedback route {} lease lost", route_id)
+                return
+            except Exception as exc:
+                execution_error = exc
+                await execution_session.rollback()
+    except Exception as exc:
+        logger.warning(
+            "Feedback route {} execution transaction class {}",
+            route_id,
+            type(exc).__name__,
+        )
+        return
+
+    if execution_error is None:
+        logger.info("Feedback route {} execution committed", route_id)
+        return
+
+    try:
+        async with session_factory() as failure_session:
+            try:
+                await record_feedback_route_failure(
+                    failure_session,
+                    claim,
+                    error=execution_error,
+                    now=now,
+                )
+                await failure_session.commit()
+            except FeedbackRouteLeaseLost:
+                await failure_session.rollback()
+                logger.info("Feedback route {} lease lost", route_id)
+                return
+            except Exception as exc:
+                await failure_session.rollback()
+                logger.warning(
+                    "Feedback route {} failure transaction class {}",
+                    route_id,
+                    type(exc).__name__,
+                )
+                return
+    except Exception as exc:
+        logger.warning(
+            "Feedback route {} failure transaction class {}",
+            route_id,
+            type(exc).__name__,
+        )
+        return
+
+    logger.warning(
+        "Feedback route {} failure recorded class {}",
+        route_id,
+        type(execution_error).__name__,
+    )
+
+
+async def drain_feedback_routes(
+    *,
+    now=None,
+    limit: int = _FEEDBACK_ROUTE_SWEEP_LIMIT,
+    session_factory=None,
+) -> int:
+    """Claim a bounded route batch, then execute every claim in isolation."""
+    if not 1 <= limit <= _FEEDBACK_ROUTE_SWEEP_LIMIT:
+        raise ValueError(f"limit must be between 1 and {_FEEDBACK_ROUTE_SWEEP_LIMIT}")
+
+    if session_factory is None:
+        from cygnus.runtime.database import get_async_session_factory
+
+        session_factory = get_async_session_factory()
+
+    async with session_factory() as claim_session:
+        try:
+            claims = await claim_feedback_routes(
+                claim_session,
+                now=now,
+                limit=limit,
+            )
+            await claim_session.commit()
+        except Exception:
+            await claim_session.rollback()
+            raise
+
+    for claim in claims:
+        await _execute_feedback_route_claim(
+            session_factory,
+            claim,
+            now=now,
+        )
+    return len(claims)
+
+
+async def sweep_feedback_routes_cron(ctx: dict):
+    """Drain a small durable feedback-route batch on the worker schedule."""
+    _ = ctx
+    try:
+        count = await drain_feedback_routes()
+    except Exception as exc:
+        logger.warning("Feedback route cron sweep failed class {}", type(exc).__name__)
+        return
+    if count:
+        logger.info("Feedback route cron sweep claimed {} route(s)", count)
+
+
 async def sweep_ai_pre_review_dispatch_cron(ctx: dict):
     """Drain committed AI-review outbox intents on the worker schedule."""
     _ = ctx
@@ -1653,6 +1782,12 @@ class WorkerSettings:
             sweep_ai_pre_review_dispatch_cron,
             minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55},
         ),
+        # Every 5 minutes, offset from the pre-review outbox sweep so feedback
+        # recovery remains bounded without competing for the same cron minute.
+        cron(
+            sweep_feedback_routes_cron,
+            minute={2, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52, 57},
+        ),
         # Every 10 minutes — quick recovery from stuck 'running' AI reviews
         # caused by hard worker death (OOM, SIGKILL, container restart).
         cron(sweep_stuck_ai_review_cron, minute={0, 10, 20, 30, 40, 50}),
@@ -1675,6 +1810,16 @@ class WorkerSettings:
         else:
             if count:
                 logger.info("AI pre-review startup sweep leased {} intent(s)", count)
+
+        try:
+            count = await drain_feedback_routes()
+        except Exception as exc:
+            logger.warning(
+                "Feedback route startup sweep failed class {}", type(exc).__name__
+            )
+        else:
+            if count:
+                logger.info("Feedback route startup sweep claimed {} route(s)", count)
 
     @staticmethod
     async def on_shutdown(ctx: dict):

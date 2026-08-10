@@ -13,11 +13,14 @@ from cygnus.review import (
     get_pressure_intake_review_brief_surface,
     PressureIntakeRecord,
     PressureSignalType,
+    ReviewRiskType,
 )
 
 
 class ReviewIntakeTests(unittest.TestCase):
-    def test_ticket_cluster_compiles_into_support_domain_troubleshooting_proposal(self) -> None:
+    def test_ticket_cluster_compiles_into_support_domain_troubleshooting_proposal(
+        self,
+    ) -> None:
         record = PressureIntakeRecord(
             signal_type=PressureSignalType.TICKET_CLUSTER,
             signal_ref="billing-verification-w25",
@@ -45,7 +48,9 @@ class ReviewIntakeTests(unittest.TestCase):
         self.assertEqual(payload["evidence_sufficiency"], "sufficient")
         self.assertIn("internal", payload["audience_notes"][0])
 
-    def test_compiled_ticket_and_rewrite_records_feed_pressure_surface_without_manual_reentry(self) -> None:
+    def test_compiled_ticket_and_rewrite_records_feed_pressure_surface_without_manual_reentry(
+        self,
+    ) -> None:
         records = (
             PressureIntakeRecord(
                 signal_type=PressureSignalType.TICKET_CLUSTER,
@@ -88,17 +93,34 @@ class ReviewIntakeTests(unittest.TestCase):
             ),
         )
 
-        surface = build_review_pressure_surface(compile_pressure_proposal_bundles(records)).to_dict()
+        surface = build_review_pressure_surface(
+            compile_pressure_proposal_bundles(records)
+        ).to_dict()
         refs = {line["proposal_ref"]: line for line in surface["pressure_lines"]}
 
         self.assertIn("billing-verification-w25", refs)
         self.assertIn("refund-enterprise-rewrite", refs)
-        self.assertEqual(refs["billing-verification-w25"]["suggested_object_type"], "troubleshooting_flow")
-        self.assertEqual(refs["refund-enterprise-rewrite"]["suggested_object_type"], "policy_rule")
-        self.assertEqual(refs["billing-verification-w25"]["evidence_sufficiency"], "sufficient")
-        self.assertIn("internal surfaces", refs["billing-verification-w25"]["visibility_consequence"])
-        self.assertIn("external audience", refs["refund-enterprise-rewrite"]["visibility_consequence"])
-        self.assertIn("route_to_review", refs["billing-verification-w25"]["command_actions"])
+        self.assertEqual(
+            refs["billing-verification-w25"]["suggested_object_type"],
+            "troubleshooting_flow",
+        )
+        self.assertEqual(
+            refs["refund-enterprise-rewrite"]["suggested_object_type"], "policy_rule"
+        )
+        self.assertEqual(
+            refs["billing-verification-w25"]["evidence_sufficiency"], "sufficient"
+        )
+        self.assertIn(
+            "internal surfaces",
+            refs["billing-verification-w25"]["visibility_consequence"],
+        )
+        self.assertIn(
+            "external audience",
+            refs["refund-enterprise-rewrite"]["visibility_consequence"],
+        )
+        self.assertIn(
+            "route_to_review", refs["billing-verification-w25"]["command_actions"]
+        )
         self.assertIn("macro", refs["refund-enterprise-rewrite"]["affected_surfaces"])
 
     def test_ticket_pressure_does_not_require_fixture_trigger_labels(self) -> None:
@@ -119,13 +141,112 @@ class ReviewIntakeTests(unittest.TestCase):
         surface = build_review_pressure_surface(
             compile_pressure_proposal_bundles((record,))
         ).to_dict()
-
         self.assertEqual(
             surface["pressure_lines"][0]["proposal_ref"],
             "persisted-refund-cluster",
         )
 
-    def test_source_failure_compiles_into_source_blindness_governance_context(self) -> None:
+    def test_consumption_feedback_compiles_conservatively_for_review(self) -> None:
+        cases = (
+            (
+                PressureSignalType.LOW_RATING,
+                FreshnessState.UNKNOWN,
+                ReviewRiskType.TICKET_PRESSURE,
+                "medium",
+                "low answer rating",
+                ("urgent", "hot"),
+            ),
+            (
+                PressureSignalType.STALE_ANSWER,
+                FreshnessState.STALE,
+                ReviewRiskType.DRIFT,
+                "high",
+                "may be out of date",
+                ("stale_answer",),
+            ),
+        )
+
+        for (
+            signal_type,
+            freshness_state,
+            risk_type,
+            urgency,
+            why_now_phrase,
+            trigger_signals,
+        ) in cases:
+            with self.subTest(signal_type=signal_type.value):
+                bundle = compile_pressure_intake(
+                    PressureIntakeRecord(
+                        signal_type=signal_type,
+                        signal_ref=f"feedback-route:{signal_type.value}",
+                        title=f"{signal_type.value} feedback requires review",
+                        summary="Consumer feedback requires governed review.",
+                        source_ref=f"feedback-route:{signal_type.value}",
+                        source_type=EvidenceSourceType.CONSUMPTION_FEEDBACK,
+                        audience_filter=AudienceFilter(
+                            visibility=Visibility.EXTERNAL,
+                            product_lines=("billing",),
+                        ),
+                        object_type=KnowledgeObjectType.ANSWER_CARD,
+                        affected_surfaces=("feedback", "review_queue"),
+                        trigger_signals=trigger_signals,
+                        freshness_state=freshness_state,
+                        queue_owner="support-ops",
+                        evidence_excerpt="A concrete feedback observation was recorded.",
+                    )
+                )
+
+                self.assertEqual(bundle.signal.risk_type, risk_type)
+                self.assertEqual(bundle.proposal.urgency.value, urgency)
+                self.assertEqual(
+                    bundle.proposal.evidence_sufficiency.value,
+                    "partial",
+                )
+                self.assertEqual(
+                    bundle.signal.recommended_actions,
+                    ("open_review", "assign_owner"),
+                )
+                self.assertEqual(
+                    bundle.evidence[0].source_type,
+                    EvidenceSourceType.CONSUMPTION_FEEDBACK,
+                )
+                self.assertEqual(
+                    bundle.evidence[0].freshness_state,
+                    freshness_state,
+                )
+                self.assertIn(
+                    why_now_phrase,
+                    bundle.proposal.why_now.lower(),
+                )
+                self.assertNotIn(
+                    "restrict_publish",
+                    bundle.signal.recommended_actions,
+                )
+
+        stale_bundle = compile_pressure_intake(
+            PressureIntakeRecord(
+                signal_type=PressureSignalType.STALE_ANSWER,
+                signal_ref="feedback-route:stale-unknown-freshness",
+                title="Stale answer feedback requires review",
+                summary="Consumer feedback requires governed review.",
+                source_ref="feedback-route:stale-unknown-freshness",
+                source_type=EvidenceSourceType.CONSUMPTION_FEEDBACK,
+                audience_filter=AudienceFilter(visibility=Visibility.EXTERNAL),
+                object_type=KnowledgeObjectType.ANSWER_CARD,
+                affected_surfaces=("feedback", "review_queue"),
+                freshness_state=FreshnessState.UNKNOWN,
+            )
+        )
+        self.assertEqual(
+            stale_bundle.evidence[0].freshness_state,
+            FreshnessState.UNKNOWN,
+        )
+        self.assertNotIn("release", stale_bundle.proposal.why_now.lower())
+        self.assertNotIn("incident", stale_bundle.proposal.why_now.lower())
+
+    def test_source_failure_compiles_into_source_blindness_governance_context(
+        self,
+    ) -> None:
         record = PressureIntakeRecord(
             signal_type=PressureSignalType.SOURCE_FAILURE,
             signal_ref="incident-sync-eu-billing",
@@ -149,7 +270,9 @@ class ReviewIntakeTests(unittest.TestCase):
             evidence_excerpt="Incident feed is degraded while the workaround continues to be customer-facing.",
         )
 
-        surface = build_source_blindness_surface(compile_pressure_proposal_bundles((record,))).to_dict()
+        surface = build_source_blindness_surface(
+            compile_pressure_proposal_bundles((record,))
+        ).to_dict()
         context = surface["contexts"][0]
 
         self.assertEqual(context["proposal_ref"], "incident-sync-eu-billing")
@@ -159,7 +282,9 @@ class ReviewIntakeTests(unittest.TestCase):
         self.assertIn("external", context["affected_audience_labels"][0])
         self.assertIn("help_center", context["affected_surfaces"])
 
-    def test_build_pressure_intake_surfaces_returns_review_home_and_specialized_surfaces(self) -> None:
+    def test_build_pressure_intake_surfaces_returns_review_home_and_specialized_surfaces(
+        self,
+    ) -> None:
         records = (
             PressureIntakeRecord(
                 signal_type=PressureSignalType.TICKET_CLUSTER,
@@ -208,18 +333,30 @@ class ReviewIntakeTests(unittest.TestCase):
         self.assertEqual(len(surfaces["review_home"]["priority_stack"]), 2)
         self.assertIsNotNone(surfaces["pressure_surface"])
         self.assertIsNotNone(surfaces["source_blindness_surface"])
-        self.assertEqual(surfaces["pressure_surface"]["pressure_lines"][0]["proposal_ref"], "billing-verification-w25")
-        self.assertEqual(surfaces["source_blindness_surface"]["contexts"][0]["proposal_ref"], "incident-sync-eu-billing")
+        self.assertEqual(
+            surfaces["pressure_surface"]["pressure_lines"][0]["proposal_ref"],
+            "billing-verification-w25",
+        )
+        self.assertEqual(
+            surfaces["source_blindness_surface"]["contexts"][0]["proposal_ref"],
+            "incident-sync-eu-billing",
+        )
 
-    def test_pressure_intake_review_brief_surface_is_ranked_from_compiled_intake(self) -> None:
+    def test_pressure_intake_review_brief_surface_is_ranked_from_compiled_intake(
+        self,
+    ) -> None:
         payload = get_pressure_intake_review_brief_surface().to_dict()
 
         self.assertEqual(payload["surface_id"], "review-home")
         # 3 ticket_pressure signals: two create-proposals + one governance
         # signal on the EXISTING published object ko-billing-refund-policy.
-        self.assertEqual(payload["command_brief"]["summary_counts"]["ticket_pressure"], 3)
+        self.assertEqual(
+            payload["command_brief"]["summary_counts"]["ticket_pressure"], 3
+        )
         self.assertEqual(payload["priority_stack"][0]["risk_type"], "source_blindness")
-        self.assertEqual(payload["priority_stack"][0]["object_ref"], "incident-sync-eu-billing")
+        self.assertEqual(
+            payload["priority_stack"][0]["object_ref"], "incident-sync-eu-billing"
+        )
         self.assertIn("assign_owner", payload["priority_stack"][1]["command_actions"])
         # The publish write-path keys on object_ref; an existing ko-* object in
         # the queue bridges APPLY to traceability (same id resolves on both sides).
@@ -243,7 +380,9 @@ class ReviewIntakeTests(unittest.TestCase):
             affected_surfaces=("copilot", "macro"),
         )
 
-        payload = compile_pressure_intake(record).as_proposal_bundle().proposal.to_dict()
+        payload = (
+            compile_pressure_intake(record).as_proposal_bundle().proposal.to_dict()
+        )
 
         self.assertEqual(payload["proposal_id"], "ko-billing-refund-policy")
         self.assertEqual(payload["action"], "update")

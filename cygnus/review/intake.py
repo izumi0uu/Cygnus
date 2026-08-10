@@ -36,6 +36,28 @@ class PressureSignalType(str, Enum):
     SOURCE_FAILURE = "source_failure"
     RELEASE_DELTA = "release_delta"
     INCIDENT_DELTA = "incident_delta"
+    LOW_RATING = "low_rating"
+    STALE_ANSWER = "stale_answer"
+
+
+_CONSUMPTION_FEEDBACK_SIGNAL_TYPES = frozenset(
+    {
+        PressureSignalType.LOW_RATING,
+        PressureSignalType.STALE_ANSWER,
+    }
+)
+
+
+def is_feedback_derived_signal_type(signal_type: object) -> bool:
+    try:
+        normalized = (
+            signal_type
+            if isinstance(signal_type, PressureSignalType)
+            else PressureSignalType(signal_type)
+        )
+    except (TypeError, ValueError):
+        return False
+    return normalized in _CONSUMPTION_FEEDBACK_SIGNAL_TYPES
 
 
 def _normalize(values: Iterable[str] | None, *, label: str) -> tuple[str, ...]:
@@ -389,7 +411,7 @@ def _proposal_for_record(record: PressureIntakeRecord) -> CompilationProposal:
             record.evidence_excerpt or record.summary,
         ),
         review_owner=record.queue_owner or "support-ops",
-        why_now=record.reason or _why_now_for_signal(record),
+        why_now=_why_now_for_record(record),
         audience_notes=(audience_note,) if audience_note else (),
     )
 
@@ -435,15 +457,21 @@ def _risk_type_for_signal(signal_type: PressureSignalType) -> ReviewRiskType:
     return {
         PressureSignalType.TICKET_CLUSTER: ReviewRiskType.TICKET_PRESSURE,
         PressureSignalType.HUMAN_REWRITE: ReviewRiskType.TICKET_PRESSURE,
+        PressureSignalType.LOW_RATING: ReviewRiskType.TICKET_PRESSURE,
         PressureSignalType.SOURCE_FAILURE: ReviewRiskType.SOURCE_BLINDNESS,
         PressureSignalType.RELEASE_DELTA: ReviewRiskType.DRIFT,
         PressureSignalType.INCIDENT_DELTA: ReviewRiskType.DRIFT,
+        PressureSignalType.STALE_ANSWER: ReviewRiskType.DRIFT,
     }[signal_type]
 
 
 def _urgency_for_signal(
     signal_type: PressureSignalType, trigger_signals: tuple[str, ...]
 ) -> UrgencyLevel:
+    if signal_type is PressureSignalType.LOW_RATING:
+        return UrgencyLevel.MEDIUM
+    if signal_type is PressureSignalType.STALE_ANSWER:
+        return UrgencyLevel.HIGH
     if signal_type is PressureSignalType.SOURCE_FAILURE:
         return UrgencyLevel.URGENT
     if signal_type in (
@@ -459,7 +487,10 @@ def _urgency_for_signal(
 def _evidence_sufficiency_for_signal(
     signal_type: PressureSignalType, evidence_excerpt: str
 ) -> EvidenceSufficiency:
-    if signal_type is PressureSignalType.SOURCE_FAILURE:
+    if (
+        signal_type is PressureSignalType.SOURCE_FAILURE
+        or is_feedback_derived_signal_type(signal_type)
+    ):
         return EvidenceSufficiency.PARTIAL
     if evidence_excerpt and evidence_excerpt.strip():
         return EvidenceSufficiency.SUFFICIENT
@@ -469,6 +500,8 @@ def _evidence_sufficiency_for_signal(
 def _recommended_actions_for_signal(
     signal_type: PressureSignalType, queue_owner: str | None
 ) -> tuple[str, ...]:
+    if is_feedback_derived_signal_type(signal_type):
+        return ("open_review", "assign_owner")
     if signal_type is PressureSignalType.SOURCE_FAILURE:
         return ("open_review", "restrict_publish", "assign_owner")
     if signal_type in (
@@ -481,11 +514,21 @@ def _recommended_actions_for_signal(
     return ("open_review", "assign_owner")
 
 
+def _why_now_for_record(record: PressureIntakeRecord) -> str:
+    if is_feedback_derived_signal_type(record.signal_type):
+        return _why_now_for_signal(record)
+    return record.reason or _why_now_for_signal(record)
+
+
 def _why_now_for_signal(record: PressureIntakeRecord) -> str:
     if record.signal_type is PressureSignalType.TICKET_CLUSTER:
         return "Recurring ticket pressure is ready to enter review."
     if record.signal_type is PressureSignalType.HUMAN_REWRITE:
         return "Human rewrite pressure is indicating a reusable knowledge gap."
+    if record.signal_type is PressureSignalType.LOW_RATING:
+        return "A low answer rating warrants review; it does not confirm an underlying knowledge error."
+    if record.signal_type is PressureSignalType.STALE_ANSWER:
+        return "A stale-answer report suggests this guidance may be out of date and needs review."
     if record.signal_type is PressureSignalType.RELEASE_DELTA:
         return "A release delta may have made published support guidance stale."
     if record.signal_type is PressureSignalType.INCIDENT_DELTA:

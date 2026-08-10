@@ -14,6 +14,7 @@ from cygnus.runtime.database.models import GovernanceSignal
 from cygnus.runtime.main import app
 from cygnus.runtime.routers.governance import signals as signals_router
 from cygnus.runtime.services.auth_service import require_admin
+from cygnus.review import PressureSignalType
 
 
 _NOW = datetime(2026, 8, 8, 12, 0, tzinfo=timezone.utc)
@@ -152,6 +153,60 @@ class GovernanceSignalsApiTests(unittest.TestCase):
         self.assertIn(
             "incident_delta",
             listed.json()["provider_coverage"]["covered_signals"],
+        )
+        self.assertIn(
+            "low_rating",
+            listed.json()["provider_coverage"]["covered_signals"],
+        )
+        self.assertIn(
+            "stale_answer",
+            listed.json()["provider_coverage"]["covered_signals"],
+        )
+
+    def test_write_rejects_worker_owned_feedback_types_before_service_write(
+        self,
+    ) -> None:
+        self.enable_admin()
+        for signal_type in ("low_rating", "stale_answer"):
+            with (
+                self.subTest(signal_type=signal_type),
+                patch.object(
+                    signals_router,
+                    "create_governance_signal",
+                    AsyncMock(),
+                ) as create_signal,
+            ):
+                response = self.client.post(
+                    "/api/governance-signals",
+                    json={
+                        **_CREATE_PAYLOAD,
+                        "signal_ref": f"feedback-route:{signal_type}",
+                        "signal_type": signal_type,
+                    },
+                )
+
+            self.assertEqual(response.status_code, 422)
+            self.assertIn("worker-owned derived type", response.json()["detail"])
+            create_signal.assert_not_awaited()
+
+    def test_read_can_filter_worker_owned_feedback_signal_rows(self) -> None:
+        self.enable_admin()
+        signal = _signal()
+        signal.signal_ref = "feedback-route:low-rating"
+        signal.signal_type = "low_rating"
+        signal.evidence_source_type = "consumption_feedback"
+        with patch.object(
+            signals_router,
+            "list_governance_signals",
+            AsyncMock(return_value=(signal,)),
+        ) as list_signals:
+            response = self.client.get("/api/governance-signals?signal_type=low_rating")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["signals"][0]["signal_type"], "low_rating")
+        self.assertEqual(
+            list_signals.await_args.kwargs["signal_types"],
+            [PressureSignalType.LOW_RATING],
         )
 
     def test_write_returns_conflict_for_different_signal_ref_reuse(self) -> None:

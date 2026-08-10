@@ -19,7 +19,10 @@ from cygnus.governance.signals import (
     list_governance_signals,
     resolve_governance_signal,
 )
-from cygnus.review.intake import PressureSignalType
+from cygnus.review.intake import (
+    PressureSignalType,
+    is_feedback_derived_signal_type,
+)
 from cygnus.runtime.database import get_db
 from cygnus.runtime.database.models import Employee
 from cygnus.runtime.services.auth_service import require_admin
@@ -114,6 +117,15 @@ async def write_governance_signal(
     db: AsyncSession = Depends(get_db),
     current_user: Employee = Depends(require_admin),
 ) -> dict[str, object]:
+    if is_feedback_derived_signal_type(body.signal_type):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"{body.signal_type.value} is a worker-owned derived type and "
+                "cannot be created through this endpoint"
+            ),
+        )
+
     try:
         signal = await create_governance_signal(
             db,

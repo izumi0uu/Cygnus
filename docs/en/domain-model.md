@@ -139,6 +139,12 @@ Examples:
 - poor rating
 - unresolved conversation
 
+Durable form (CYG-118/119):
+- the accepted types are fixed to `answer_accepted`, `human_rewrite`, `escalated`, `low_rating`, `unsupported_answer`, and `stale_answer`
+- `low_rating` and `stale_answer` create a durable feedback route that a bounded worker executes through `queued / running / completed / blocked / failed` (retryable failures requeue at most 3 times; missing, draft-only, or ineligible targets end `blocked` without guessing)
+- a completed route materializes a durable outcome `GovernanceSignal` whose identity is `route_ref=feedback-route:<route UUID>` (the durable route row stores `outcome_signal_id`; responses project `outcome_signal_ref=governance-signal:<signal UUID>` from that ID): `low_rating` → review pressure (`ticket_pressure`, unknown freshness), `stale_answer` → suspected freshness/drift review (`drift`, stale freshness)
+- execution never auto-changes content or publishes; completion proves materialization into governed review truth only
+
 ## 3. Object relationships
 - Source Connector produces Support Evidence
 - Support Evidence supports Answer Card / Troubleshooting Flow / Policy Rule / Known Issue Page
@@ -196,6 +202,8 @@ Used to re-rank the review entry by governance risk rather than creation time:
 - `policy_conflict` — policy conflict across audiences
 - `owner_gap` — missing owner
 
+Durable consumption-feedback routes materialize into these risk types (CYG-118/119): `low_rating` → `ticket_pressure` with unknown freshness, `stale_answer` → `drift` with stale freshness.
+
 ### 7.2 Owner State
 - `assigned` / `unassigned` / `escalated`
 
@@ -206,4 +214,4 @@ Used to re-rank the review entry by governance risk rather than creation time:
 - `insufficient` / `partial` / `sufficient`
 
 ### 7.5 Evidence Source Type
-- `help_center` / `internal_sop` / `resolved_ticket` / `release_note` / `incident_update` / `chat_transcript`
+- `help_center` / `internal_sop` / `resolved_ticket` / `release_note` / `incident_update` / `chat_transcript` / `consumption_feedback`

@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.domain import AudienceFilter, KnowledgeObjectType, Visibility
+from cygnus.evidence import EvidenceSourceType, FreshnessState
 
 from cygnus.publish import (
     PublishActionType,
@@ -19,7 +20,10 @@ from cygnus.publish import (
     PublishPreviewCandidate,
     get_pressure_intake_publish_preview_surface,
     get_pressure_intake_publish_propagation_surface,
+    durable_publish_command_for_signal,
+    persisted_publish_candidate_for_signal,
 )
+from cygnus.review import PressureIntakeRecord, PressureSignalType
 from cygnus.runtime.database.models import Employee, GovernanceSignal
 from cygnus.runtime.routers.governance import publish as publish_router
 
@@ -80,6 +84,28 @@ def _persisted_candidate() -> PublishPreviewCandidate:
         target_channels=("help_center",),
         target_bindings=(
             PublishBinding(audience_filter=audience, channel="help_center"),
+        ),
+    )
+
+
+def _feedback_record(
+    signal_type: PressureSignalType = PressureSignalType.STALE_ANSWER,
+) -> PressureIntakeRecord:
+    return PressureIntakeRecord(
+        signal_type=signal_type,
+        signal_ref=f"feedback-route:{signal_type.value}",
+        title=f"{signal_type.value} feedback",
+        summary="Consumption feedback requires governed review.",
+        source_ref=f"feedback-route:{signal_type.value}",
+        source_type=EvidenceSourceType.CONSUMPTION_FEEDBACK,
+        audience_filter=AudienceFilter(visibility=Visibility.EXTERNAL),
+        object_type=KnowledgeObjectType.ANSWER_CARD,
+        affected_surfaces=("feedback", "review_queue"),
+        trigger_signals=(signal_type.value,),
+        freshness_state=(
+            FreshnessState.STALE
+            if signal_type is PressureSignalType.STALE_ANSWER
+            else FreshnessState.UNKNOWN
         ),
     )
 
@@ -187,6 +213,103 @@ class PublishSurfaceTests(unittest.TestCase):
         self.assertEqual(record_map["feedback"]["status"], "manual_action_required")
         self.assertIn(
             "resolve_surface_hold", payload["propagation_ledger"]["continue_commands"]
+        )
+
+    def test_feedback_derived_signals_never_compile_publish_truth(self) -> None:
+        for signal_type in (
+            PressureSignalType.LOW_RATING,
+            PressureSignalType.STALE_ANSWER,
+        ):
+            with self.subTest(signal_type=signal_type.value):
+                signal = _persisted_signal()
+                signal.signal_type = signal_type.value
+                signal.evidence_source_type = "consumption_feedback"
+                session = AsyncMock()
+
+                command = asyncio.run(
+                    durable_publish_command_for_signal(
+                        cast(AsyncSession, cast(object, session)),
+                        signal=signal,
+                    )
+                )
+                candidate = asyncio.run(
+                    persisted_publish_candidate_for_signal(
+                        cast(AsyncSession, cast(object, session)),
+                        signal=signal,
+                    )
+                )
+
+                self.assertIsNone(command)
+                self.assertIsNone(candidate)
+                session.get.assert_not_awaited()
+                session.execute.assert_not_awaited()
+
+                with self.assertRaisesRegex(
+                    ValueError,
+                    rf"signal_type={signal_type.value} is review-only feedback and cannot compile a publish action",
+                ):
+                    get_pressure_intake_publish_preview_surface(
+                        records=(_feedback_record(signal_type),)
+                    )
+                with self.assertRaisesRegex(
+                    ValueError,
+                    rf"signal_type={signal_type.value} is review-only feedback and cannot compile a publish action",
+                ):
+                    get_pressure_intake_publish_preview_surface(
+                        records=(_feedback_record(signal_type),),
+                        candidate_override=_persisted_candidate(),
+                    )
+
+    def test_runtime_preview_skips_feedback_before_selecting_publish_candidate(
+        self,
+    ) -> None:
+        feedback = _persisted_signal()
+        feedback.signal_ref = "feedback-route:stale-answer"
+        feedback.signal_type = PressureSignalType.STALE_ANSWER.value
+        feedback.object_ref = "ko-feedback-answer"
+        feedback.title = "Suspected stale answer"
+        feedback.evidence_source_type = "consumption_feedback"
+        feedback.freshness = "stale"
+        feedback.trigger_signals = ["stale_answer"]
+        publishable = _persisted_signal()
+        candidate = _persisted_candidate()
+        candidate_loader = AsyncMock(return_value=candidate)
+        command_loader = AsyncMock(return_value=None)
+        db = cast(AsyncSession, cast(object, AsyncMock()))
+
+        with (
+            patch.object(
+                publish_router,
+                "list_governance_signals",
+                AsyncMock(return_value=(feedback, publishable)),
+            ),
+            patch.object(
+                publish_router,
+                "persisted_publish_candidate_for_signal",
+                candidate_loader,
+            ),
+            patch.object(
+                publish_router,
+                "durable_publish_command_for_signal",
+                command_loader,
+            ),
+        ):
+            payload = asyncio.run(
+                publish_router.publish_preview(
+                    current_user=cast(
+                        Employee,
+                        cast(object, SimpleNamespace(role="admin")),
+                    ),
+                    db=db,
+                )
+            )
+
+        self.assertEqual(payload["selected_card"]["object_ref"], publishable.object_ref)
+        candidate_loader.assert_awaited_once_with(db, signal=publishable)
+        command_loader.assert_awaited_once_with(
+            db,
+            signal=publishable,
+            action_key=None,
         )
 
     def test_runtime_preview_uses_persisted_binding_candidate(self) -> None:

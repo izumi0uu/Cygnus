@@ -36,7 +36,10 @@ from cygnus.publish import (
     update_propagation,
 )
 from cygnus.publish.surface import get_pressure_intake_publish_preview_surface
-from cygnus.review import get_pressure_intake_review_brief_surface
+from cygnus.review import (
+    get_pressure_intake_review_brief_surface,
+    is_feedback_derived_signal_type,
+)
 from cygnus.runtime.database import get_db
 from cygnus.runtime.database.models import (
     Employee,
@@ -87,6 +90,8 @@ async def publish_preview(
     records = []
     record_signals = []
     for signal in signals:
+        if is_feedback_derived_signal_type(signal.signal_type):
+            continue
         audience_override = None
         if signal.audience_filter is None and signal.audience_binding_ref is not None:
             binding_statement = (

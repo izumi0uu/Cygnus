@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import cast
@@ -117,6 +118,110 @@ class GovernanceSignalServiceTests(unittest.TestCase):
         self.assertEqual(
             {bundle.proposal.proposal_id for bundle in bundles},
             {"ko-billing-verification", "ko-refund-policy"},
+        )
+
+    def test_feedback_rows_default_to_feedback_evidence_and_compile_review_truth(
+        self,
+    ) -> None:
+        for signal_type, freshness in (
+            (PressureSignalType.LOW_RATING, FreshnessState.UNKNOWN),
+            (PressureSignalType.STALE_ANSWER, FreshnessState.STALE),
+        ):
+            with self.subTest(signal_type=signal_type.value):
+                signal_input = replace(
+                    _signal_input(),
+                    signal_ref=f"feedback-route:{signal_type.value}",
+                    signal_type=signal_type,
+                    evidence_source_type=None,
+                    freshness=freshness,
+                )
+                self.assertEqual(
+                    signal_input.evidence_source_type,
+                    EvidenceSourceType.CONSUMPTION_FEEDBACK,
+                )
+
+        low_rating = _signal(
+            signal_ref="feedback-route:low-rating",
+            signal_type=PressureSignalType.LOW_RATING.value,
+            object_ref="ko-feedback-low-rating",
+            title="Low answer rating",
+        )
+        stale_answer = _signal(
+            signal_ref="feedback-route:stale-answer",
+            signal_type=PressureSignalType.STALE_ANSWER.value,
+            object_ref="ko-feedback-stale-answer",
+            title="Suspected stale answer",
+        )
+        for signal, freshness in (
+            (low_rating, FreshnessState.UNKNOWN),
+            (stale_answer, FreshnessState.STALE),
+        ):
+            signal.evidence_source_type = EvidenceSourceType.CONSUMPTION_FEEDBACK.value
+            signal.freshness = freshness.value
+            signal.affected_surfaces = ["feedback", "review_queue"]
+            signal.trigger_signals = [signal.signal_type]
+
+        bundles = compile_review_signal_bundles((low_rating, stale_answer))
+        bundles_by_ref = {bundle.signal.signal_ref: bundle for bundle in bundles}
+
+        self.assertEqual(
+            set(bundles_by_ref),
+            {low_rating.signal_ref, stale_answer.signal_ref},
+        )
+        self.assertEqual(
+            bundles_by_ref[low_rating.signal_ref].signal.risk_type.value,
+            "ticket_pressure",
+        )
+        self.assertEqual(
+            bundles_by_ref[stale_answer.signal_ref].signal.risk_type.value,
+            "drift",
+        )
+        self.assertEqual(
+            bundles_by_ref[low_rating.signal_ref].proposal.urgency.value,
+            "medium",
+        )
+        self.assertEqual(
+            bundles_by_ref[stale_answer.signal_ref].proposal.urgency.value,
+            "high",
+        )
+        self.assertEqual(
+            {
+                bundle.proposal.evidence_sufficiency.value
+                for bundle in bundles_by_ref.values()
+            },
+            {"partial"},
+        )
+        self.assertEqual(
+            {bundle.signal.recommended_actions for bundle in bundles_by_ref.values()},
+            {("open_review", "assign_owner")},
+        )
+        self.assertEqual(
+            bundles_by_ref[low_rating.signal_ref].evidence[0].freshness_state,
+            FreshnessState.UNKNOWN,
+        )
+        self.assertEqual(
+            bundles_by_ref[stale_answer.signal_ref].evidence[0].freshness_state,
+            FreshnessState.STALE,
+        )
+        self.assertEqual(
+            {bundle.evidence[0].source_type for bundle in bundles_by_ref.values()},
+            {EvidenceSourceType.CONSUMPTION_FEEDBACK},
+        )
+        self.assertIn(
+            "low answer rating",
+            bundles_by_ref[low_rating.signal_ref].proposal.why_now.lower(),
+        )
+        self.assertIn(
+            "may be out of date",
+            bundles_by_ref[stale_answer.signal_ref].proposal.why_now.lower(),
+        )
+        self.assertNotIn(
+            "release",
+            bundles_by_ref[stale_answer.signal_ref].proposal.why_now.lower(),
+        )
+        self.assertNotIn(
+            "incident",
+            bundles_by_ref[stale_answer.signal_ref].proposal.why_now.lower(),
         )
 
     def test_binding_backed_row_accepts_an_explicit_resolved_filter(self) -> None:

@@ -128,6 +128,7 @@
 - coverage gap
 - refresh candidate
 - object deprecation/update queue
+- durable feedback-route 生命周期真相（`queued` → `running` → `completed`；目标缺失、仅 draft 或不符合条件时 `blocked`；失败在有界 backoff 下最多退回 3 次，之后以 `failed` 结束），其完成只物化进 governed review truth，绝不自动修改内容或发布
 
 ## 4. 关键闭环
 ### Loop A：Ticket-to-Knowledge
@@ -145,6 +146,7 @@ drift / ticket / source 信号不止是观察项，而是可被直接发出的�
 - 工单 / 改写压力（ticket_pressure）→ `route_to_review` / `assign_owner` / `mark_urgent`
 - 来源失明（source_blindness）→ `repair_source` / `restrict_propagation` / `route_to_human_review`
 - 审阅队列重排 → `restack` / `reroute` / `escalate`
+- 消费反馈 route（CYG-118/119）：`low_rating` 物化为 review pressure（`ticket_pressure`、unknown freshness），`stale_answer` 物化为疑似 freshness/drift review（`drift`、stale freshness）；route 执行只物化 durable governed review truth，绝不自动修改内容或发布
 
 ## 5. 生命周期原则
 1. **New knowledge defaults to draft**

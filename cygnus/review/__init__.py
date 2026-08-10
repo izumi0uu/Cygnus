@@ -82,6 +82,7 @@ from cygnus.review.intake import (
     compile_pressure_proposal_bundles,
     get_pressure_intake_review_brief_surface,
     get_pressure_intake_review_queue_drilldown,
+    is_feedback_derived_signal_type,
     sample_pressure_intake_records,
 )
 from cygnus.review.item import (
@@ -263,6 +264,7 @@ __all__ = [
     "compile_pressure_intake_bundle",
     "compile_pressure_proposal_bundles",
     "get_pressure_intake_review_brief_surface",
+    "is_feedback_derived_signal_type",
     "get_pressure_intake_review_queue_drilldown",
     "sample_pressure_intake_records",
     "ProposalBundle",

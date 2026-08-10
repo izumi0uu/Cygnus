@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
+from cygnus.evidence import EvidenceSourceType
 from cygnus.review import build_pressure_intake_surfaces, get_review_home_surface
 from cygnus.review.drift import build_drift_governance_surface
 from cygnus.review.source_blindness import build_source_blindness_surface
@@ -16,16 +17,10 @@ router = APIRouter()
 
 def _review_observation(snapshot: GovernanceReadSnapshot) -> SurfaceObservation:
     missing_signals = (
-        ("audience_binding_resolution",)
-        if snapshot.uncompiled_signal_count
-        else ()
+        ("audience_binding_resolution",) if snapshot.uncompiled_signal_count else ()
     )
     return SurfaceObservation(
-        state=(
-            ObservationState.PARTIAL
-            if missing_signals
-            else ObservationState.READY
-        ),
+        state=(ObservationState.PARTIAL if missing_signals else ObservationState.READY),
         observed_count=(
             len(snapshot.governance_signals)
             + snapshot.audience_conflict_count
@@ -42,6 +37,8 @@ def _review_observation(snapshot: GovernanceReadSnapshot) -> SurfaceObservation:
             "source_failure",
             "release_delta",
             "incident_delta",
+            "low_rating",
+            "stale_answer",
             "audience_conflict",
             "review_assignment",
             "source_impact",
@@ -52,7 +49,15 @@ def _review_observation(snapshot: GovernanceReadSnapshot) -> SurfaceObservation:
 
 def _drift_observation(snapshot: GovernanceReadSnapshot) -> SurfaceObservation:
     drift_count = sum(
-        bundle.signal.risk_type.value == "drift" for bundle in snapshot.review_bundles
+        any(
+            evidence.source_type
+            in {
+                EvidenceSourceType.RELEASE_NOTE,
+                EvidenceSourceType.INCIDENT_UPDATE,
+            }
+            for evidence in bundle.evidence
+        )
+        for bundle in snapshot.review_bundles
     )
     missing_signals = (
         ("audience_binding_resolution",)

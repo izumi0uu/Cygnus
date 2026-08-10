@@ -65,6 +65,7 @@ from cygnus.governance.feedback import (
     GovernanceFeedbackSignal,
     create_feedback_signal,
     feedback_signal_to_dict,
+    feedback_signal_ref,
     normalize_audience_context,
 )
 from cygnus.governance.feedback_routing import (
@@ -75,6 +76,13 @@ from cygnus.governance.feedback_routing import (
     feedback_route_kind,
     project_feedback_route,
     route_feedback_signal,
+)
+from cygnus.governance.feedback_execution import (
+    FeedbackRouteClaim,
+    FeedbackRouteLeaseLost,
+    claim_feedback_routes,
+    execute_feedback_route,
+    record_feedback_route_failure,
 )
 
 __all__ = [
@@ -102,6 +110,8 @@ __all__ = [
     "FeedbackRouteConflict",
     "FeedbackRouteState",
     "FeedbackRoutingProjection",
+    "FeedbackRouteClaim",
+    "FeedbackRouteLeaseLost",
     "GovernanceSignalStatus",
     "GovernanceLedgerConflict",
     "append_draft_event",
@@ -119,9 +129,13 @@ __all__ = [
     "record_created_draft",
     "create_feedback_signal",
     "feedback_signal_to_dict",
+    "feedback_signal_ref",
     "feedback_route_kind",
     "project_feedback_route",
     "route_feedback_signal",
+    "claim_feedback_routes",
+    "execute_feedback_route",
+    "record_feedback_route_failure",
     "normalize_audience_context",
     "audience_binding_to_dict",
     "audience_filter_from_binding",

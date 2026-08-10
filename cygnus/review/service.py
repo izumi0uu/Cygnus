@@ -4,7 +4,11 @@ from dataclasses import dataclass, field
 from typing import Iterable
 
 from cygnus.domain.audience import AudienceFilter
-from cygnus.evidence.records import FreshnessState, SupportEvidence
+from cygnus.evidence.records import (
+    EvidenceSourceType,
+    FreshnessState,
+    SupportEvidence,
+)
 from cygnus.review.briefing import (
     OwnerState,
     ReviewRiskItem,
@@ -206,7 +210,10 @@ def _compose_why_now_summary(
     evidence: tuple[SupportEvidence, ...],
     owner_state: OwnerState,
 ) -> str:
-    parts = [proposal.why_now.rstrip("."), _risk_phrase(signal.risk_type)]
+    parts = [
+        proposal.why_now.rstrip("."),
+        _risk_phrase(signal=signal, evidence=evidence),
+    ]
     stale_count = sum(
         1 for record in evidence if record.freshness_state is FreshnessState.STALE
     )
@@ -226,7 +233,34 @@ def _compose_why_now_summary(
     return "; ".join(parts) + "."
 
 
-def _risk_phrase(risk_type: ReviewRiskType) -> str:
+def _is_consumption_feedback_signal(
+    *,
+    signal: ReviewSignal,
+    evidence: tuple[SupportEvidence, ...],
+) -> bool:
+    from cygnus.review.intake import is_feedback_derived_signal_type
+
+    return any(
+        is_feedback_derived_signal_type(trigger) for trigger in signal.trigger_signals
+    ) or any(
+        record.source_type is EvidenceSourceType.CONSUMPTION_FEEDBACK
+        for record in evidence
+    )
+
+
+def _risk_phrase(
+    *,
+    signal: ReviewSignal,
+    evidence: tuple[SupportEvidence, ...],
+) -> str:
+    consumption_feedback = _is_consumption_feedback_signal(
+        signal=signal,
+        evidence=evidence,
+    )
+    if consumption_feedback and signal.risk_type is ReviewRiskType.TICKET_PRESSURE:
+        return "consumption feedback indicates a support-quality concern that requires review"
+    if consumption_feedback and signal.risk_type is ReviewRiskType.DRIFT:
+        return "consumption feedback suggests a suspected freshness risk that requires verification"
     mapping = {
         ReviewRiskType.SOURCE_BLINDNESS: "source coverage is degraded at the exact moment operators need confidence",
         ReviewRiskType.DRIFT: "published guidance is drifting away from current support reality",
@@ -235,7 +269,7 @@ def _risk_phrase(risk_type: ReviewRiskType) -> str:
         ReviewRiskType.POLICY_CONFLICT: "policy interpretation may now be inconsistent across surfaces",
         ReviewRiskType.OWNER_GAP: "review ownership is unclear for an active knowledge change",
     }
-    return mapping[risk_type]
+    return mapping[signal.risk_type]
 
 
 def _merge_trigger_signals(
@@ -261,6 +295,9 @@ def _merge_recommended_actions(
     owner_state: OwnerState,
     evidence: tuple[SupportEvidence, ...],
 ) -> tuple[str, ...]:
+    if _is_consumption_feedback_signal(signal=signal, evidence=evidence):
+        return ("open_review", "assign_owner")
+
     actions = [
         action
         for action in signal.recommended_actions

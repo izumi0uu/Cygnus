@@ -146,6 +146,8 @@ class CommandCenterApiTests(unittest.TestCase):
             "persisted_governance_signal_provider_ready",
         )
         self.assertIn("ticket_cluster", payload["observation"]["covered_signals"])
+        self.assertIn("low_rating", payload["observation"]["covered_signals"])
+        self.assertIn("stale_answer", payload["observation"]["covered_signals"])
 
     def test_review_intake_payload_shape(self) -> None:
         self.enable_auth()
@@ -232,9 +234,7 @@ class CommandCenterApiTests(unittest.TestCase):
         self.assertEqual(source_payload["contexts"], [])
         self.assertEqual(source_payload["available_commands"], [])
         self.assertEqual(source_payload["observation"]["state"], "ready")
-        self.assertEqual(
-            source_payload["observation"]["missing_signals"], []
-        )
+        self.assertEqual(source_payload["observation"]["missing_signals"], [])
         self.assertEqual(
             source_payload["source_observations"][0]["source_id"], "source-failed"
         )

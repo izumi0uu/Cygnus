@@ -34,3 +34,18 @@ class EvidenceRecordTests(unittest.TestCase):
         self.assertEqual(payload["freshness_state"], "fresh")
         self.assertEqual(payload["product_lines"], ["billing"])
 
+    def test_consumption_feedback_serializes_as_evidence(self) -> None:
+        evidence = SupportEvidence(
+            evidence_id="ev-feedback-low-rating",
+            source_type=EvidenceSourceType.CONSUMPTION_FEEDBACK,
+            source_ref="feedback-route:route-low-rating",
+            title="Low answer rating",
+            content="A consumer rated this answer poorly.",
+            audience_filter=AudienceFilter(visibility=Visibility.EXTERNAL),
+            freshness_state=FreshnessState.UNKNOWN,
+        )
+
+        self.assertEqual(
+            evidence.to_dict()["source_type"],
+            "consumption_feedback",
+        )

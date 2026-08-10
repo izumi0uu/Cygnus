@@ -71,6 +71,91 @@ class ReviewServiceTests(unittest.TestCase):
         self.assertIn("mark_urgent", payload["recommended_actions"])
         self.assertIn("source coverage is degraded", payload["why_now"]["summary"])
 
+    def test_consumption_feedback_review_items_keep_suspected_language_and_conservative_actions(
+        self,
+    ) -> None:
+        cases = (
+            (
+                "low_rating",
+                ReviewRiskType.TICKET_PRESSURE,
+                UrgencyLevel.MEDIUM,
+                FreshnessState.UNKNOWN,
+                "consumption feedback indicates a support-quality concern that requires review",
+                "ticket pressure is signaling a reusable knowledge gap",
+            ),
+            (
+                "stale_answer",
+                ReviewRiskType.DRIFT,
+                UrgencyLevel.HIGH,
+                FreshnessState.STALE,
+                "consumption feedback suggests a suspected freshness risk that requires verification",
+                "published guidance is drifting away from current support reality",
+            ),
+        )
+        for (
+            signal_type,
+            risk_type,
+            urgency,
+            freshness_state,
+            expected_phrase,
+            generic_phrase,
+        ) in cases:
+            with self.subTest(signal_type=signal_type):
+                proposal = CompilationProposal(
+                    proposal_id=f"cp-{signal_type}",
+                    object_type=KnowledgeObjectType.ANSWER_CARD,
+                    action=PlanAction.UPDATE,
+                    title=f"{signal_type} feedback",
+                    summary="Consumer feedback requires governed review.",
+                    evidence_ids=(f"ev-{signal_type}",),
+                    urgency=urgency,
+                    evidence_sufficiency=EvidenceSufficiency.PARTIAL,
+                    review_owner="support-ops",
+                    why_now="Consumer feedback was recorded.",
+                )
+                signal = ReviewSignal(
+                    proposal_id=proposal.proposal_id,
+                    signal_ref=f"feedback-route:{signal_type}",
+                    risk_type=risk_type,
+                    affected_audiences=(
+                        AudienceFilter(visibility=Visibility.EXTERNAL),
+                    ),
+                    affected_surfaces=("feedback", "review_queue"),
+                    trigger_signals=(signal_type,),
+                    recommended_actions=("open_review", "assign_owner"),
+                )
+                evidence = SupportEvidence(
+                    evidence_id=f"ev-{signal_type}",
+                    source_type=EvidenceSourceType.CONSUMPTION_FEEDBACK,
+                    source_ref=f"feedback-route:{signal_type}",
+                    title=f"{signal_type} feedback",
+                    content="A consumer feedback observation was recorded.",
+                    audience_filter=AudienceFilter(visibility=Visibility.EXTERNAL),
+                    freshness_state=freshness_state,
+                )
+
+                item = build_review_risk_item(
+                    ProposalBundle(
+                        proposal=proposal,
+                        signal=signal,
+                        evidence=(evidence,),
+                    )
+                )
+
+                self.assertIn(expected_phrase, item.why_now.summary)
+                self.assertNotIn(generic_phrase, item.why_now.summary)
+                self.assertIn("open_review", item.recommended_actions)
+                self.assertIn("assign_owner", item.recommended_actions)
+                self.assertNotIn("restrict_publish", item.recommended_actions)
+                self.assertNotIn(
+                    "force_audience_recheck",
+                    item.recommended_actions,
+                )
+                self.assertEqual(
+                    item.recommended_actions,
+                    ("open_review", "assign_owner"),
+                )
+
     def test_assemble_review_command_brief_returns_ranked_brief_payload(self) -> None:
         external = AudienceFilter(visibility=Visibility.EXTERNAL)
         proposal_high = CompilationProposal(
@@ -131,6 +216,18 @@ class ReviewServiceTests(unittest.TestCase):
         self.assertEqual(payload["priority_items"][0]["object_ref"], "cp-high")
         self.assertEqual(payload["summary_counts"]["drift"], 1)
         self.assertEqual(payload["summary_counts"]["ticket_pressure"], 1)
+        summaries_by_ref = {
+            item["object_ref"]: item["why_now"]["summary"]
+            for item in payload["priority_items"]
+        }
+        self.assertIn(
+            "published guidance is drifting away from current support reality",
+            summaries_by_ref["cp-high"],
+        )
+        self.assertIn(
+            "ticket pressure is signaling a reusable knowledge gap",
+            summaries_by_ref["cp-low"],
+        )
 
     def test_rank_review_item_prefers_unassigned_source_blindness_when_urgency_matches(
         self,

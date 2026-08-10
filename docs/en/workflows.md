@@ -128,6 +128,7 @@ Outputs:
 - coverage gap
 - refresh candidate
 - object deprecation/update queue
+- durable feedback-route lifecycle truth (`queued` → `running` → `completed`; `blocked` for missing/draft-only/ineligible targets; failures requeue with bounded backoff up to 3 attempts, then end `failed`), whose completion materializes into governed review truth without auto-changing content or publishing
 
 ## 4. Key loops
 ### Loop A: Ticket-to-Knowledge
@@ -145,6 +146,7 @@ Drift / ticket / source signals are not just observations; they are governance c
 - ticket / rewrite pressure (`ticket_pressure`) → `route_to_review` / `assign_owner` / `mark_urgent`
 - source blindness → `repair_source` / `restrict_propagation` / `route_to_human_review`
 - review-queue re-stacking → `restack` / `reroute` / `escalate`
+- consumption feedback routes (CYG-118/119): `low_rating` materializes as review pressure (`ticket_pressure`, unknown freshness) and `stale_answer` as suspected freshness/drift review (`drift`, stale freshness); route execution only materializes durable governed review truth and never auto-changes content or publishes
 
 ## 5. Lifecycle principles
 1. **New knowledge defaults to draft**

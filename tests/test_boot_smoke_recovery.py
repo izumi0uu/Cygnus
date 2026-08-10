@@ -107,14 +107,21 @@ class WorkerBootSmokeTests(unittest.IsolatedAsyncioTestCase):
     async def test_worker_hooks_expose_a_bootable_contract(self) -> None:
         from cygnus.runtime.worker import WorkerSettings
 
-        with patch(
-            "cygnus.review.pre_review.dispatch.sweep_ai_pre_review_dispatches",
-            AsyncMock(return_value=0),
-        ) as sweep:
+        with (
+            patch(
+                "cygnus.review.pre_review.dispatch.sweep_ai_pre_review_dispatches",
+                AsyncMock(return_value=0),
+            ) as sweep,
+            patch(
+                "cygnus.runtime.worker.drain_feedback_routes",
+                AsyncMock(return_value=0),
+            ) as feedback_sweep,
+        ):
             await WorkerSettings.on_startup({})
         await WorkerSettings.on_shutdown({})
 
         sweep.assert_awaited_once()
+        feedback_sweep.assert_awaited_once()
         self.assertGreaterEqual(len(WorkerSettings.functions), 1)
         self.assertGreaterEqual(len(WorkerSettings.cron_jobs), 1)
 

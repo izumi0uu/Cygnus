@@ -144,6 +144,12 @@
 - poor rating
 - unresolved conversation
 
+持久化形态（CYG-118/119）：
+- 可接受类型固定为 `answer_accepted`、`human_rewrite`、`escalated`、`low_rating`、`unsupported_answer` 与 `stale_answer`
+- `low_rating` 与 `stale_answer` 创建 durable feedback route，由有界 worker 沿 `queued / running / completed / blocked / failed` 执行（可重试失败最多退回 3 次；目标缺失、仅 draft 或不符合条件的 route 以 `blocked` 结束，不猜测目标）
+- completed route 物化一条 durable outcome `GovernanceSignal`，其身份为 `route_ref=feedback-route:<route UUID>`（durable route row 存储 `outcome_signal_id`；response 从该 ID 投影 `outcome_signal_ref=governance-signal:<signal UUID>`）：`low_rating` → review pressure（`ticket_pressure`、unknown freshness），`stale_answer` → 疑似 freshness/drift review（`drift`、stale freshness）
+- 执行绝不自动修改内容或发布；完成只证明已物化进 governed review truth
+
 ## 3. 对象关系
 - Source Connector 产生 Support Evidence
 - Support Evidence 支撑 Answer Card / Troubleshooting Flow / Policy Rule / Known Issue Page
@@ -201,6 +207,8 @@ V1 必须明确支持：
 - `policy_conflict` — 跨受众的策略冲突
 - `owner_gap` — 责任人缺位
 
+Durable consumption-feedback route 会物化为这些 risk type（CYG-118/119）：`low_rating` → `ticket_pressure`（unknown freshness），`stale_answer` → `drift`（stale freshness）。
+
 ### 7.2 Owner State — 责任归属状态
 - `assigned` / `unassigned` / `escalated`
 
@@ -211,4 +219,4 @@ V1 必须明确支持：
 - `insufficient` / `partial` / `sufficient`
 
 ### 7.5 Evidence Source Type — 证据来源类型
-- `help_center` / `internal_sop` / `resolved_ticket` / `release_note` / `incident_update` / `chat_transcript`
+- `help_center` / `internal_sop` / `resolved_ticket` / `release_note` / `incident_update` / `chat_transcript` / `consumption_feedback`

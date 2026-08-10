@@ -402,10 +402,13 @@ class FeedbackPersistenceTests(unittest.TestCase):
                 "route_ref": None,
                 "route_kind": None,
                 "route_state": None,
+                "outcome_signal_id": None,
+                "outcome_signal_ref": None,
+                "terminal_reason": None,
                 "routing_state": "recorded_only",
                 "review_queued": False,
                 "refresh_queued": False,
-            },
+            }
         )
 
     def test_definition_is_one_strict_r1_tool(self) -> None:

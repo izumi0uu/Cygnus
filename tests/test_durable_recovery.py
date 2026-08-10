@@ -350,6 +350,66 @@ def test_no_supported_post_publish_feedback_is_explicitly_unavailable() -> None:
         raise AssertionError("runtime unavailable feedback must return HTTP 404")
 
 
+def test_feedback_derived_signals_keep_exact_recovery_meaning() -> None:
+    published_at = datetime(2026, 8, 8, 12, 0, tzinfo=timezone.utc)
+    publication = _publication(published_at)
+    low_rating = _signal(
+        published_at=published_at,
+        signal_ref="feedback-route:low-rating",
+        signal_type="low_rating",
+        observed_offset=4,
+        triggers=("low_rating",),
+        surface="feedback",
+    )
+    stale_answer = _signal(
+        published_at=published_at,
+        signal_ref="feedback-route:stale-answer",
+        signal_type="stale_answer",
+        observed_offset=5,
+        triggers=("stale_answer",),
+        surface="review_queue",
+    )
+
+    recovery = asyncio.run(
+        get_durable_recovery_window(
+            _session(
+                publication=publication,
+                propagations=(_propagation("synced", "copilot"),),
+                signals=(low_rating, stale_answer),
+            ),
+            command_id=publication.command_id,
+        )
+    ).to_dict()
+    risks = {item["risk_id"]: item for item in recovery["residual_risks"]}
+
+    assert recovery["escalation_delta"]["after_value"] == 1
+    assert recovery["drift_delta"]["after_value"] == 1
+    assert risks["signal:feedback-route:low-rating"]["recommended_command"] == (
+        "open_feedback_review"
+    )
+    assert risks["signal:feedback-route:stale-answer"]["recommended_command"] == (
+        "verify_freshness"
+    )
+
+    try:
+        asyncio.run(
+            get_durable_downstream_reality_check(
+                _session(
+                    publication=publication,
+                    propagations=(_propagation("synced", "copilot"),),
+                    signals=(low_rating, stale_answer),
+                ),
+                command_id=publication.command_id,
+            )
+        )
+    except DurableRecoveryUnavailable as exc:
+        assert "no persisted post-publication downstream feedback" in str(exc)
+    else:
+        raise AssertionError(
+            "feedback-derived governance signals must not fabricate downstream feedback types"
+        )
+
+
 def test_unknown_command_is_not_resolved_from_sample_fixtures() -> None:
     fake = _RecoverySession(publication=None)
     session = cast(AsyncSession, cast(object, fake))

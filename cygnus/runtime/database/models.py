@@ -1282,7 +1282,7 @@ class GovernanceSignal(Base):
     __table_args__ = (
         CheckConstraint(
             "signal_type IN ('ticket_cluster', 'human_rewrite', 'source_failure', "
-            "'release_delta', 'incident_delta')",
+            "'release_delta', 'incident_delta', 'low_rating', 'stale_answer')",
             name="ck_governance_signals_type",
         ),
         CheckConstraint(
@@ -1448,7 +1448,7 @@ class GovernanceFeedbackSignal(Base):
 
 
 class GovernanceFeedbackRoute(Base):
-    """Durable queued work derived from one consumption-feedback signal."""
+    """Durable lifecycle-owned work derived from one consumption-feedback signal."""
 
     __tablename__ = "governance_feedback_routes"
 
@@ -1463,6 +1463,26 @@ class GovernanceFeedbackRoute(Base):
     route_kind: Mapped[str] = mapped_column(String(20), nullable=False)
     lifecycle_state: Mapped[str] = mapped_column(
         String(20), nullable=False, default="queued", server_default="queued"
+    )
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    next_attempt_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, server_default=func.now()
+    )
+    lease_token: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    lease_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    outcome_signal_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("governance_signals.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    terminal_reason: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -1480,8 +1500,39 @@ class GovernanceFeedbackRoute(Base):
             name="ck_governance_feedback_routes_kind",
         ),
         CheckConstraint(
-            "lifecycle_state = 'queued'",
+            "lifecycle_state IN ('queued', 'running', 'completed', 'blocked', "
+            "'failed')",
             name="ck_governance_feedback_routes_state",
+        ),
+        CheckConstraint(
+            "attempt_count >= 0",
+            name="ck_governance_feedback_routes_attempts",
+        ),
+        CheckConstraint(
+            "(lifecycle_state = 'queued' AND lease_token IS NULL "
+            "AND lease_expires_at IS NULL AND completed_at IS NULL "
+            "AND outcome_signal_id IS NULL AND terminal_reason IS NULL) OR "
+            "(lifecycle_state = 'running' AND lease_token IS NOT NULL "
+            "AND lease_expires_at IS NOT NULL AND next_attempt_at IS NULL "
+            "AND outcome_signal_id IS NULL AND completed_at IS NULL "
+            "AND terminal_reason IS NULL AND last_error IS NULL) OR "
+            "(lifecycle_state = 'completed' AND lease_token IS NULL "
+            "AND lease_expires_at IS NULL AND next_attempt_at IS NULL "
+            "AND outcome_signal_id IS NOT NULL AND completed_at IS NOT NULL "
+            "AND terminal_reason IS NULL AND last_error IS NULL) OR "
+            "(lifecycle_state = 'blocked' AND lease_token IS NULL "
+            "AND lease_expires_at IS NULL AND next_attempt_at IS NULL "
+            "AND terminal_reason IS NOT NULL AND completed_at IS NOT NULL "
+            "AND last_error IS NULL AND outcome_signal_id IS NULL) OR "
+            "(lifecycle_state = 'failed' AND lease_token IS NULL "
+            "AND lease_expires_at IS NULL AND next_attempt_at IS NULL "
+            "AND terminal_reason IS NOT NULL AND last_error IS NOT NULL "
+            "AND completed_at IS NOT NULL AND outcome_signal_id IS NULL)",
+            name="ck_governance_feedback_routes_lifecycle",
+        ),
+        UniqueConstraint(
+            "outcome_signal_id",
+            name="uq_governance_feedback_routes_outcome_signal",
         ),
         UniqueConstraint(
             "feedback_signal_id",
@@ -1490,8 +1541,9 @@ class GovernanceFeedbackRoute(Base):
         ),
         Index(
             "ix_governance_feedback_routes_queue",
-            "route_kind",
             "lifecycle_state",
+            "next_attempt_at",
+            "lease_expires_at",
             "created_at",
         ),
     )

@@ -326,12 +326,18 @@ async def create_feedback_signal(
     return FeedbackSignalWrite(signal=signal, replayed=False)
 
 
+def feedback_signal_ref(signal: GovernanceFeedbackSignal) -> str:
+    """Return the durable entity reference for one feedback fact."""
+    return f"feedback-signal:{signal.id}"
+
+
 def feedback_signal_to_dict(signal: GovernanceFeedbackSignal) -> dict[str, object]:
     """Project a durable feedback row without exposing its request fingerprint."""
 
     created_at = getattr(signal, "created_at", None)
     updated_at = getattr(signal, "updated_at", None)
     return {
+        "feedback_ref": feedback_signal_ref(signal),
         "signal_id": str(signal.id),
         "command_id": signal.command_id,
         "signal_type": signal.signal_type,
@@ -431,6 +437,7 @@ __all__ = [
     "GovernanceFeedbackSignal",
     "create_feedback_signal",
     "feedback_signal_to_dict",
+    "feedback_signal_ref",
     "replay_feedback_signal",
     "normalize_audience_context",
 ]

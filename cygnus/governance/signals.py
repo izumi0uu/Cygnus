@@ -18,6 +18,7 @@ from cygnus.review.intake import (
     PressureIntakeRecord,
     PressureSignalType,
     compile_pressure_proposal_bundles,
+    is_feedback_derived_signal_type,
 )
 from cygnus.review.service import ProposalBundle
 from cygnus.runtime.database.models import (
@@ -48,6 +49,8 @@ _DEFAULT_EVIDENCE_TYPE = {
     PressureSignalType.HUMAN_REWRITE: EvidenceSourceType.CHAT_TRANSCRIPT,
     PressureSignalType.RELEASE_DELTA: EvidenceSourceType.RELEASE_NOTE,
     PressureSignalType.INCIDENT_DELTA: EvidenceSourceType.INCIDENT_UPDATE,
+    PressureSignalType.LOW_RATING: EvidenceSourceType.CONSUMPTION_FEEDBACK,
+    PressureSignalType.STALE_ANSWER: EvidenceSourceType.CONSUMPTION_FEEDBACK,
 }
 
 
@@ -272,7 +275,7 @@ async def resolve_governance_signal(
 def compile_review_signal_bundles(
     signals: Iterable[GovernanceSignal],
 ) -> tuple[ProposalBundle, ...]:
-    """Compile ticket, rewrite, and qualified source-failure facts."""
+    """Compile eligible durable governance facts into review bundles."""
     records = (
         governance_signal_to_pressure_record(signal)
         for signal in signals
@@ -282,6 +285,7 @@ def compile_review_signal_bundles(
             PressureSignalType.HUMAN_REWRITE.value,
             PressureSignalType.SOURCE_FAILURE.value,
         }
+        or is_feedback_derived_signal_type(signal.signal_type)
     )
     return compile_pressure_proposal_bundles(records)
 

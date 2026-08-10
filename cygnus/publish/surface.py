@@ -32,6 +32,7 @@ from cygnus.review.intake import (
     compile_pressure_intake_bundle,
     get_pressure_intake_review_brief_surface,
     sample_pressure_intake_records,
+    is_feedback_derived_signal_type,
 )
 from cygnus.review.surface import PriorityStackCard, ReviewCommandSurface
 
@@ -70,8 +71,16 @@ class PublishSituationFrame:
         for field_name in ("blocked_paths", "new_paths", "stopped_paths"):
             if getattr(self, field_name) < 0:
                 raise ValueError(f"{field_name} must not be negative")
-        object.__setattr__(self, "affected_surfaces", _normalize(self.affected_surfaces, label="affected surface"))
-        object.__setattr__(self, "recommended_commands", _normalize(self.recommended_commands, label="recommended command"))
+        object.__setattr__(
+            self,
+            "affected_surfaces",
+            _normalize(self.affected_surfaces, label="affected surface"),
+        )
+        object.__setattr__(
+            self,
+            "recommended_commands",
+            _normalize(self.recommended_commands, label="recommended command"),
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -105,7 +114,11 @@ class PublishActionPreset:
             raise ValueError("reason must not be blank")
         if not self.consequence_hint.strip():
             raise ValueError("consequence_hint must not be blank")
-        object.__setattr__(self, "audience_labels", _normalize(self.audience_labels, label="audience label"))
+        object.__setattr__(
+            self,
+            "audience_labels",
+            _normalize(self.audience_labels, label="audience label"),
+        )
         object.__setattr__(self, "channels", _normalize(self.channels, label="channel"))
         if not self.channels:
             raise ValueError("channels must not be empty")
@@ -136,7 +149,9 @@ class PublishActionEcho:
             raise ValueError("selected_action must not be blank")
         if not self.summary.strip():
             raise ValueError("summary must not be blank")
-        object.__setattr__(self, "action_log", _normalize(self.action_log, label="action log"))
+        object.__setattr__(
+            self, "action_log", _normalize(self.action_log, label="action log")
+        )
         object.__setattr__(self, "opened_bindings", tuple(self.opened_bindings))
         object.__setattr__(self, "removed_bindings", tuple(self.removed_bindings))
         object.__setattr__(self, "held_bindings", tuple(self.held_bindings))
@@ -147,7 +162,9 @@ class PublishActionEcho:
             "summary": self.summary,
             "action_log": list(self.action_log),
             "opened_bindings": [binding.to_dict() for binding in self.opened_bindings],
-            "removed_bindings": [binding.to_dict() for binding in self.removed_bindings],
+            "removed_bindings": [
+                binding.to_dict() for binding in self.removed_bindings
+            ],
             "held_bindings": [binding.to_dict() for binding in self.held_bindings],
         }
 
@@ -183,8 +200,14 @@ class PublishPreviewSurface:
             raise ValueError("selected_position must not be negative")
         if self.total_items <= 0:
             raise ValueError("total_items must be positive")
-        object.__setattr__(self, "available_commands", _normalize(self.available_commands, label="available command"))
-        object.__setattr__(self, "context_notes", _normalize(self.context_notes, label="context note"))
+        object.__setattr__(
+            self,
+            "available_commands",
+            _normalize(self.available_commands, label="available command"),
+        )
+        object.__setattr__(
+            self, "context_notes", _normalize(self.context_notes, label="context note")
+        )
         object.__setattr__(self, "action_presets", tuple(self.action_presets))
         if self.selected_action is not None and not self.selected_action.strip():
             raise ValueError("selected_action must not be blank when provided")
@@ -209,7 +232,9 @@ class PublishPreviewSurface:
             "context_notes": list(self.context_notes),
             "action_presets": [preset.to_dict() for preset in self.action_presets],
             "selected_action": self.selected_action,
-            "action_echo": self.action_echo.to_dict() if self.action_echo is not None else None,
+            "action_echo": self.action_echo.to_dict()
+            if self.action_echo is not None
+            else None,
         }
 
 
@@ -228,7 +253,9 @@ class PropagationStatusLane:
             raise ValueError("note must not be blank")
         if self.count < 0:
             raise ValueError("count must not be negative")
-        object.__setattr__(self, "surface_ids", _normalize(self.surface_ids, label="surface id"))
+        object.__setattr__(
+            self, "surface_ids", _normalize(self.surface_ids, label="surface id")
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -271,7 +298,9 @@ class PublishPropagationSurface:
             raise ValueError("total_items must be positive")
         object.__setattr__(self, "status_lanes", tuple(self.status_lanes))
         object.__setattr__(self, "action_presets", tuple(self.action_presets))
-        object.__setattr__(self, "context_notes", _normalize(self.context_notes, label="context note"))
+        object.__setattr__(
+            self, "context_notes", _normalize(self.context_notes, label="context note")
+        )
         if self.selected_action is not None and not self.selected_action.strip():
             raise ValueError("selected_action must not be blank when provided")
 
@@ -288,7 +317,9 @@ class PublishPropagationSurface:
             "total_items": self.total_items,
             "action_presets": [preset.to_dict() for preset in self.action_presets],
             "selected_action": self.selected_action,
-            "action_echo": self.action_echo.to_dict() if self.action_echo is not None else None,
+            "action_echo": self.action_echo.to_dict()
+            if self.action_echo is not None
+            else None,
             "previous_object_ref": self.previous_object_ref,
             "next_object_ref": self.next_object_ref,
             "context_notes": list(self.context_notes),
@@ -302,7 +333,9 @@ def get_pressure_intake_publish_preview_surface(
     action_key: str | None = None,
     candidate_override: PublishPreviewCandidate | None = None,
 ) -> PublishPreviewSurface:
-    source_records = tuple(records) if records is not None else sample_pressure_intake_records()
+    source_records = (
+        tuple(records) if records is not None else sample_pressure_intake_records()
+    )
     queue_surface = get_pressure_intake_review_brief_surface(records=source_records)
     queue_cards = queue_surface.priority_stack
     if not queue_cards:
@@ -312,6 +345,10 @@ def get_pressure_intake_publish_preview_surface(
     selected_position = queue_cards.index(selected_card)
     intake_bundles = compile_pressure_intake_bundle(source_records)
     bundle = _require_intake_bundle(intake_bundles, selected_card.object_ref)
+    if is_feedback_derived_signal_type(bundle.intake_record.signal_type):
+        raise ValueError(
+            f"signal_type={bundle.intake_record.signal_type.value} is review-only feedback and cannot compile a publish action"
+        )
     if (
         candidate_override is not None
         and candidate_override.object_id != selected_card.object_ref
@@ -319,19 +356,29 @@ def get_pressure_intake_publish_preview_surface(
         raise ValueError("candidate_override must match the selected publish object")
     base_candidate = candidate_override or _build_candidate(bundle)
     base_preview = build_publish_blast_radius_preview(base_candidate)
-    action_presets = _build_action_presets(bundle=bundle, candidate=base_candidate, preview=base_preview)
+    action_presets = _build_action_presets(
+        bundle=bundle, candidate=base_candidate, preview=base_preview
+    )
 
     selected_candidate = base_candidate
     selected_preview = base_preview
     action_echo: PublishActionEcho | None = None
     if action_key is not None:
-        result = _apply_selected_action(action_key, bundle=bundle, candidate=base_candidate, presets=action_presets)
+        result = _apply_selected_action(
+            action_key, bundle=bundle, candidate=base_candidate, presets=action_presets
+        )
         selected_candidate = result.updated_candidate
         selected_preview = result.preview
         action_echo = _build_action_echo(action_key, result)
 
-    available_commands = tuple(_normalize((preset.command_key for preset in action_presets), label="available command"))
-    situation_frame = _build_situation_frame(bundle=bundle, preview=selected_preview, commands=available_commands)
+    available_commands = tuple(
+        _normalize(
+            (preset.command_key for preset in action_presets), label="available command"
+        )
+    )
+    situation_frame = _build_situation_frame(
+        bundle=bundle, preview=selected_preview, commands=available_commands
+    )
     return PublishPreviewSurface(
         surface_id="publish-preview",
         headline="Publish becomes blast-radius control before any outward command",
@@ -343,8 +390,12 @@ def get_pressure_intake_publish_preview_surface(
         selected_preview=selected_preview,
         selected_position=selected_position,
         total_items=len(queue_cards),
-        previous_object_ref=queue_cards[selected_position - 1].object_ref if selected_position > 0 else None,
-        next_object_ref=queue_cards[selected_position + 1].object_ref if selected_position < len(queue_cards) - 1 else None,
+        previous_object_ref=queue_cards[selected_position - 1].object_ref
+        if selected_position > 0
+        else None,
+        next_object_ref=queue_cards[selected_position + 1].object_ref
+        if selected_position < len(queue_cards) - 1
+        else None,
         available_commands=available_commands,
         context_notes=_build_context_notes(
             bundle=bundle,
@@ -372,7 +423,9 @@ def apply_pressure_intake_publish_action(
     ``PublishGovernanceResult`` (opened / removed / held bindings + action_log)
     is returned rather than the flattened echo.
     """
-    source_records = tuple(records) if records is not None else sample_pressure_intake_records()
+    source_records = (
+        tuple(records) if records is not None else sample_pressure_intake_records()
+    )
     queue_surface = get_pressure_intake_review_brief_surface(records=source_records)
     queue_cards = queue_surface.priority_stack
     if not queue_cards:
@@ -383,8 +436,12 @@ def apply_pressure_intake_publish_action(
     bundle = _require_intake_bundle(intake_bundles, selected_card.object_ref)
     base_candidate = _build_candidate(bundle)
     base_preview = build_publish_blast_radius_preview(base_candidate)
-    action_presets = _build_action_presets(bundle=bundle, candidate=base_candidate, preview=base_preview)
-    return _apply_selected_action(action_key, bundle=bundle, candidate=base_candidate, presets=action_presets)
+    action_presets = _build_action_presets(
+        bundle=bundle, candidate=base_candidate, preview=base_preview
+    )
+    return _apply_selected_action(
+        action_key, bundle=bundle, candidate=base_candidate, presets=action_presets
+    )
 
 
 def get_pressure_intake_publish_propagation_surface(
@@ -393,11 +450,15 @@ def get_pressure_intake_publish_propagation_surface(
     records: Iterable[PressureIntakeRecord] | None = None,
     action_key: str | None = None,
 ) -> PublishPropagationSurface:
-    source_records = tuple(records) if records is not None else sample_pressure_intake_records()
+    source_records = (
+        tuple(records) if records is not None else sample_pressure_intake_records()
+    )
     queue_surface = get_pressure_intake_review_brief_surface(records=source_records)
     queue_cards = queue_surface.priority_stack
     if not queue_cards:
-        raise ValueError("publish propagation surface requires at least one review queue card")
+        raise ValueError(
+            "publish propagation surface requires at least one review queue card"
+        )
 
     selected_card = _resolve_selected_card(queue_cards, selected_object_ref)
     selected_position = queue_cards.index(selected_card)
@@ -405,13 +466,22 @@ def get_pressure_intake_publish_propagation_surface(
     bundle = _require_intake_bundle(intake_bundles, selected_card.object_ref)
     base_candidate = _build_candidate(bundle)
     base_preview = build_publish_blast_radius_preview(base_candidate)
-    action_presets = _build_action_presets(bundle=bundle, candidate=base_candidate, preview=base_preview)
+    action_presets = _build_action_presets(
+        bundle=bundle, candidate=base_candidate, preview=base_preview
+    )
     effective_action = action_key or _default_action_key(action_presets)
-    result = _apply_selected_action(effective_action, bundle=bundle, candidate=base_candidate, presets=action_presets)
+    result = _apply_selected_action(
+        effective_action,
+        bundle=bundle,
+        candidate=base_candidate,
+        presets=action_presets,
+    )
     action_echo = _build_action_echo(effective_action, result)
     ledger = build_publish_propagation_ledger(
         result,
-        surface_updates=_build_propagation_surface_updates(bundle=bundle, result=result),
+        surface_updates=_build_propagation_surface_updates(
+            bundle=bundle, result=result
+        ),
         supporting_surfaces=_supporting_surface_ids(),
     )
     return PublishPropagationSurface(
@@ -427,9 +497,15 @@ def get_pressure_intake_publish_propagation_surface(
         action_presets=action_presets,
         selected_action=effective_action,
         action_echo=action_echo,
-        previous_object_ref=queue_cards[selected_position - 1].object_ref if selected_position > 0 else None,
-        next_object_ref=queue_cards[selected_position + 1].object_ref if selected_position < len(queue_cards) - 1 else None,
-        context_notes=_build_propagation_context_notes(bundle=bundle, ledger=ledger, action_echo=action_echo),
+        previous_object_ref=queue_cards[selected_position - 1].object_ref
+        if selected_position > 0
+        else None,
+        next_object_ref=queue_cards[selected_position + 1].object_ref
+        if selected_position < len(queue_cards) - 1
+        else None,
+        context_notes=_build_propagation_context_notes(
+            bundle=bundle, ledger=ledger, action_echo=action_echo
+        ),
     )
 
 
@@ -442,7 +518,9 @@ def _resolve_selected_card(
     for card in queue_cards:
         if card.object_ref == selected_object_ref:
             return card
-    raise ValueError(f"object_ref={selected_object_ref} is not present in the publish queue")
+    raise ValueError(
+        f"object_ref={selected_object_ref} is not present in the publish queue"
+    )
 
 
 def _require_intake_bundle(
@@ -478,6 +556,10 @@ def _build_candidate(bundle: PressureIntakeBundle) -> PublishPreviewCandidate:
 
 
 def _action_type(signal_type: PressureSignalType) -> PublishActionType:
+    if is_feedback_derived_signal_type(signal_type):
+        raise ValueError(
+            f"signal_type={signal_type.value} is review-only feedback and cannot compile a publish action"
+        )
     return {
         PressureSignalType.TICKET_CLUSTER: PublishActionType.PUBLISH,
         PressureSignalType.HUMAN_REWRITE: PublishActionType.REPUBLISH,
@@ -507,7 +589,9 @@ def _current_bindings(record: PressureIntakeRecord) -> tuple[PublishBinding, ...
             languages=audience.languages,
             product_versions=audience.product_versions,
         )
-        bindings.append(PublishBinding(audience_filter=internal_audience, channel="copilot"))
+        bindings.append(
+            PublishBinding(audience_filter=internal_audience, channel="copilot")
+        )
     else:
         bindings.extend(
             PublishBinding(audience_filter=audience, channel=channel)
@@ -579,7 +663,10 @@ def _build_action_presets(
                 consequence_hint="Turns part of the current path into stopped exposure so the team can contain blast radius first.",
             )
         )
-    if any(impact.audience_filter.visibility is Visibility.EXTERNAL for impact in preview.impacts):
+    if any(
+        impact.audience_filter.visibility is Visibility.EXTERNAL
+        for impact in preview.impacts
+    ):
         presets.append(
             PublishActionPreset(
                 command_key="hold_external",
@@ -594,7 +681,8 @@ def _build_action_presets(
                     binding.channel
                     for binding in candidate.target_bindings
                     if binding.audience_filter.visibility is Visibility.EXTERNAL
-                ) or channels,
+                )
+                or channels,
                 consequence_hint="Converts external paths into explicit conflicts instead of silently letting them continue.",
             )
         )
@@ -605,7 +693,9 @@ def _build_action_presets(
                 command_key="split_variant",
                 summary="Open a separately governed audience variant instead of widening the base answer.",
                 reason="a narrower rollout variant should be governed separately from the base answer path",
-                audience_labels=tuple(_audience_label(audience) for audience in split_audiences),
+                audience_labels=tuple(
+                    _audience_label(audience) for audience in split_audiences
+                ),
                 channels=(candidate.target_channels[0],),
                 consequence_hint="Adds a new governed path so a risky audience can be split out instead of forcing binary approval.",
             )
@@ -618,13 +708,19 @@ def _build_action_presets(
                 reason="internal support guidance must stay live while customer-facing exposure is paused",
                 audience_labels=tuple(
                     _audience_label(binding.audience_filter)
-                    for binding in (*candidate.target_bindings, *candidate.current_bindings)
+                    for binding in (
+                        *candidate.target_bindings,
+                        *candidate.current_bindings,
+                    )
                     if binding.audience_filter.visibility is Visibility.INTERNAL
                 )
                 or audience_labels,
                 channels=tuple(
                     binding.channel
-                    for binding in (*candidate.target_bindings, *candidate.current_bindings)
+                    for binding in (
+                        *candidate.target_bindings,
+                        *candidate.current_bindings,
+                    )
                     if binding.audience_filter.visibility is Visibility.INTERNAL
                 )
                 or channels,
@@ -643,7 +739,9 @@ def _apply_selected_action(
 ) -> PublishGovernanceResult:
     known_actions = {preset.command_key for preset in presets}
     if action_key not in known_actions:
-        raise ValueError(f"action_key={action_key} is not available for this publish surface")
+        raise ValueError(
+            f"action_key={action_key} is not available for this publish surface"
+        )
 
     actions: tuple[PublishGovernanceAction, ...]
     if action_key in {"publish", "republish"}:
@@ -660,7 +758,8 @@ def _apply_selected_action(
                 audiences=tuple(
                     audience
                     for audience in candidate.target_audiences
-                    if audience.visibility is bundle.intake_record.audience_filter.visibility
+                    if audience.visibility
+                    is bundle.intake_record.audience_filter.visibility
                 )
                 or candidate.target_audiences,
                 channels=candidate.target_channels,
@@ -683,7 +782,9 @@ def _apply_selected_action(
     elif action_key == "split_variant":
         audiences = _split_variant_audiences(bundle, candidate)
         if not audiences:
-            raise ValueError("split_variant is not available without a derived variant audience")
+            raise ValueError(
+                "split_variant is not available without a derived variant audience"
+            )
         actions = (
             PublishGovernanceAction(
                 action_type=PublishGovernanceActionType.SPLIT_VARIANT,
@@ -701,10 +802,7 @@ def _apply_selected_action(
                     for binding in candidate.current_bindings
                     if binding.audience_filter.visibility is Visibility.INTERNAL
                 )
-                or tuple(
-                    channel
-                    for channel in candidate.target_channels
-                ),
+                or tuple(channel for channel in candidate.target_channels),
                 reason="keep internal support truth live while stopping external spread",
             ),
         )
@@ -714,13 +812,17 @@ def _apply_selected_action(
 
 
 def _default_action_key(presets: tuple[PublishActionPreset, ...]) -> str:
-    recommended = next((preset.command_key for preset in presets if preset.recommended), None)
+    recommended = next(
+        (preset.command_key for preset in presets if preset.recommended), None
+    )
     if recommended is not None:
         return recommended
     return presets[0].command_key
 
 
-def _build_action_echo(action_key: str, result: PublishGovernanceResult) -> PublishActionEcho:
+def _build_action_echo(
+    action_key: str, result: PublishGovernanceResult
+) -> PublishActionEcho:
     summary_parts: list[str] = []
     if result.opened_bindings:
         summary_parts.append(f"{len(result.opened_bindings)} path(s) opened")
@@ -729,7 +831,9 @@ def _build_action_echo(action_key: str, result: PublishGovernanceResult) -> Publ
     if result.held_bindings:
         summary_parts.append(f"{len(result.held_bindings)} external path(s) held")
     if not summary_parts:
-        summary_parts.append("No path counts changed, but the governance command is now explicit")
+        summary_parts.append(
+            "No path counts changed, but the governance command is now explicit"
+        )
     return PublishActionEcho(
         selected_action=action_key,
         summary="; ".join(summary_parts) + ".",
@@ -759,7 +863,9 @@ def _split_variant_audiences(
         visibility=base_audience.visibility,
         brands=base_audience.brands,
         product_lines=base_audience.product_lines or bundle.intake_record.product_lines,
-        plans=("enterprise",) if base_audience.plans != ("enterprise",) else base_audience.plans,
+        plans=("enterprise",)
+        if base_audience.plans != ("enterprise",)
+        else base_audience.plans,
         regions=base_audience.regions or ("eu",),
         languages=base_audience.languages,
         product_versions=base_audience.product_versions,
@@ -772,8 +878,14 @@ def _split_variant_audiences(
 
 def _can_republish_internal_only(candidate: PublishPreviewCandidate) -> bool:
     bindings = (*candidate.target_bindings, *candidate.current_bindings)
-    has_internal = any(binding.audience_filter.visibility is Visibility.INTERNAL for binding in bindings)
-    has_external = any(binding.audience_filter.visibility is Visibility.EXTERNAL for binding in bindings)
+    has_internal = any(
+        binding.audience_filter.visibility is Visibility.INTERNAL
+        for binding in bindings
+    )
+    has_external = any(
+        binding.audience_filter.visibility is Visibility.EXTERNAL
+        for binding in bindings
+    )
     return has_internal and has_external
 
 
@@ -784,9 +896,15 @@ def _build_situation_frame(
     commands: tuple[str, ...],
 ) -> PublishSituationFrame:
     impacts = preview.impacts
-    blocked_paths = sum(1 for impact in impacts if impact.effect is BlastRadiusEffect.CONFLICT)
-    new_paths = sum(1 for impact in impacts if impact.effect is BlastRadiusEffect.NEW_EXPOSURE)
-    stopped_paths = sum(1 for impact in impacts if impact.effect is BlastRadiusEffect.STOPPED_EXPOSURE)
+    blocked_paths = sum(
+        1 for impact in impacts if impact.effect is BlastRadiusEffect.CONFLICT
+    )
+    new_paths = sum(
+        1 for impact in impacts if impact.effect is BlastRadiusEffect.NEW_EXPOSURE
+    )
+    stopped_paths = sum(
+        1 for impact in impacts if impact.effect is BlastRadiusEffect.STOPPED_EXPOSURE
+    )
     truth_boundary = ", ".join(preview.audience_scope.audience_labels)
     consequence_summary = (
         f"{new_paths} new path(s), {blocked_paths} blocked path(s), and {stopped_paths} path(s) withdrawn "
@@ -805,8 +923,14 @@ def _build_situation_frame(
 
 
 def _build_surface_summary(preview: BlastRadiusPreview) -> str:
-    external_paths = sum(1 for impact in preview.impacts if impact.audience_filter.visibility is Visibility.EXTERNAL)
-    blocked_paths = sum(1 for impact in preview.impacts if impact.effect is BlastRadiusEffect.CONFLICT)
+    external_paths = sum(
+        1
+        for impact in preview.impacts
+        if impact.audience_filter.visibility is Visibility.EXTERNAL
+    )
+    blocked_paths = sum(
+        1 for impact in preview.impacts if impact.effect is BlastRadiusEffect.CONFLICT
+    )
     return (
         f"{external_paths} external path(s) are inside this command boundary; "
         f"{blocked_paths} path(s) already need an explicit gate decision."
@@ -820,7 +944,9 @@ def _build_context_notes(
     candidate: PublishPreviewCandidate,
     action_echo: PublishActionEcho | None,
 ) -> tuple[str, ...]:
-    current_channels = tuple(dict.fromkeys(binding.channel for binding in candidate.current_bindings))
+    current_channels = tuple(
+        dict.fromkeys(binding.channel for binding in candidate.current_bindings)
+    )
     notes = [
         bundle.proposal.summary,
         f"Current exposure still includes {', '.join(current_channels)}.",
@@ -837,7 +963,13 @@ def _build_context_notes(
 
 
 def _supporting_surface_ids() -> tuple[str, ...]:
-    return ("review_queue", "queue-sidebar", "feedback", "source_repair", "hold_resolution")
+    return (
+        "review_queue",
+        "queue-sidebar",
+        "feedback",
+        "source_repair",
+        "hold_resolution",
+    )
 
 
 def _build_propagation_surface_updates(
@@ -859,7 +991,11 @@ def _build_propagation_surface_updates(
                 surface_id="review_queue",
                 status=PropagationStatus.FAILED,
                 reason="The review queue remains open because the governing source chain is degraded during an active incident path.",
-                follow_up_commands=("open_review", "repair_source_chain", "recheck_propagation"),
+                follow_up_commands=(
+                    "open_review",
+                    "repair_source_chain",
+                    "recheck_propagation",
+                ),
             )
         )
         updates.append(
@@ -867,7 +1003,11 @@ def _build_propagation_surface_updates(
                 surface_id="source_repair",
                 status=PropagationStatus.FAILED,
                 reason="Source repair is still required before this propagation result can be treated as trusted external truth.",
-                follow_up_commands=("refresh_sources", "repair_source_chain", "recheck_propagation"),
+                follow_up_commands=(
+                    "refresh_sources",
+                    "repair_source_chain",
+                    "recheck_propagation",
+                ),
             )
         )
     elif result.removed_bindings or result.held_bindings:
@@ -916,7 +1056,10 @@ def _build_propagation_surface_updates(
                 surface_id="feedback",
                 status=PropagationStatus.MANUAL_ACTION_REQUIRED,
                 reason="Live support sessions should be inspected while held customer-facing paths are prevented from resuming silently.",
-                follow_up_commands=("inspect_feedback_sessions", "resolve_surface_hold"),
+                follow_up_commands=(
+                    "inspect_feedback_sessions",
+                    "resolve_surface_hold",
+                ),
             )
         )
     elif _has_external_bindings((*result.opened_bindings, *result.removed_bindings)):
@@ -932,7 +1075,10 @@ def _build_propagation_surface_updates(
                 surface_id="feedback",
                 status=PropagationStatus.PENDING,
                 reason="Customer-facing path changes should still be watched in live conversations before the command is considered closed.",
-                follow_up_commands=("inspect_feedback_sessions", "check_propagation_status"),
+                follow_up_commands=(
+                    "inspect_feedback_sessions",
+                    "check_propagation_status",
+                ),
             )
         )
     else:
@@ -955,10 +1101,15 @@ def _build_propagation_surface_updates(
 
 
 def _has_external_bindings(bindings: Iterable[PublishBinding]) -> bool:
-    return any(binding.audience_filter.visibility is Visibility.EXTERNAL for binding in bindings)
+    return any(
+        binding.audience_filter.visibility is Visibility.EXTERNAL
+        for binding in bindings
+    )
 
 
-def _build_status_lanes(ledger: PublishPropagationLedger) -> tuple[PropagationStatusLane, ...]:
+def _build_status_lanes(
+    ledger: PublishPropagationLedger,
+) -> tuple[PropagationStatusLane, ...]:
     lane_meta = {
         PropagationStatus.SYNCED: (
             "Surfaces already reflecting the command",
@@ -984,7 +1135,9 @@ def _build_status_lanes(ledger: PublishPropagationLedger) -> tuple[PropagationSt
         PropagationStatus.FAILED,
         PropagationStatus.MANUAL_ACTION_REQUIRED,
     ):
-        matching = tuple(record.surface_id for record in ledger.records if record.status is status)
+        matching = tuple(
+            record.surface_id for record in ledger.records if record.status is status
+        )
         headline, note = lane_meta[status]
         lanes.append(
             PropagationStatusLane(
@@ -1049,7 +1202,8 @@ def _target_audiences(record: PressureIntakeRecord) -> tuple[AudienceFilter, ...
             AudienceFilter(
                 visibility=Visibility.INTERNAL,
                 brands=record.audience_filter.brands,
-                product_lines=record.audience_filter.product_lines or record.product_lines,
+                product_lines=record.audience_filter.product_lines
+                or record.product_lines,
                 languages=record.audience_filter.languages,
                 product_versions=record.audience_filter.product_versions,
             )

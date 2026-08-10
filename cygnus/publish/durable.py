@@ -119,6 +119,10 @@ async def durable_publish_command_for_signal(
     action_key: str | None = None,
 ) -> dict[str, object] | None:
     """Return an executable envelope only for fully qualified durable truth."""
+    from cygnus.review.intake import is_feedback_derived_signal_type
+
+    if is_feedback_derived_signal_type(getattr(signal, "signal_type", None)):
+        return None
     if signal.page_id is None or signal.status != "active":
         return None
     page = await session.get(WikiPage, signal.page_id)
@@ -241,6 +245,10 @@ async def persisted_publish_candidate_for_signal(
     signal: GovernanceSignal,
 ) -> PublishPreviewCandidate | None:
     """Project a preview candidate only from persisted page, binding, and publication truth."""
+    from cygnus.review.intake import is_feedback_derived_signal_type
+
+    if is_feedback_derived_signal_type(getattr(signal, "signal_type", None)):
+        return None
     if signal.page_id is None or signal.status != "active":
         return None
     page = await session.get(WikiPage, signal.page_id)

@@ -29,9 +29,13 @@ class FeedbackRouteKind(str, Enum):
 
 
 class FeedbackRouteState(str, Enum):
-    """Lifecycle states owned by the initial routing slice."""
+    """Durable feedback-route lifecycle states."""
 
     QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    BLOCKED = "blocked"
+    FAILED = "failed"
 
 
 _ROUTING_POLICY: dict[FeedbackSignalType, FeedbackRouteKind] = {
@@ -48,6 +52,9 @@ class FeedbackRoutingProjection:
     route_ref: str | None
     route_kind: str | None
     route_state: str | None
+    outcome_signal_id: str | None
+    outcome_signal_ref: str | None
+    terminal_reason: str | None
     routing_state: str
     review_queued: bool
     refresh_queued: bool
@@ -58,6 +65,9 @@ class FeedbackRoutingProjection:
             "route_ref": self.route_ref,
             "route_kind": self.route_kind,
             "route_state": self.route_state,
+            "outcome_signal_id": self.outcome_signal_id,
+            "outcome_signal_ref": self.outcome_signal_ref,
+            "terminal_reason": self.terminal_reason,
             "routing_state": self.routing_state,
             "review_queued": self.review_queued,
             "refresh_queued": self.refresh_queued,
@@ -150,6 +160,9 @@ def project_feedback_route(
             route_ref=None,
             route_kind=None,
             route_state=None,
+            outcome_signal_id=None,
+            outcome_signal_ref=None,
+            terminal_reason=None,
             routing_state="recorded_only",
             review_queued=False,
             refresh_queued=False,
@@ -164,6 +177,17 @@ def project_feedback_route(
         route_ref=f"feedback-route:{route_id}",
         route_kind=route_kind.value,
         route_state=route_state.value,
+        outcome_signal_id=(
+            str(route.outcome_signal_id)
+            if route.outcome_signal_id is not None
+            else None
+        ),
+        outcome_signal_ref=(
+            f"governance-signal:{route.outcome_signal_id}"
+            if route.outcome_signal_id is not None
+            else None
+        ),
+        terminal_reason=route.terminal_reason,
         routing_state=f"{route_kind.value}_{route_state.value}",
         review_queued=queued and route_kind is FeedbackRouteKind.REVIEW,
         refresh_queued=queued and route_kind is FeedbackRouteKind.REFRESH,

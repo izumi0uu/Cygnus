@@ -450,7 +450,7 @@ Nanobot 只消费结果，不拥有检索真相。
 
 ## 8.4 `record_feedback_signal`
 ### 用途
-将已认证的消费反馈记录为持久化事实，并为两种需要路由的 signal type 创建持久化队列意图。queued route 只表示 durable intent：这里没有 worker 或 consumer 执行它，queued 也不表示 review 或 refresh 工作已完成。
+将已认证的消费反馈记录为持久化事实，并为两种需要路由的 signal type 创建可被有界 feedback worker 认领并执行的持久化 route。CYG-118 将该路由冻结为 replay-safe 的 durable queued intent；CYG-119 在其上增加执行生命周期（`queued / running / completed / blocked / failed`）与有界 claim/recovery。`queued` 绝不表示 review 或 refresh 工作已完成；`completed` 只证明该 route 已把 durable outcome governance signal 物化进 governed review truth。
 
 ### 风险级别
 `R1`
@@ -475,14 +475,20 @@ Nanobot 只消费结果，不拥有检索真相。
 
 - 可接受的 signal type 固定为 `answer_accepted`、`human_rewrite`、`escalated`、`low_rating`、`unsupported_answer` 与 `stale_answer`。
 - `GovernanceFeedbackSignal.command_id` 全局唯一；每条 signal 保存基于规范化 payload 与已认证 actor 的 64 字符 `request_fingerprint`。即使 payload 相同，不同 command ID 仍代表不同的 feedback signal。
-- 完成语法校验后，command binding 会先于 governed resource lookup 判定。`command_id`、规范化 payload 与已认证 actor 完全相同的 exact replay 返回已有 signal 及其 route（如有），不创建新的 signal、route 或 audit row；复用 `command_id` 但规范化 payload 或 actor 不同，则返回结构化 `conflict` 且不写入。只有尚未绑定的 command 才解析 object/draft ref，因此新 command 的隐藏或缺失引用仍返回 `not_found`，且不泄露资源。
+- 完成语法校验后，command binding 会先于 governed resource lookup 判定。`command_id`、规范化 payload 与已认证 actor 完全相同的 exact replay 返回已有 signal 及其 route（如有），不创建新的 signal、route 或 audit row；复用 `command_id` 但规范化 payload 或 actor 不同，则返回结构化 `conflict` 且不写入。只有尚未绑定的 command 才解析 object/draft ref，因此新 command 的隐藏或缺失引用仍返回 `not_found`，且不泄露资源。Replay 不是冻结的逐字节响应快照：它保留相同的 signal/route 身份，但投影 route 当前的 durable lifecycle，因此稍后的 exact replay 可以如实显示 `completed`、`blocked` 或 `failed`，且不产生重复真相。
 - 新调用在同一个 caller-owned transaction 内暂存原始 `GovernanceFeedbackSignal`、适用时的一条 route，以及恰好一条 runtime mutation `AuditLog`。feedback persistence owner 只 flush、不 commit；caller 必须全部提交或全部回滚。exact replay 不产生重复 audit。
 - `GovernanceFeedbackRoute` 是唯一的 durable queue truth；它在 `(feedback_signal_id, route_kind)` 上唯一，`route_kind` 为 `review|refresh`，`lifecycle_state` 初始为 `queued`。映射已冻结：`low_rating` → queued `review`，`stale_answer` → queued `refresh`，其他所有可接受 type → 无 route 且为 `recorded_only`。ownership migration 会为 route table 建立前已存在的 durable feedback signal 按相同映射补写 route。
-- Routed response 暴露 `route_id`、形如 `feedback-route:{uuid}` 的 `route_ref`、`route_kind`、`route_state:"queued"`，以及 `routing_state:"review_queued"` 或 `"refresh_queued"`；`review_queued` 与 `refresh_queued` 恰有一个为 `true`。
+- Routed response 暴露 `route_id`、形如 `feedback-route:{uuid}` 的 `route_ref`、`route_kind`、跨生命周期的 `route_state`（`queued|running|completed|blocked|failed`），以及形如 `<route_kind>_<route_state>` 的 `routing_state`（`review_queued|review_running|review_completed|review_blocked|review_failed` 或对应的 `refresh_*`）；`review_queued` 与 `refresh_queued` 恰有一个为 `true` 只在 route state 为 `queued` 时成立，`running`/`completed`/`blocked`/`failed` 时两个 queue flag 都为 `false`。
 - Non-routed response 暴露 `route_id:null`、`route_ref:null`、`route_kind:null`、`route_state:null`、`routing_state:"recorded_only"`、`review_queued:false` 与 `refresh_queued:false`。
 - `actor_id` 及已解析的 `page_id` / `draft_id` 是 `RESTRICT` 外键；`object_id` 与 `source_context_ref` 是持久化上下文而非数据库外键，`source_context_ref` 不会解析为 `Source` row。
 - `persisted:true`、`rehearsal:false`；`trace_ref` 只标识 durable feedback row，route fields 标识 durable route row；两者都不表示下游工作已完成。
 - 隐藏、缺失或有歧义的 object/draft ref 统一返回结构化 `not_found`；冲突的 object/draft ref 返回结构化 `conflict`，不泄露资源且不写入记录。
+
+#### Route 执行生命周期（CYG-119）
+- 上面的 replay-safe queue-intent seam 由 CYG-118 冻结；CYG-119 在其上增加有界执行。`GovernanceFeedbackRoute.lifecycle_state` 沿 `queued / running / completed / blocked / failed` 推进：worker 以 60 秒 lease 认领到期 route（最多 `limit=25` 条），可重试失败把 route 退回 `queued`（最多 3 次尝试、30 秒基础重试），目标对象缺失、仅 draft 或不符合 governed review 条件的 route 以 `blocked` 结束，且不猜测目标。
+- durable route row 携带 `attempt_count`、`next_attempt_at`、`lease_token`、`lease_expires_at`、`outcome_signal_id`、`terminal_reason`、`last_error` 与 `completed_at`。每次 mutation 只 flush；caller 拥有 commit。worker wrapper 先提交 claim，再以独立 transaction 提交每次 execution 或 failure。
+- completed route 物化一条 durable outcome `GovernanceSignal`，其 signal 身份恰好为 `route_ref=feedback-route:<route UUID>`，落在 `feedback` 与 `review_queue` surface；durable route row 存储 `outcome_signal_id`，response 从该 ID 投影 `outcome_signal_ref=governance-signal:<signal UUID>`（response projection，不是存储列）。`low_rating` 物化为 review pressure（`ticket_pressure`、unknown freshness），`stale_answer` 物化为疑似 freshness/drift review（`drift`、stale freshness）。low_rating/stale_answer 的派生由 worker 独占：feedback 派生类型不能通过 admin write endpoint 创建，admin read endpoint 可以读取 worker 创建的 row。route 执行不会记录原始 `source_context` 或 `notes` payload。
+- 执行绝不自动修改知识内容，也绝不发布。Route 完成只证明已物化进 governed review truth——不代表 reviewer 已行动、草稿已创建、已发布、下游已传播、KPI 已改善或已产生业务影响。
 
 ## 8.5 Governance audit read surface
 ### 用途
@@ -577,21 +583,29 @@ Nanobot 只消费结果，不拥有检索真相。
 - 后续 workflow orchestration、eval、UI 都可以围绕这些 contract 继续长出来
 
 ## 13. 当前实现状态（与代码对账）
-本节对账 `cygnus/integrations/nanobot_tools.py`、`cygnus/integrations/governed_draft_review_tools.py`、`cygnus/integrations/governed_publish_tools.py`、`cygnus/integrations/governed_drift_tools.py` 与 `cygnus/integrations/governed_feedback_tools.py`，明确区分：
+本节对账 `cygnus/integrations/nanobot_tools.py`、`cygnus/integrations/governed_draft_review_tools.py`、`cygnus/integrations/governed_publish_tools.py`、`cygnus/integrations/governed_drift_tools.py` 与 `cygnus/integrations/governed_feedback_tools.py`，以及 CYG-119 的 route 执行模块 `cygnus/governance/feedback_execution.py`，明确区分：
 - 上文的**目标 contract**
 - 下文当前可调用的 **durable interface**
-- CYG-118 已实现的 replay-safe、durable feedback-routing 边界
+- CYG-118 已实现的 replay-safe、durable feedback-routing 边界，以及 CYG-119 已实现的有界 route 执行生命周期
 
 ### 13.1 当前真正已兑现的能力
 - **Group A — Retrieval（4/4）**：`search_knowledge_objects` / `read_knowledge_object` / `search_support_evidence` / `get_source_trace` 使用 substrate-backed、请求级权限过滤的检索面。
 - **Group B — Draft/Review（4/4）**：`propose_knowledge_object` / `update_draft_object` / `request_review` / `read_review_feedback` 使用 durable `WikiPageDraft` 生命周期、review queue、source/evidence metadata、ledger event、notification path 与作用域内 review feedback 真相。
-- **Group C — Governance（4/4）**：`validate_publish_policy` 与 `publish_knowledge_object` 使用 durable draft、approval、audience-binding 与 publication 服务；`list_drift_alerts` 读取权限内 durable release/incident signal 真相并返回显式 observation coverage；`record_feedback_signal` 写入 replay-safe 的 durable consumption-feedback 真相与冻结的 review/refresh route intent，而不是下游完成态。
+- **Group C — Governance（4/4）**：`validate_publish_policy` 与 `publish_knowledge_object` 使用 durable draft、approval、audience-binding 与 publication 服务；`list_drift_alerts` 读取权限内 durable release/incident signal 真相并返回显式 observation coverage；`record_feedback_signal` 写入 replay-safe 的 durable consumption-feedback 真相与冻结的 `low_rating`/`stale_answer` route 映射，CYG-119 的有界 worker 会将其执行成 feedback/review-queue surface 上身份为 `feedback-route:<uuid>` 的 durable outcome governance signal，且绝不自动修改内容或发布。
 
-### 13.2 已实现的 durable feedback-routing seam
+### 13.2 已实现的 durable feedback-routing seam（CYG-118 scope）
+以下 bullet 描述 CYG-118 的 queue-intent 切片：replay-safe signal 与冻结的 route 映射，当时还没有 worker 或 consumer 执行 route。CYG-119 的有界执行生命周期见 13.2.1。
 - `record_feedback_signal` 是 authenticated、请求级 R1 adapter，后端使用独立 `GovernanceFeedbackSignal`，只接受六种固定 consumption-feedback type，不会复用 `GovernanceSignal` pressure fact 或 fixture observation。
 - `GovernanceFeedbackSignal` 持有全局唯一的 `command_id` 与 64 字符 `request_fingerprint`。同一 `command_id`、规范化 payload 与已认证 actor 完全相同的 exact replay 返回已有 signal 与 route；复用 `command_id` 但规范化 payload 或已认证 actor 改变则返回不写入的 `conflict`，而新的 command ID 代表独立 feedback。
 - caller-owned transaction 暂存原始 feedback row、适用时的 mapped route 与恰好一条 runtime mutation `AuditLog`；persistence owner 只 flush。exact replay 不产生重复 audit。object 与 draft ref 在投影前通过 SQL Wiki scope 解析；隐藏、缺失或有歧义的 ref 统一返回 `not_found`，不匹配 ref 返回不泄露资源且不写入的 `conflict`。
 - `GovernanceFeedbackRoute` 是唯一的 durable queue truth，在 `(feedback_signal_id, route_kind)` 上唯一，kind 为 `review|refresh`，lifecycle 为 `queued`。冻结映射为 `low_rating` → `review`、`stale_answer` → `refresh`、其他所有可接受 type → `recorded_only`。routed result 暴露 queued route fields 且恰有一个 queue flag 为真；non-routed result 暴露 null route fields 且两个 flag 都为假。不引入 feedback worker 或 consumer，queued intent 绝不表示 review 或 refresh 已完成。
+
+### 13.2.1 已实现的 durable feedback-route 执行（CYG-119）
+- 核心执行模块是 `cygnus/governance/feedback_execution.py`，导出 `FeedbackRouteClaim`、`FeedbackRouteLeaseLost`、`claim_feedback_routes(session, *, now=None, limit=25)`、`execute_feedback_route(session, claim, *, now=None)` 与 `record_feedback_route_failure(session, claim, *, error, now=None)`。Exact command replay 保留相同的 signal/route 身份，并投影 route 当前的 durable lifecycle（稍后的 replay 可以如实返回 `completed`、`blocked` 或 `failed`），不产生重复的 signal、route 或 audit 真相。
+- route state 为 `queued`、`running`、`completed`、`blocked` 与 `failed`。worker 以 60 秒 lease 认领最多 `limit=25` 条到期 route；lease 丢失时抛出 `FeedbackRouteLeaseLost` 而不是并发竞争。未被目标校验直接阻断的 worker 执行失败会在有界 backoff 下把 route 退回 `queued`，直到第三次尝试；第三次尝试仍失败时，route 以 `failed` 结束并记录 `terminal_reason` 与 `last_error`。目标对象缺失、仅 draft 或不符合 governed review 条件的 route 以 `blocked` 结束，不猜测目标。
+- durable route row 携带 `attempt_count`、`next_attempt_at`、`lease_token`、`lease_expires_at`、`outcome_signal_id`、`terminal_reason`、`last_error` 与 `completed_at`。每次 mutation 只 flush；caller 拥有 commit；worker wrapper 先提交 claim，再以独立 transaction 提交每次 execution 或 failure。
+- completed route 物化一条 durable outcome `GovernanceSignal`，其 signal 身份恰好为 `route_ref=feedback-route:<route UUID>`，落在 `feedback` 与 `review_queue` surface；durable route row 存储 `outcome_signal_id`，response 从该 ID 投影 `outcome_signal_ref=governance-signal:<signal UUID>`（response projection，不是存储列）。`low_rating` 物化为 review pressure（`ticket_pressure`、unknown freshness），`stale_answer` 物化为疑似 freshness/drift review（`drift`、stale freshness）。low_rating/stale_answer 的派生由 worker 独占：feedback 派生类型不能通过 admin write endpoint 创建，admin read endpoint 可以读取 worker 创建的 row。route 执行不会记录原始 `source_context` 或 `notes` payload。`routing_state` 沿 `<route_kind>_<route_state>` 表达（`review_running`、`review_completed` 等）；route 为 `queued` 时，依据 route kind 恰有一个 queue flag 为真，其他所有 route state 的两个 queue flag 都为假。
+- 执行绝不自动修改知识内容，也绝不发布。Route 完成只证明已物化进 governed review truth——不代表 reviewer 已行动、草稿已创建、已发布、下游已传播、KPI 已改善或已产生业务影响。
 
 ### 13.3 已兑现的 durable draft/review seam
 - `propose_knowledge_object` 会创建 typed、create-kind 的 `WikiPageDraft`，持久化在 `draft` 状态，仅记录 `proposal_created`，并保存 proposed object type、audience context、source refs、evidence refs 与 source IDs，供后续 materialization 使用。
@@ -628,7 +642,7 @@ CYG-101～104 与 CYG-108 已把工单/改写压力、发布/事故 drift、受�
 Nanobot 现在可以通过 `POST /api/session-bridge/query` 把 `request_ref`、可选 `session_ref`、support query、`audience_context` 与可选的前一轮 `governance_context` 交给 Cygnus。Cygnus 在请求级权限范围内重新装载 substrate-backed knowledge snapshot，并返回统一 envelope：`answer`、`source_trace`、`tool_trace`、`governance`、`continuity` 与下一轮可携带的 `governance_context`。
 
 - `GET /api/session-bridge/capabilities` 与 Runtime MCP 消费同一份 shared adapter-definition contract，并将恰好十二个 governed tools 标为 `ready`，同时返回 `not_exposed:[]`：`search_knowledge_objects`、`read_knowledge_object`、`search_support_evidence`、`get_source_trace`、`list_drift_alerts`、`propose_knowledge_object`、`update_draft_object`、`request_review`、`read_review_feedback`、`record_feedback_signal`、`validate_publish_policy`、`publish_knowledge_object`。
-- Runtime MCP 为 `list_drift_alerts`、`read_review_feedback` 与 `record_feedback_signal` 使用 authenticated visibility gate，为三个 R1 draft/review write 使用 contributor gate，并为 publication 使用 administrator gate。新 feedback 的 caller-owned transaction 暂存 signal、适用时的 mapped route 与一条 runtime audit；exact replay 返回已有 durable result，不产生重复 audit。queued feedback route 只表示 intent，不代表 feedback worker/consumer 执行或 review/refresh 工作已完成。
+- Runtime MCP 为 `list_drift_alerts`、`read_review_feedback` 与 `record_feedback_signal` 使用 authenticated visibility gate，为三个 R1 draft/review write 使用 contributor gate，并为 publication 使用 administrator gate。新 feedback 的 caller-owned transaction 暂存 signal、适用时的 mapped route 与一条 runtime audit；exact replay 返回已有 durable result，不产生重复 audit。queued feedback route 表示可认领的 intent：CYG-119 的有界 worker 会沿 `queued / running / completed / blocked / failed` 执行它，完成只证明已物化进 governed review truth——绝不代表 reviewer 已行动、草稿已创建、已发布、下游已传播、KPI 已改善或已产生业务影响。
 - audience mismatch、pending review、stale/unknown freshness、source blindness 与 no-match 都返回结构化治理状态；分别收敛为 `restricted`、`escalate` 或 `fallback`，不能生成看似可直接外发的答案。
 - continuity 每轮都重新查询 Cygnus truth。受众、对象、版本、trace 或 freshness 改变时前一轮 context 必须失效；即使没有变化也只能标记为 revalidated，且始终返回 `session_memory_used_as_truth:false`。
 

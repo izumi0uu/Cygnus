@@ -116,6 +116,8 @@ def _ready_review_observation(observed_count: int) -> SurfaceObservation:
             "ticket_pressure",
             "release_delta",
             "incident_delta",
+            "low_rating",
+            "stale_answer",
             "audience_conflict",
             "review_assignment",
             "source_impact",

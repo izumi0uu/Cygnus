@@ -14,13 +14,13 @@ class EvidenceSourceType(str, Enum):
     RELEASE_NOTE = "release_note"
     INCIDENT_UPDATE = "incident_update"
     CHAT_TRANSCRIPT = "chat_transcript"
+    CONSUMPTION_FEEDBACK = "consumption_feedback"
 
 
 class FreshnessState(str, Enum):
     FRESH = "fresh"
     STALE = "stale"
     UNKNOWN = "unknown"
-
 
 
 def _normalize(values: Iterable[str] | None, *, label: str) -> tuple[str, ...]:
@@ -61,11 +61,19 @@ class SupportEvidence:
             raise ValueError("title must not be blank")
         if not self.content.strip():
             raise ValueError("content must not be blank")
-        object.__setattr__(self, "product_lines", _normalize(self.product_lines, label="product line"))
+        object.__setattr__(
+            self, "product_lines", _normalize(self.product_lines, label="product line")
+        )
         object.__setattr__(self, "plans", _normalize(self.plans, label="plan"))
         object.__setattr__(self, "regions", _normalize(self.regions, label="region"))
-        object.__setattr__(self, "languages", _normalize(self.languages, label="language"))
-        object.__setattr__(self, "product_versions", _normalize(self.product_versions, label="product version"))
+        object.__setattr__(
+            self, "languages", _normalize(self.languages, label="language")
+        )
+        object.__setattr__(
+            self,
+            "product_versions",
+            _normalize(self.product_versions, label="product version"),
+        )
         object.__setattr__(self, "tags", _normalize(self.tags, label="tag"))
         if self.updated_at is not None and not self.updated_at.strip():
             raise ValueError("updated_at must not be blank when provided")

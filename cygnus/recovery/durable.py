@@ -9,6 +9,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.governance.review_assignments import load_review_assignments
+from cygnus.review.intake import PressureSignalType, is_feedback_derived_signal_type
 from cygnus.publish.durable import list_publication_propagations
 from cygnus.recovery.overview import GovernanceOverviewSurface
 from cygnus.recovery.providers import (
@@ -419,11 +420,19 @@ def _metric_keys(signal: GovernanceSignal) -> tuple[str, ...]:
     if signal.signal_type == "human_rewrite" or triggers & _REWRITE_TRIGGERS:
         keys.append("rewrite_count")
     if (
-        signal.signal_type in {"release_delta", "incident_delta"}
+        signal.signal_type
+        in {
+            "release_delta",
+            "incident_delta",
+            PressureSignalType.STALE_ANSWER.value,
+        }
         or triggers & _DRIFT_TRIGGERS
     ):
         keys.append("drift_count")
-    if signal.signal_type == "ticket_cluster" or triggers & _ESCALATION_TRIGGERS:
+    if (
+        signal.signal_type in {"ticket_cluster", PressureSignalType.LOW_RATING.value}
+        or triggers & _ESCALATION_TRIGGERS
+    ):
         keys.append("escalation_count")
     if signal.signal_type == "source_failure" or triggers & _COVERAGE_TRIGGERS:
         keys.append("coverage_gap_count")
@@ -609,6 +618,8 @@ def _feedback_signal(
 
 
 def _feedback_type(signal: GovernanceSignal) -> FeedbackSignalType | None:
+    if is_feedback_derived_signal_type(signal.signal_type):
+        return None
     triggers = _trigger_tokens(signal.trigger_signals)
     mappings = (
         ({"answer_accepted", "copilot_accepted"}, FeedbackSignalType.COPILOT_ACCEPTED),
@@ -654,6 +665,11 @@ def _signal_truth_plane(signal: GovernanceSignal) -> str:
 
 
 def _signal_follow_up(signal: GovernanceSignal) -> str:
+    if is_feedback_derived_signal_type(signal.signal_type):
+        return {
+            PressureSignalType.LOW_RATING.value: "open_feedback_review",
+            PressureSignalType.STALE_ANSWER.value: "verify_freshness",
+        }[signal.signal_type]
     if "publish_conflict_count" in _metric_keys(signal):
         return "open_audience_conflict_review"
     return {

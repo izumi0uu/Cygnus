@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Check } from 'lucide-react'
 import {
   fetchSourceBlindnessSurface,
   type SourceBlindnessContext,
@@ -14,12 +13,10 @@ import { PageSkeleton } from '@/components/Skeleton'
 import { ObservationBanner } from '@/components/ObservationBanner'
 import { SourceFailureCard } from '@/components/SourceFailureCard'
 
-// freshness → tol style (stale = urgent heat, fresh = ok, unknown = muted)
-const FRESH_TOL: Record<string, string> = { stale: 'bp-tol-urgent', fresh: 'bp-tol-ok', unknown: 'bp-tol-flat' }
-const FRESH_COLOR: Record<string, string> = { stale: 'var(--urgent)', fresh: 'var(--ok)', unknown: 'var(--medium)' }
+// Freshness labels report backend state without adding health or urgency semantics.
+const FRESH_COLOR = 'var(--muted-foreground)'
 
-// Source/evidence integrity health board — source-blindness risks as governance-loss cards.
-// Sourced from the source-health surface (degraded source refs, freshness states, signal loss).
+// Source/evidence integrity surface: observed source failures plus complete governance contexts.
 export default function SourcesEvidence() {
   const { t } = useTranslation()
   const [data, setData] = useState<SourceBlindnessSurface | null>(null)
@@ -47,23 +44,27 @@ export default function SourcesEvidence() {
 
   const rows = data.contexts
   const failures = data.source_observations
-  const stale = rows.filter((c) => c.freshness_states.includes('stale')).length
   const surfaces = new Set(rows.flatMap((c) => c.affected_surfaces)).size
-  const watched = new Set(rows.flatMap((c) => c.evidence_ids)).size
-  const blindObjs = new Set(rows.map((c) => c.proposal_ref)).size
-  const ok = Math.max(0, watched - blindObjs)
+  const showSummary = rows.length > 0 || failures.length > 0 || data.observation.state === 'ready'
+  const emptyCopyKey = failures.length > 0
+    ? 'observation.sourceFactsOnly'
+    : data.observation.state === 'ready'
+      ? 'observation.sourceEmptyReady'
+      : data.observation.state === 'partial'
+        ? 'observation.sourceEmptyPartial'
+        : 'observation.sourceEmptyUnavailable'
 
   return (
     <>
       <ObservationBanner observation={data.observation} />
-      <p className="mb-3 font-mono text-[12px] leading-relaxed text-muted-foreground">{data.summary}</p>
+      {showSummary && (
+        <p className="mb-3 font-mono text-[12px] leading-relaxed text-muted-foreground">{data.summary}</p>
+      )}
 
       <div className="mb-4 flex flex-wrap gap-2.5">
         <Stat n={failures.length} label={t('observation.sourceFacts')} dot="var(--high)" />
         <Stat n={rows.length} label={t('observation.completeRisks')} dot="var(--urgent)" />
-        <Stat n={stale} label={t('frame.urgent')} dot="var(--urgent)" />
         <Stat n={surfaces} label={t('queue.statSurfaces')} />
-        <Stat n={watched} label={t('src.statWatched')} />
       </div>
 
       {failures.length > 0 && (
@@ -75,25 +76,20 @@ export default function SourcesEvidence() {
         </section>
       )}
 
-      {rows.length > 0 && <div className="mb-2 bp-label">{t('observation.completeRisks')}</div>}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {rows.map((c) => (
-          <SourceCard key={c.proposal_ref} ctx={c} command={data.available_commands[0]} />
-        ))}
-      </div>
+      {rows.length > 0 && (
+        <section aria-labelledby="complete-source-risks-heading">
+          <div id="complete-source-risks-heading" className="mb-2 bp-label">{t('observation.completeRisks')}</div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {rows.map((c) => (
+              <SourceCard key={c.proposal_ref} ctx={c} command={data.available_commands[0]} />
+            ))}
+          </div>
+        </section>
+      )}
 
       {rows.length === 0 ? (
         <div className="bp-panel px-[18px] py-10 text-center font-mono text-sm text-muted-foreground">
-          {data.observation.state === 'ready'
-            ? t('src.empty')
-            : failures.length > 0
-              ? t('observation.sourceFactsOnly')
-              : t('observation.sourceEmptyPartial')}
-        </div>
-      ) : ok > 0 ? (
-        <div className="mt-4 flex items-center gap-2 bp-panel px-4 py-3 font-mono text-[13px] text-muted-foreground">
-          <Check size={16} style={{ color: 'var(--ok)' }} />
-          {t('src.okFmt', { n: ok })}
+          {t(emptyCopyKey)}
         </div>
       ) : null}
     </>
@@ -110,7 +106,7 @@ function SourceCard({ ctx, command }: { ctx: SourceBlindnessContext; command: st
       <div className="bp-dim flex items-center gap-2 px-4 py-3">
         <span className="h-2 w-2 rotate-45" style={{ background: 'var(--urgent)' }} />
         <span className="font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--urgent)' }}>{t('src.blind')}</span>
-        <span className={`bp-tol ${FRESH_TOL[worstFresh] ?? 'bp-tol-flat'} ml-auto`}>{t(`urgency.${worstFresh === 'stale' ? 'urgent' : 'medium'}`)}</span>
+        <span className="bp-tol bp-tol-flat ml-auto">{v.freshness(worstFresh)}</span>
       </div>
       <div className="flex flex-col gap-3 p-4">
         <div>
@@ -124,7 +120,7 @@ function SourceCard({ ctx, command }: { ctx: SourceBlindnessContext; command: st
           <div className="space-y-1">
             {ctx.source_refs.map((ref, i) => (
               <div key={ref} className="flex items-center gap-2 font-mono text-[10px]">
-                <span className="h-1.5 w-1.5 rotate-45" style={{ background: FRESH_COLOR[ctx.freshness_states[i] ?? 'unknown'] ?? 'var(--faint)' }} />
+                <span className="h-1.5 w-1.5 rotate-45" style={{ background: FRESH_COLOR }} />
                 <span className="text-muted-foreground">{ref}</span>
                 <span className="text-faint">{v.evidenceSourceType(ctx.source_types[i] ?? '')} · {v.freshness(ctx.freshness_states[i] ?? 'unknown')}</span>
               </div>

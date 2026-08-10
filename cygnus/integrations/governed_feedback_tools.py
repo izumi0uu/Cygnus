@@ -3,23 +3,26 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any, final
+from typing import Any, cast, final
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.domain import AudienceContext
 from cygnus.governance.feedback import (
+    FeedbackCommandConflict,
     FeedbackSignalInput,
     FeedbackSignalType,
     create_feedback_signal,
     feedback_signal_to_dict,
+    replay_feedback_signal,
+)
+from cygnus.governance.feedback_routing import (
+    project_feedback_route,
+    route_feedback_signal,
 )
 from cygnus.integrations.nanobot_tools import audience_context_from_payload
-from cygnus.retrieval.substrate_provider import (
-    resolve_object_type,
-    wiki_page_to_knowledge_object,
-)
+from cygnus.retrieval.substrate_provider import wiki_page_to_knowledge_object
 from cygnus.runtime.database.models import Employee, WikiPage, WikiPageDraft
 from cygnus.runtime.services.audit_service import log_audit
 from cygnus.runtime.services.permission_engine import (
@@ -45,6 +48,7 @@ _AUDIENCE_KEYS = frozenset(
 
 def normalize_feedback_arguments(
     *,
+    command_id: object,
     signal_type: object,
     audience_context: object,
     object_id: object = None,
@@ -56,13 +60,12 @@ def normalize_feedback_arguments(
     normalized_type = _normalize_signal_type(signal_type)
     normalized_context = _normalize_audience_context(audience_context)
     return FeedbackSignalInput(
+        command_id=_required_text(command_id, label="command_id", max_length=220),
         signal_type=normalized_type,
         audience_context=normalized_context,
         object_id=_optional_text(object_id, label="object_id", max_length=320),
         draft_id=(
-            _parse_uuid(draft_id, label="draft_id")
-            if draft_id is not None
-            else None
+            _parse_uuid(draft_id, label="draft_id") if draft_id is not None else None
         ),
         notes=_optional_text(notes, label="notes", max_length=10_000),
         source_context_ref=_optional_text(
@@ -86,6 +89,7 @@ class GovernedFeedbackTools:
     async def record_feedback_signal(
         self,
         *,
+        command_id: str,
         signal_type: str,
         audience_context: dict[str, Any],
         object_id: str | None = None,
@@ -93,10 +97,11 @@ class GovernedFeedbackTools:
         notes: str | None = None,
         source_context_ref: str | None = None,
     ) -> dict[str, Any]:
-        """Record one feedback fact without implying downstream routing."""
+        """Persist one feedback command and any deterministic durable route."""
 
         try:
             normalized_input = normalize_feedback_arguments(
+                command_id=command_id,
                 signal_type=signal_type,
                 audience_context=audience_context,
                 object_id=object_id,
@@ -105,87 +110,137 @@ class GovernedFeedbackTools:
                 source_context_ref=source_context_ref,
             )
             normalized_type = FeedbackSignalType(normalized_input.signal_type).value
+            normalized_command_id = normalized_input.command_id
             normalized_context = dict(normalized_input.audience_context)
             normalized_object_id = normalized_input.object_id
-            normalized_draft_id = normalized_input.draft_id
+            normalized_draft_id = cast(uuid.UUID | None, normalized_input.draft_id)
             normalized_notes = normalized_input.notes
             normalized_source_ref = normalized_input.source_context_ref
         except (TypeError, ValueError, AttributeError) as exc:
             return _error("invalid", str(exc), "invalid_arguments")
 
-        page = None
-        draft = None
-        if normalized_object_id is not None:
-            page = await self._scoped_object(normalized_object_id)
-            if page is None:
-                return _not_found()
-
-        if normalized_draft_id is not None:
-            draft, draft_page = await self._scoped_draft(normalized_draft_id)
-            if draft is None:
-                return _not_found()
-            if page is not None and (
-                draft_page is None or page.id != draft_page.id
-            ):
-                return _reference_conflict()
-            if page is None:
-                page = draft_page
-
-            draft_object_id = _draft_object_id(draft, draft_page)
-            if (
-                normalized_object_id is not None
-                and normalized_object_id != draft_object_id
-            ):
-                return _reference_conflict()
-            if normalized_object_id is None:
-                normalized_object_id = draft_object_id
-
         try:
-            signal_input = FeedbackSignalInput(
-                signal_type=normalized_type,
-                audience_context=normalized_context,
-                object_id=normalized_object_id,
-                page_id=page.id if page is not None else None,
-                draft_id=normalized_draft_id,
-                notes=normalized_notes,
-                source_context_ref=normalized_source_ref,
-            )
-            signal = await create_feedback_signal(
+            write = await replay_feedback_signal(
                 self._session,
-                signal_input,
+                FeedbackSignalInput(
+                    command_id=normalized_command_id,
+                    signal_type=normalized_type,
+                    audience_context=normalized_context,
+                    object_id=normalized_object_id,
+                    draft_id=normalized_draft_id,
+                    notes=normalized_notes,
+                    source_context_ref=normalized_source_ref,
+                ),
                 actor_id=self._actor.id,
             )
+        except FeedbackCommandConflict:
+            return _idempotency_conflict()
+        except (TypeError, ValueError) as exc:
+            return _error("invalid", str(exc), "invalid_arguments")
+
+        if write is None:
+            page = None
+            draft = None
+            if normalized_object_id is not None:
+                page = await self._scoped_object(normalized_object_id)
+                if page is None:
+                    return _not_found()
+
+            if normalized_draft_id is not None:
+                draft, draft_page = await self._scoped_draft(normalized_draft_id)
+                if draft is None:
+                    return _not_found()
+                if page is not None and (
+                    draft_page is None or page.id != draft_page.id
+                ):
+                    return _reference_conflict()
+                if page is None:
+                    page = draft_page
+
+                draft_object_id = _draft_object_id(draft, draft_page)
+                if (
+                    normalized_object_id is not None
+                    and normalized_object_id != draft_object_id
+                ):
+                    return _reference_conflict()
+                if normalized_object_id is None:
+                    normalized_object_id = draft_object_id
+
+            try:
+                signal_input = FeedbackSignalInput(
+                    command_id=normalized_command_id,
+                    signal_type=normalized_type,
+                    audience_context=normalized_context,
+                    object_id=normalized_object_id,
+                    page_id=page.id if page is not None else None,
+                    draft_id=normalized_draft_id,
+                    notes=normalized_notes,
+                    source_context_ref=normalized_source_ref,
+                )
+                write = await create_feedback_signal(
+                    self._session,
+                    signal_input,
+                    actor_id=self._actor.id,
+                )
+            except FeedbackCommandConflict:
+                return _idempotency_conflict()
+            except (TypeError, ValueError) as exc:
+                return _error("invalid", str(exc), "invalid_arguments")
+        else:
+            normalized_type = write.signal.signal_type
+            normalized_object_id = write.signal.object_id
+            normalized_draft_id = write.signal.draft_id
+
+        signal = write.signal
+        route = await route_feedback_signal(
+            self._session,
+            signal,
+            replayed=write.replayed,
+        )
+        routing = project_feedback_route(route)
+        if not write.replayed:
+            audit_reason = (
+                f"governed_session:{normalized_type}; "
+                f"routing_state={routing.routing_state}"
+            )
+            if routing.route_ref is not None:
+                audit_reason += f"; route_ref={routing.route_ref}"
             await log_audit(
                 self._session,
                 self._actor,
                 "record_feedback_signal",
                 "governance_feedback_signal",
                 str(signal.id),
-                reason=f"governed_session:{normalized_type}",
+                reason=audit_reason,
             )
             await self._session.flush()
-        except (TypeError, ValueError) as exc:
-            return _error("invalid", str(exc), "invalid_arguments")
 
         signal_payload = feedback_signal_to_dict(signal)
         return {
             "status": "success",
-            "summary": "Consumption feedback recorded durably; no routing was queued.",
+            "summary": (
+                "Feedback command replayed from durable routing truth."
+                if write.replayed
+                else (
+                    "Consumption feedback recorded durably; no routing was queued."
+                    if routing.route_ref is None
+                    else f"Consumption feedback recorded durably with one {routing.route_kind} route queued."
+                )
+            ),
             "data": {
                 **signal_payload,
-                "routing_state": "recorded_only",
-                "review_queued": False,
-                "refresh_queued": False,
+                **routing.to_dict(),
+                "replayed": write.replayed,
             },
             "signal_id": str(signal.id),
+            "command_id": normalized_command_id,
+            "replayed": write.replayed,
             "signal_type": normalized_type,
             "object_id": normalized_object_id,
             "draft_id": str(normalized_draft_id)
             if normalized_draft_id is not None
             else None,
-            "routing_state": "recorded_only",
-            "review_queued": False,
-            "refresh_queued": False,
+            **routing.to_dict(),
             "trace_ref": f"feedback-signal:{signal.id}",
             "persisted": True,
             "rehearsal": False,
@@ -202,14 +257,10 @@ class GovernedFeedbackTools:
         scope_clause = build_wiki_scope_clause(self._actor, action="read")
         if scope_clause is not None:
             statement = statement.where(scope_clause)
-        pages = tuple(
-            (await self._session.execute(statement.limit(2))).scalars().all()
-        )
+        pages = tuple((await self._session.execute(statement.limit(2))).scalars().all())
         if len(pages) != 1:
             return None
         page = pages[0]
-        if resolve_object_type(getattr(page, "knowledge_type_slugs", ())) is None:
-            return None
         projected = wiki_page_to_knowledge_object(page)
         if projected is None or projected.object_id != object_id:
             return None
@@ -235,12 +286,10 @@ class GovernedFeedbackTools:
             page_scope = build_wiki_scope_clause(self._actor, action="read")
             if page_scope is not None:
                 page_statement = page_statement.where(page_scope)
-            page = (
-                await self._session.execute(page_statement)
-            ).scalar_one_or_none()
+            page = (await self._session.execute(page_statement)).scalar_one_or_none()
             if page is None:
                 return None, None
-            if resolve_object_type(getattr(page, "knowledge_type_slugs", ())) is None:
+            if wiki_page_to_knowledge_object(page) is None:
                 return None, None
         return draft, page
 
@@ -321,6 +370,13 @@ def _parse_uuid(value: object, *, label: str) -> uuid.UUID:
         raise ValueError(f"{label} must be a UUID") from exc
 
 
+def _required_text(value: object, *, label: str, max_length: int) -> str:
+    normalized = _optional_text(value, label=label, max_length=max_length)
+    if normalized is None:
+        raise ValueError(f"{label} is required")
+    return normalized
+
+
 def _optional_text(
     value: object,
     *,
@@ -371,17 +427,30 @@ def _reference_conflict() -> dict[str, Any]:
     )
 
 
+def _idempotency_conflict() -> dict[str, Any]:
+    return _error(
+        "conflict",
+        "Feedback command ID is already bound to different input.",
+        "idempotency_conflict",
+    )
+
+
 _FEEDBACK_TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         name="record_feedback_signal",
         description=(
-            "Record one durable support-consumption feedback signal without "
-            "claiming review or refresh routing."
+            "Record one durable support-consumption feedback command and "
+            "persist its deterministic review or refresh route when required."
         ),
         parameters={
             "type": "object",
             "additionalProperties": False,
             "properties": {
+                "command_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 220,
+                },
                 "signal_type": {
                     "type": "string",
                     "enum": sorted(_SIGNAL_TYPE_VALUES),
@@ -428,7 +497,7 @@ _FEEDBACK_TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
                     "maxLength": 500,
                 },
             },
-            "required": ["signal_type", "audience_context"],
+            "required": ["command_id", "signal_type", "audience_context"],
         },
         risk_level="R1",
     ),

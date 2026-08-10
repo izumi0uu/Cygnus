@@ -1313,6 +1313,7 @@ class GovernanceSignal(Base):
         Index("ix_governance_signals_object", "object_ref"),
     )
 
+
 class GovernanceFeedbackSignal(Base):
     """Durable consumption feedback recorded from a governed session."""
 
@@ -1321,6 +1322,8 @@ class GovernanceFeedbackSignal(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
+    command_id: Mapped[str] = mapped_column(String(220), nullable=False)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     signal_type: Mapped[str] = mapped_column(String(40), nullable=False)
     actor_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -1360,6 +1363,19 @@ class GovernanceFeedbackSignal(Base):
             "signal_type IN ('answer_accepted', 'human_rewrite', 'escalated', "
             "'low_rating', 'unsupported_answer', 'stale_answer')",
             name="ck_governance_feedback_signals_type",
+        ),
+        CheckConstraint(
+            "command_id = btrim(command_id) "
+            "AND char_length(command_id) BETWEEN 1 AND 220",
+            name="ck_governance_feedback_signals_command_id",
+        ),
+        CheckConstraint(
+            "char_length(request_fingerprint) = 64",
+            name="ck_governance_feedback_signals_request_fingerprint",
+        ),
+        UniqueConstraint(
+            "command_id",
+            name="uq_governance_feedback_signals_command_id",
         ),
         CheckConstraint(
             "jsonb_typeof(audience_context) = 'object' "
@@ -1428,6 +1444,56 @@ class GovernanceFeedbackSignal(Base):
         Index("ix_governance_feedback_signals_object", "object_id"),
         Index("ix_governance_feedback_signals_page", "page_id"),
         Index("ix_governance_feedback_signals_draft", "draft_id"),
+    )
+
+
+class GovernanceFeedbackRoute(Base):
+    """Durable queued work derived from one consumption-feedback signal."""
+
+    __tablename__ = "governance_feedback_routes"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    feedback_signal_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("governance_feedback_signals.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    route_kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    lifecycle_state: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="queued", server_default="queued"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "route_kind IN ('review', 'refresh')",
+            name="ck_governance_feedback_routes_kind",
+        ),
+        CheckConstraint(
+            "lifecycle_state = 'queued'",
+            name="ck_governance_feedback_routes_state",
+        ),
+        UniqueConstraint(
+            "feedback_signal_id",
+            "route_kind",
+            name="uq_governance_feedback_routes_signal_kind",
+        ),
+        Index(
+            "ix_governance_feedback_routes_queue",
+            "route_kind",
+            "lifecycle_state",
+            "created_at",
+        ),
     )
 
 

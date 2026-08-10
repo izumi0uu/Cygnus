@@ -149,7 +149,7 @@ CYG-117 没有容忍区间或 judge-model threshold。所有适用的确定性 c
 - fixture 直接构造 domain object 与 evidence。它们不导入 `sample_*`、不使用替代性的 fallback fixture、不读取数据库，也不调用 live network/provider。预期的 fallback/restricted/escalation disposition 是可观察结果，不是 fixture source fallback。
 - session memory 不是 retrieval 或 policy truth。
 - judge model 不属于该 gate。
-- report 只提供确定性回归证据。它不证明 feedback routing、在线 business KPI instrumentation 或 business-impact evidence 已存在。
+- report 只提供确定性回归证据。它不执行或证明 durable feedback-routing seam、feedback-route worker 执行、在线 business KPI instrumentation 或 business-impact evidence。
 
 ## 8. 该 gate 之外的 Business-layer metrics
 以下指标仍是独立在线层的推荐业务度量：
@@ -161,7 +161,7 @@ CYG-117 没有容忍区间或 judge-model threshold。所有适用的确定性 c
 - ticket-cluster to draft conversion rate
 - review-to-publish cycle time
 
-CYG-117 既不路由 feedback，也不测量这些 KPI。domain report 通过不能被表述为 business impact 的证据。
+CYG-117 既不执行 feedback routing，也不测量这些 KPI。domain report 通过不能被表述为 route 执行或 business impact 的证据。
 
 ## 9. Failure-to-eval loop
 每个真实失败，最终都应该进入下面某一种结果：
@@ -188,13 +188,13 @@ Cygnus 应至少保留足够结构来回答：
 ## 11. 推荐的后续评估层
 1. 从观察到的失败中扩充 deterministic case，同时不弱化固定 gate contract
 2. 在存在可观察契约时，增加更广的 drafting fixture
-3. 只有在 durable evidence path 存在后，才对 online support KPI 与 feedback routing 做 instrumentation
+3. 只有在 durable evidence path 存在后，才对 online support KPI 与 feedback-route worker outcome 做 instrumentation
 4. 仅对 deterministic check 无法证明的质量维度考虑 judge-assisted layer
 
 ## 12. 当前结论
 CYG-117 gate 把确定性的 governance correctness 和领域专用离线 fixture 变成 merge-blocking check。它通过既有 governed retrieval 与 publish-policy path 评估 Cygnus domain control plane；不会把 Cygnus 变成另一个 agent loop，也不会把真相移入 Nanobot session memory。
 
-generic agent benchmark、judge-model quality score、feedback routing 与在线 business impact 均不属于该 gate，也不能由该 report 证明。
+generic agent benchmark、judge-model quality score、durable feedback routing、feedback-route worker 执行与在线 business impact 均不属于该 gate，也不能由该 report 证明。
 
 ## 13. 参考资料
 - AI Engineering from Scratch — Eval-Driven Agent Development  

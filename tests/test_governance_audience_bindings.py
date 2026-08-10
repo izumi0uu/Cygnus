@@ -331,6 +331,7 @@ class AudienceBindingServiceTests(unittest.TestCase):
             content_md="# Billing policy\n\nGoverned billing policy.",
             knowledge_type_slugs=["answer_card"],
             status="approved",
+            orphaned=False,
         )
         signal = cast(
             GovernanceSignal,

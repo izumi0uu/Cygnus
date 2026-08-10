@@ -59,12 +59,16 @@ def _source(**overrides: object) -> Source:
 
 class ResolveObjectTypeTests(unittest.TestCase):
     def test_underscore_and_hyphen_slugs_resolve(self) -> None:
-        self.assertIs(resolve_object_type(["answer_card"]), KnowledgeObjectType.ANSWER_CARD)
+        self.assertIs(
+            resolve_object_type(["answer_card"]), KnowledgeObjectType.ANSWER_CARD
+        )
         self.assertIs(
             resolve_object_type(["troubleshooting-flow"]),
             KnowledgeObjectType.TROUBLESHOOTING_FLOW,
         )
-        self.assertIs(resolve_object_type(["known-issue"]), KnowledgeObjectType.KNOWN_ISSUE_PAGE)
+        self.assertIs(
+            resolve_object_type(["known-issue"]), KnowledgeObjectType.KNOWN_ISSUE_PAGE
+        )
 
     def test_non_support_slugs_resolve_to_none(self) -> None:
         self.assertIsNone(resolve_object_type(["sop", "product"]))
@@ -108,13 +112,19 @@ class WikiPageMappingTests(unittest.TestCase):
 
     def test_troubleshooting_flow_without_lists_gets_pointer_step(self) -> None:
         object_ = wiki_page_to_knowledge_object(
-            _page(slug="vpn-drops", knowledge_type_slugs=["troubleshooting_flow"], content_md="prose only")
+            _page(
+                slug="vpn-drops",
+                knowledge_type_slugs=["troubleshooting_flow"],
+                content_md="prose only",
+            )
         )
         assert isinstance(object_, TroubleshootingFlow)
         self.assertEqual(object_.steps, ("See wiki page: vpn-drops",))
 
     def test_policy_rule_and_known_issue_and_escalation_projections(self) -> None:
-        policy = wiki_page_to_knowledge_object(_page(knowledge_type_slugs=["policy_rule"]))
+        policy = wiki_page_to_knowledge_object(
+            _page(knowledge_type_slugs=["policy_rule"])
+        )
         assert isinstance(policy, PolicyRule)
         self.assertEqual(policy.authority_source, "wiki:refund-policy")
 
@@ -125,15 +135,30 @@ class WikiPageMappingTests(unittest.TestCase):
         self.assertEqual(issue.issue_status, "developing")
 
         route = wiki_page_to_knowledge_object(
-            _page(knowledge_type_slugs=["escalation_route"], content_md="- payment stuck")
+            _page(
+                knowledge_type_slugs=["escalation_route"], content_md="- payment stuck"
+            )
         )
         assert isinstance(route, EscalationRoute)
         self.assertEqual(route.trigger_conditions, ("payment stuck",))
         self.assertEqual(route.destination_team, "unassigned")
 
     def test_non_support_page_is_not_projected(self) -> None:
-        self.assertIsNone(wiki_page_to_knowledge_object(_page(knowledge_type_slugs=["sop"])))
+        self.assertIsNone(
+            wiki_page_to_knowledge_object(_page(knowledge_type_slugs=["sop"]))
+        )
         self.assertIsNone(wiki_page_to_knowledge_object(_page(knowledge_type_slugs=[])))
+
+    def test_reserved_orphaned_and_source_pages_are_not_directly_projected(
+        self,
+    ) -> None:
+        for page in (
+            _page(slug="_index"),
+            _page(slug="source/billing-sop"),
+            _page(slug="orphan", orphaned=True),
+        ):
+            with self.subTest(slug=page.slug):
+                self.assertIsNone(wiki_page_to_knowledge_object(page))
 
 
 class SourceMappingTests(unittest.TestCase):
@@ -149,7 +174,9 @@ class SourceMappingTests(unittest.TestCase):
         self.assertEqual(evidence.audience_filter.visibility.value, "internal")
 
     def test_unknown_knowledge_type_defaults_to_internal_sop(self) -> None:
-        evidence = source_to_support_evidence(_source(), knowledge_type_slug="random-type")
+        evidence = source_to_support_evidence(
+            _source(), knowledge_type_slug="random-type"
+        )
         self.assertIs(evidence.source_type, EvidenceSourceType.INTERNAL_SOP)
 
     def test_blank_source_fields_fall_back_without_fabricating(self) -> None:

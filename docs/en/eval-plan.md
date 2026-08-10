@@ -149,7 +149,7 @@ Expected object and evidence refs are required subsets; forbidden object refs mu
 - Fixtures build domain objects and evidence directly. They do not import `sample_*`, use substitute fallback fixtures, read the database, or call live networks/providers. Expected fallback/restricted/escalation dispositions are observable outcomes, not fixture-source fallbacks.
 - Session memory is not retrieval or policy truth.
 - Judge models are outside this gate.
-- The report is deterministic regression evidence only. It does not establish that feedback routing, online business KPI instrumentation, or business-impact evidence exists.
+- The report is deterministic regression evidence only. It does not exercise or prove the durable feedback-routing seam, feedback-route worker execution, online business KPI instrumentation, or business-impact evidence.
 
 ## 8. Business-layer metrics outside this gate
 The following remain recommended business measures for a separately instrumented online layer:
@@ -161,7 +161,7 @@ The following remain recommended business measures for a separately instrumented
 - ticket-cluster to draft conversion rate
 - review-to-publish cycle time
 
-CYG-117 neither routes feedback nor measures these KPIs. A passing domain report must not be presented as evidence of business impact.
+CYG-117 neither exercises feedback routing nor measures these KPIs. A passing domain report must not be presented as evidence of route execution or business impact.
 
 ## 9. Failure-to-eval loop
 Every real failure should produce one of these outcomes:
@@ -188,13 +188,13 @@ Without that, evaluator outputs become hard to trust.
 ## 11. Recommended next evaluation layers
 1. grow deterministic cases from observed failures without weakening the fixed gate contract
 2. add broader drafting fixtures where observable contracts exist
-3. instrument online support KPIs and feedback routing only when their durable evidence paths exist
+3. instrument online support KPIs and feedback-route worker outcomes only when their durable evidence paths exist
 4. consider a judge-assisted layer only for quality dimensions deterministic checks cannot establish
 
 ## 12. Current conclusion
 The CYG-117 gate makes deterministic governance correctness and domain-specific offline fixtures merge-blocking. It evaluates the Cygnus domain control plane through existing governed retrieval and publish-policy paths; it does not turn Cygnus into another agent loop or move truth into Nanobot session memory.
 
-Generic agent benchmarks, judge-model quality scores, feedback routing, and online business impact remain outside this gate and are not evidenced by its report.
+Generic agent benchmarks, judge-model quality scores, durable feedback routing, feedback-route worker execution, and online business impact remain outside this gate and are not evidenced by its report.
 
 ## 13. References
 - AI Engineering from Scratch — Eval-Driven Agent Development  

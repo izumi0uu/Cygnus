@@ -113,10 +113,14 @@ def _list_items(content_md: str | None) -> tuple[str, ...]:
 
 
 def _summary_for(page: "WikiPage") -> str:
-    return (page.summary or "").strip() or _first_paragraph(page.content_md) or page.title
+    return (
+        (page.summary or "").strip() or _first_paragraph(page.content_md) or page.title
+    )
 
 
-def resolve_object_type(knowledge_type_slugs: Iterable[str] | None) -> KnowledgeObjectType | None:
+def resolve_object_type(
+    knowledge_type_slugs: Iterable[str] | None,
+) -> KnowledgeObjectType | None:
     """First knowledge-type slug that names a support object type, if any."""
     for slug in knowledge_type_slugs or ():
         object_type = _OBJECT_TYPE_BY_SLUG.get(slug.strip().lower())
@@ -130,23 +134,33 @@ def wiki_page_to_knowledge_object(
     *,
     evidence_ids: tuple[str, ...] = (),
 ) -> KnowledgeObject | None:
-    """Project one wiki page into a typed support knowledge object.
+    """Project one eligible wiki page into a typed support knowledge object.
 
-    Returns None when the page does not declare a support object type —
-    such pages stay wiki-substrate truth and are not governed objects.
+    Reserved, source-backed, orphaned, and non-support pages stay wiki-substrate
+    truth and are never exposed through the governed object plane.
     """
+    if (
+        page.orphaned
+        or page.slug in RESERVED_WIKI_SLUGS
+        or page.slug.startswith("source/")
+    ):
+        return None
     object_type = resolve_object_type(page.knowledge_type_slugs)
     if object_type is None:
         return None
 
     summary = _summary_for(page)
     steps = _list_items(page.content_md)
-    tags = tuple(dict.fromkeys([*(page.knowledge_type_slugs or ()), SUBSTRATE_MAPPED_TAG]))
+    tags = tuple(
+        dict.fromkeys([*(page.knowledge_type_slugs or ()), SUBSTRATE_MAPPED_TAG])
+    )
     base: dict[str, object] = {
         "object_id": f"ko-{page.slug}",
         "title": page.title,
         "summary": summary,
-        "lifecycle_state": _LIFECYCLE_BY_WIKI_STATUS.get(page.status or "seed", LifecycleState.DRAFT),
+        "lifecycle_state": _LIFECYCLE_BY_WIKI_STATUS.get(
+            page.status or "seed", LifecycleState.DRAFT
+        ),
         "supported_audiences": (_INTERNAL_GLOBAL,),
         "evidence_ids": evidence_ids,
         "tags": tags,
@@ -229,8 +243,6 @@ def build_substrate_snapshot(
 
     objects: list[KnowledgeObject] = []
     for page in pages:
-        if page.orphaned or page.slug in RESERVED_WIKI_SLUGS or page.slug.startswith("source/"):
-            continue
         evidence_ids = tuple(
             candidate
             for source_id in (page.source_ids or ())
@@ -243,15 +255,23 @@ def build_substrate_snapshot(
     return SubstrateKnowledgeSnapshot(objects=tuple(objects), evidence=tuple(evidence))
 
 
-async def load_substrate_snapshot(session: "AsyncSession") -> SubstrateKnowledgeSnapshot:
+async def load_substrate_snapshot(
+    session: "AsyncSession",
+) -> SubstrateKnowledgeSnapshot:
     """Load the governed object/evidence snapshot from substrate truth."""
     from sqlalchemy import select
 
     from cygnus.runtime.database.models import KnowledgeType, Source, WikiPage
 
     pages = (await session.execute(select(WikiPage))).scalars().all()
-    sources = (await session.execute(select(Source).where(Source.status == "ready"))).scalars().all()
+    sources = (
+        (await session.execute(select(Source).where(Source.status == "ready")))
+        .scalars()
+        .all()
+    )
     knowledge_types = (await session.execute(select(KnowledgeType))).scalars().all()
     slug_by_id = {item.id: item.slug for item in knowledge_types}
 
-    return build_substrate_snapshot(pages, sources, knowledge_type_slug_by_id=slug_by_id)
+    return build_substrate_snapshot(
+        pages, sources, knowledge_type_slug_by_id=slug_by_id
+    )

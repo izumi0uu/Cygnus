@@ -56,6 +56,10 @@ _DriftLimitInput = Annotated[
 _FEEDBACK_TOOL_PARAMETERS = governed_session_tool_definition(
     "record_feedback_signal"
 ).parameters["properties"]
+_FeedbackCommandIdInput = Annotated[
+    object,
+    WithJsonSchema(_FEEDBACK_TOOL_PARAMETERS["command_id"]),
+]
 _FeedbackSignalTypeInput = Annotated[
     object,
     WithJsonSchema(_FEEDBACK_TOOL_PARAMETERS["signal_type"]),
@@ -207,6 +211,7 @@ async def _get_governed_drift_tools(
         return None, "Authenticated employee no longer exists."
     provider = await load_drift_signal_provider(session, current_user=employee)
     return GovernedDriftTools(provider), None
+
 
 async def _get_governed_feedback_tools(
     identity: ResolvedIdentity,
@@ -555,6 +560,7 @@ def register_tools(mcp: FastMCP):
     )
     @logged_tool("record_feedback_signal", query_arg="object_id")
     async def record_feedback_signal(
+        command_id: _FeedbackCommandIdInput,
         signal_type: _FeedbackSignalTypeInput,
         audience_context: _FeedbackAudienceInput,
         object_id: _FeedbackObjectIdInput = None,
@@ -565,6 +571,7 @@ def register_tools(mcp: FastMCP):
         """Record durable feedback after validating arguments locally."""
         try:
             normalized = normalize_feedback_arguments(
+                command_id=command_id,
                 signal_type=signal_type,
                 audience_context=audience_context,
                 object_id=object_id,
@@ -592,6 +599,7 @@ def register_tools(mcp: FastMCP):
                     error or "Governed feedback is unavailable."
                 )
             payload = await tools.record_feedback_signal(
+                command_id=normalized.command_id,
                 signal_type=FeedbackSignalType(normalized.signal_type).value,
                 audience_context=dict(normalized.audience_context),
                 object_id=normalized.object_id,
@@ -606,9 +614,11 @@ def register_tools(mcp: FastMCP):
             if (
                 payload.get("status") == "success"
                 and payload.get("persisted") is True
+                and payload.get("replayed") is not True
             ):
                 await session.commit()
         return _serialize_tool_result(payload)
+
     @kb_tool(
         mcp,
         requires=ANY_AUTHENTICATED,

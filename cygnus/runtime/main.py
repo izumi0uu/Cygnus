@@ -31,7 +31,9 @@ async def seed_default_admin():
             if result.scalar_one_or_none():
                 return
 
-            dept = Department(name="Administration", description="System administrators")
+            dept = Department(
+                name="Administration", description="System administrators"
+            )
             session.add(dept)
             await session.flush()
 
@@ -47,7 +49,9 @@ async def seed_default_admin():
             await session.flush()
 
             await session.commit()
-            logger.success(f"Default admin created: {get_settings().default_admin_email}")
+            logger.success(
+                f"Default admin created: {get_settings().default_admin_email}"
+            )
     except Exception as e:
         logger.warning(f"Could not seed default admin: {e}")
 
@@ -73,6 +77,7 @@ def create_app(*, app_settings: Settings | None = None) -> FastAPI:
             # Ensure MinIO bucket exists
             try:
                 from cygnus.runtime.services.storage_service import storage_service
+
                 await storage_service.ensure_bucket()
                 logger.success("MinIO bucket ready")
             except Exception as e:
@@ -83,16 +88,23 @@ def create_app(*, app_settings: Settings | None = None) -> FastAPI:
 
             # Seed built-in skills (idempotent — no-op if already up to date)
             try:
-                from cygnus.runtime.bootstrap.seed_builtin_skills import seed_builtin_skills
+                from cygnus.runtime.bootstrap.seed_builtin_skills import (
+                    seed_builtin_skills,
+                )
+
                 await seed_builtin_skills()
             except Exception as e:
                 logger.warning(f"Could not seed built-in skills: {e}")
 
             # Warn if sensitive defaults are unchanged
             if resolved_settings.secret_key == "change-me-to-a-random-secret-string":
-                logger.warning("⚠️  SECRET_KEY is set to the default value — change it before deploying to production!")
+                logger.warning(
+                    "⚠️  SECRET_KEY is set to the default value — change it before deploying to production!"
+                )
             if resolved_settings.default_admin_password == "admin123":
-                logger.warning("⚠️  DEFAULT_ADMIN_PASSWORD is 'admin123' — change the admin password after first login!")
+                logger.warning(
+                    "⚠️  DEFAULT_ADMIN_PASSWORD is 'admin123' — change the admin password after first login!"
+                )
 
             # MCP server ready
             logger.success("Cygnus MCP Server ready at /mcp")
@@ -125,7 +137,6 @@ def create_app(*, app_settings: Settings | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
-
     # --- MCP OAuth discovery gate ---
     @app.middleware("http")
     async def _mcp_oauth_gate_mw(request, call_next):
@@ -153,18 +164,24 @@ def create_app(*, app_settings: Settings | None = None) -> FastAPI:
                 )
         return await call_next(request)
 
-
-    # --- Notification dispatch middleware ---
+    # --- Committed-only notification and durable AI review outbox accelerator ---
     @app.middleware("http")
     async def _notification_dispatch_mw(request, call_next):
+        from cygnus.review.pre_review import dispatch as pre_review_dispatch
         from cygnus.runtime.services import notification_service
 
         notification_service.init_request_dispatch_scope()
         response = await call_next(request)
         try:
             await notification_service.dispatch_pending()
-        except Exception as e:  # pragma: no cover — defensive, dispatcher already catches
+        except (
+            Exception
+        ) as e:  # pragma: no cover — defensive, dispatcher already catches
             logger.warning(f"Notification dispatch middleware failed: {e}")
+        try:
+            await pre_review_dispatch.dispatch_pending_ai_pre_reviews()
+        except Exception as e:  # pragma: no cover — dispatch must not alter response
+            logger.warning(f"AI pre-review dispatch middleware failed: {e}")
         return response
 
     # --- Mount MCP Server ---
@@ -210,7 +227,9 @@ def create_app(*, app_settings: Settings | None = None) -> FastAPI:
     app.include_router(knowledge_types.router, prefix="/api", tags=["knowledge-types"])
     app.include_router(audit.router, prefix="/api", tags=["audit"])
     app.include_router(skills.router, prefix="/api", tags=["skills"])
-    app.include_router(skill_contributions.router, prefix="/api", tags=["skill-contributions"])
+    app.include_router(
+        skill_contributions.router, prefix="/api", tags=["skill-contributions"]
+    )
     app.include_router(notifications.router, prefix="/api", tags=["notifications"])
 
     @app.get("/")

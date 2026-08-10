@@ -14,6 +14,7 @@ from cygnus.runtime.database.models import GovernanceLedgerEvent, WikiPageDraft
 
 class GovernanceEventType(str, Enum):
     PROPOSAL_CREATED = "proposal_created"
+    DRAFT_UPDATED = "draft_updated"
     REVIEW_REQUESTED = "review_requested"
     CHANGES_REQUESTED = "changes_requested"
     REVIEW_RESUBMITTED = "review_resubmitted"
@@ -44,6 +45,64 @@ def transition_key(
 ) -> str:
     suffix = f":{revision_round}" if revision_round is not None else ""
     return f"wiki-draft:{draft_id}:{event_type.value}{suffix}"
+
+
+def draft_update_key(draft_id: uuid.UUID, draft_version: int) -> str:
+    if draft_version < 1:
+        raise ValueError("draft_version must be positive")
+    return f"wiki-draft:{draft_id}:{GovernanceEventType.DRAFT_UPDATED.value}:{draft_version}"
+
+
+async def record_draft_update(
+    session: AsyncSession,
+    draft: WikiPageDraft,
+    *,
+    previous_draft_version: int,
+    from_state: str,
+    to_state: str,
+    actor_id: uuid.UUID | None,
+    action: str,
+    reason: str | None = None,
+    extra_payload: dict[str, object] | None = None,
+    lock: bool = True,
+) -> GovernanceLedgerEvent:
+    """Append one versioned draft mutation with a content-integrity trace."""
+    if previous_draft_version < 1:
+        raise ValueError("previous_draft_version must be positive")
+    if draft.version != previous_draft_version + 1:
+        raise ValueError("draft.version must advance exactly once per draft update")
+
+    normalized_action = action.strip()
+    if not normalized_action:
+        raise ValueError("action must not be blank")
+
+    payload = {
+        "action": normalized_action,
+        "previous_draft_version": previous_draft_version,
+        "draft_version": draft.version,
+        "base_version": draft.base_version,
+        "revision_round": draft.revision_round,
+        "content_sha256": hashlib.sha256(draft.content_md.encode("utf-8")).hexdigest(),
+    }
+    details = dict(extra_payload or {})
+    overlapping_keys = set(payload).intersection(details)
+    if overlapping_keys:
+        names = ", ".join(sorted(overlapping_keys))
+        raise ValueError(f"extra_payload may not override ledger fields: {names}")
+    payload.update(details)
+
+    return await append_draft_event(
+        session,
+        draft_id=draft.id,
+        event_type=GovernanceEventType.DRAFT_UPDATED,
+        from_state=from_state,
+        to_state=to_state,
+        actor_id=actor_id,
+        idempotency_key=draft_update_key(draft.id, draft.version),
+        reason=reason,
+        payload=payload,
+        lock=lock,
+    )
 
 
 async def _lock_governance_key(
@@ -182,21 +241,15 @@ async def append_draft_event(
     return event
 
 
-async def record_created_draft(
+async def record_draft_proposal(
     session: AsyncSession,
     draft: WikiPageDraft,
-) -> tuple[GovernanceLedgerEvent, GovernanceLedgerEvent]:
-    """Record that the existing create API both proposed and submitted a draft."""
+    *,
+    lock: bool = True,
+) -> GovernanceLedgerEvent:
+    """Record the durable creation of a draft before it enters review."""
     content_digest = hashlib.sha256(draft.content_md.encode("utf-8")).hexdigest()
-    proposal_payload: dict[str, object] = {
-        "draft_kind": draft.draft_kind,
-        "page_id": str(draft.page_id) if draft.page_id is not None else None,
-        "base_version": draft.base_version,
-        "revision_round": draft.revision_round,
-        "source": draft.source,
-        "content_sha256": content_digest,
-    }
-    proposal_event = await append_draft_event(
+    return await append_draft_event(
         session,
         draft_id=draft.id,
         event_type=GovernanceEventType.PROPOSAL_CREATED,
@@ -207,25 +260,68 @@ async def record_created_draft(
             draft.id,
             GovernanceEventType.PROPOSAL_CREATED,
         ),
-        payload=proposal_payload,
+        payload={
+            "draft_kind": draft.draft_kind,
+            "page_id": str(draft.page_id) if draft.page_id is not None else None,
+            "base_version": draft.base_version,
+            "draft_version": draft.version,
+            "revision_round": draft.revision_round,
+            "source": draft.source,
+            "content_sha256": content_digest,
+        },
+        lock=lock,
     )
-    review_event = await append_draft_event(
+
+
+async def record_draft_review_request(
+    session: AsyncSession,
+    draft: WikiPageDraft,
+    *,
+    actor_id: uuid.UUID | None,
+    reason: str | None,
+    review_type: str | None = None,
+    expected_version: int | None = None,
+    lock: bool = True,
+) -> GovernanceLedgerEvent:
+    """Append or replay the review-queue transition for one draft revision."""
+    payload: dict[str, object] = {
+        "draft_version": draft.version,
+        "revision_round": draft.revision_round,
+        "source": draft.source,
+    }
+    if review_type is not None:
+        payload["review_type"] = review_type
+    if expected_version is not None:
+        payload["expected_version"] = expected_version
+    return await append_draft_event(
         session,
         draft_id=draft.id,
         event_type=GovernanceEventType.REVIEW_REQUESTED,
         from_state="draft",
         to_state="in_review",
-        actor_id=draft.author_id,
+        actor_id=actor_id,
         idempotency_key=transition_key(
             draft.id,
             GovernanceEventType.REVIEW_REQUESTED,
             revision_round=draft.revision_round,
         ),
+        reason=reason,
+        payload=payload,
+        lock=lock,
+    )
+
+
+async def record_created_draft(
+    session: AsyncSession,
+    draft: WikiPageDraft,
+) -> tuple[GovernanceLedgerEvent, GovernanceLedgerEvent]:
+    """Record that legacy create callers both proposed and submitted a draft."""
+    proposal_event = await record_draft_proposal(session, draft)
+    review_event = await record_draft_review_request(
+        session,
+        draft,
+        actor_id=draft.author_id,
         reason=draft.note,
-        payload={
-            "revision_round": draft.revision_round,
-            "source": draft.source,
-        },
     )
     return proposal_event, review_event
 

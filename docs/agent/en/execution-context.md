@@ -83,7 +83,7 @@ Downstream agents must follow this contract in Jira comments, handoffs, logs, an
 ### 4.1.2 Governed session seam
 - `/api/session-bridge/query` must reload substrate truth inside the current user permission scope; a prior `governance_context` is only continuity input and never answer truth.
 - `session_memory_used_as_truth` must remain `false`. An audience/object/version/trace/freshness change returns `invalidated`; an unchanged context may return `revalidated` only after retrieval runs again.
-- Runtime MCP automatically exposes the four executable R0 governed retrieval tools plus the durable-core `validate_publish_policy` / `publish_knowledge_object` adapters. They remain scope- and administrator/approval-gated respectively; other tools without a real governance write path stay explicitly `not_exposed`.
+- Runtime MCP and session capabilities share one adapter-definition contract for four R0 governed retrieval tools, the R1 `propose_knowledge_object` / `update_draft_object` / `request_review` lifecycle adapters, R0 `read_review_feedback`, and durable-core `validate_publish_policy` / `publish_knowledge_object`. The R1 tools are contributor-gated in the catalog, feedback is authenticated-gated, and every state-changing adapter re-checks scoped identity, author authority, source visibility, and optimistic draft version server-side. Only `list_drift_alerts` and `record_feedback_signal` remain explicitly `not_exposed`.
 - No match, pending review, audience mismatch, stale/unknown evidence, and source blindness must return structured `fallback`, `restricted`, or `escalate` states rather than a fabricated answer.
 
 ### 4.1.3 Engineering execution control

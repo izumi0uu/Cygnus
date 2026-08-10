@@ -12,11 +12,19 @@ from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql.elements import ColumnElement
 
-from cygnus.retrieval import SubstrateKnowledgeSnapshot, sample_knowledge_objects, sample_support_evidence
-from cygnus.runtime.database.models import Employee, Source, WikiPage
-from cygnus.runtime.routers.governance.knowledge_graph import knowledge_graph, traceability
+from cygnus.retrieval import (
+    SubstrateKnowledgeSnapshot,
+    sample_knowledge_objects,
+    sample_support_evidence,
+)
+from cygnus.runtime.database.models import Employee, Source, WikiPage, WikiPageDraft
+from cygnus.runtime.routers.governance.knowledge_graph import (
+    knowledge_graph,
+    traceability,
+)
 from cygnus.runtime.services.permission_engine import (
     build_document_scope_clause,
+    build_wiki_draft_scope_clause,
     build_wiki_scope_clause,
 )
 
@@ -24,7 +32,12 @@ from cygnus.runtime.services.permission_engine import (
 DEPARTMENT_ID = UUID("11111111-1111-1111-1111-111111111111")
 
 
-def scoped_employee(*, role: str = "employee", global_role: str = "viewer", department_ids: tuple[UUID, ...] = ()) -> Employee:
+def scoped_employee(
+    *,
+    role: str = "employee",
+    global_role: str = "viewer",
+    department_ids: tuple[UUID, ...] = (),
+) -> Employee:
     return cast(
         Employee,
         cast(
@@ -39,7 +52,7 @@ def scoped_employee(*, role: str = "employee", global_role: str = "viewer", depa
 
 
 def compile_clause(
-    table: type[Source] | type[WikiPage],
+    table: type[Source] | type[WikiPage] | type[WikiPageDraft],
     clause: ColumnElement[bool] | None,
 ) -> str:
     if clause is None:
@@ -74,7 +87,9 @@ class GovernanceScopeTests(unittest.TestCase):
         self.assertIn("NOT (EXISTS", source_sql)
         self.assertIn(str(DEPARTMENT_ID), source_sql)
 
-    def test_own_department_user_without_departments_sees_only_global_rows(self) -> None:
+    def test_own_department_user_without_departments_sees_only_global_rows(
+        self,
+    ) -> None:
         user = scoped_employee()
         wiki_sql = compile_clause(WikiPage, build_wiki_scope_clause(user))
         source_sql = compile_clause(Source, build_document_scope_clause(user))
@@ -86,11 +101,32 @@ class GovernanceScopeTests(unittest.TestCase):
 
     def test_user_without_permissions_gets_always_false_scope(self) -> None:
         user = scoped_employee(global_role="viewer")
-        with patch("cygnus.runtime.services.permission_engine._get_user_permissions", return_value=set()):
+        with patch(
+            "cygnus.runtime.services.permission_engine._get_user_permissions",
+            return_value=set(),
+        ):
             wiki_sql = compile_clause(WikiPage, build_wiki_scope_clause(user))
             source_sql = compile_clause(Source, build_document_scope_clause(user))
         self.assertIn("wiki_pages.id IS NULL", wiki_sql)
         self.assertIn("sources.id IS NULL", source_sql)
+
+    def test_staged_draft_scope_filters_before_projection(self) -> None:
+        user = scoped_employee(department_ids=(DEPARTMENT_ID,))
+        clause = build_wiki_draft_scope_clause(user, action="read")
+        self.assertIsNotNone(clause)
+        if clause is None:
+            raise AssertionError("own-department reader must receive a draft scope")
+        sql = str(
+            select(WikiPageDraft.id)
+            .where(clause)
+            .compile(
+                dialect=postgresql.dialect(),
+                compile_kwargs={"literal_binds": True},
+            )
+        )
+        self.assertIn("wiki_page_drafts.suggested_metadata", sql)
+        self.assertIn("wiki_pages.scope_type = 'global'", sql)
+        self.assertIn(str(DEPARTMENT_ID), sql)
 
     def test_graph_keeps_object_and_evidence_planes_separate(self) -> None:
         snapshot = SubstrateKnowledgeSnapshot(
@@ -105,15 +141,17 @@ class GovernanceScopeTests(unittest.TestCase):
         self.assertTrue(any(edge["kind"] == "cites" for edge in edges))
         self.assertTrue(any(edge["kind"] == "serves" for edge in edges))
 
-    def test_hidden_and_absent_traceability_are_indistinguishable_after_scoping(self) -> None:
+    def test_hidden_and_absent_traceability_are_indistinguishable_after_scoping(
+        self,
+    ) -> None:
         empty_snapshot = SubstrateKnowledgeSnapshot(objects=(), evidence=())
         details: list[str] = []
         for object_id in ("does-not-exist", "scope-hidden-object"):
             with self.subTest(object_id=object_id):
                 with self.assertRaises(HTTPException) as raised:
-                    _ = asyncio.run(traceability(object_id=object_id, snapshot=empty_snapshot))
+                    _ = asyncio.run(
+                        traceability(object_id=object_id, snapshot=empty_snapshot)
+                    )
                 self.assertEqual(raised.exception.status_code, 404)
                 details.append(str(raised.exception.detail).replace(object_id, "<ref>"))
         self.assertEqual(details[0], details[1])
-
-

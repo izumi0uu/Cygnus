@@ -17,10 +17,12 @@ from typing import Any, Optional
 from fastmcp import FastMCP
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cygnus.runtime.mcp.logging import current_identity, logged_tool
+from cygnus.integrations.governed_draft_review_tools import GovernedDraftReviewTools
 from cygnus.integrations.governed_publish_tools import GovernedPublishTools
+from cygnus.integrations.governed_session_tools import governed_session_tool_definition
 from cygnus.integrations.mcp_auth import ResolvedIdentity
 from cygnus.integrations.nanobot_tools import GovernedKnowledgeTools
+from cygnus.runtime.mcp.logging import current_identity, logged_tool
 from cygnus.runtime.mcp.permissions import (
     ADMIN_ONLY,
     ANY_AUTHENTICATED,
@@ -132,6 +134,16 @@ async def _get_governed_publish_tools(
         ),
         None,
     )
+
+
+async def _get_governed_draft_review_tools(
+    identity: ResolvedIdentity,
+    session: AsyncSession,
+) -> tuple[GovernedDraftReviewTools | None, str | None]:
+    employee = await _load_identity_employee(identity, session)
+    if employee is None:
+        return None, "Authenticated employee no longer exists."
+    return GovernedDraftReviewTools(session, actor=employee), None
 
 
 def _structured_tool_error(summary: str, *, code: str = "scope_denied") -> str:
@@ -313,7 +325,14 @@ def register_tools(mcp: FastMCP):
     # Governed support object layer — the default path for support questions
     # =========================================================================
 
-    @kb_tool(mcp, requires=ANY_AUTHENTICATED)
+    @kb_tool(
+        mcp,
+        requires=ANY_AUTHENTICATED,
+        name=governed_session_tool_definition("search_knowledge_objects").name,
+        description=governed_session_tool_definition(
+            "search_knowledge_objects"
+        ).description,
+    )
     @logged_tool("search_knowledge_objects", query_arg="query")
     async def search_knowledge_objects(
         query: str,
@@ -338,7 +357,14 @@ def register_tools(mcp: FastMCP):
             return _structured_tool_error(str(exc), code="invalid_arguments")
         return _serialize_tool_result(payload)
 
-    @kb_tool(mcp, requires=ANY_AUTHENTICATED)
+    @kb_tool(
+        mcp,
+        requires=ANY_AUTHENTICATED,
+        name=governed_session_tool_definition("read_knowledge_object").name,
+        description=governed_session_tool_definition(
+            "read_knowledge_object"
+        ).description,
+    )
     @logged_tool("read_knowledge_object", query_arg="id_or_slug")
     async def read_knowledge_object(
         id_or_slug: str,
@@ -357,7 +383,14 @@ def register_tools(mcp: FastMCP):
             )
         )
 
-    @kb_tool(mcp, requires=ANY_AUTHENTICATED)
+    @kb_tool(
+        mcp,
+        requires=ANY_AUTHENTICATED,
+        name=governed_session_tool_definition("search_support_evidence").name,
+        description=governed_session_tool_definition(
+            "search_support_evidence"
+        ).description,
+    )
     @logged_tool("search_support_evidence", query_arg="query")
     async def search_support_evidence(
         query: str,
@@ -378,7 +411,12 @@ def register_tools(mcp: FastMCP):
             return _structured_tool_error(str(exc), code="invalid_arguments")
         return _serialize_tool_result(payload)
 
-    @kb_tool(mcp, requires=ANY_AUTHENTICATED)
+    @kb_tool(
+        mcp,
+        requires=ANY_AUTHENTICATED,
+        name=governed_session_tool_definition("get_source_trace").name,
+        description=governed_session_tool_definition("get_source_trace").description,
+    )
     @logged_tool("get_source_trace", query_arg="object_id")
     async def get_source_trace(object_id: str) -> str:
         """Return the evidence, freshness, and blind-spot trace for one object."""
@@ -387,7 +425,14 @@ def register_tools(mcp: FastMCP):
             return _structured_tool_error(error or "Governed retrieval is unavailable.")
         return _serialize_tool_result(tools.get_source_trace(object_id=object_id))
 
-    @kb_tool(mcp, requires=ANY_AUTHENTICATED)
+    @kb_tool(
+        mcp,
+        requires=ANY_AUTHENTICATED,
+        name=governed_session_tool_definition("validate_publish_policy").name,
+        description=governed_session_tool_definition(
+            "validate_publish_policy"
+        ).description,
+    )
     @logged_tool("validate_publish_policy", query_arg="draft_id")
     async def validate_publish_policy(
         draft_id: str,
@@ -416,7 +461,14 @@ def register_tools(mcp: FastMCP):
             )
         return _serialize_tool_result(payload)
 
-    @kb_tool(mcp, requires=ADMIN_ONLY)
+    @kb_tool(
+        mcp,
+        requires=ADMIN_ONLY,
+        name=governed_session_tool_definition("publish_knowledge_object").name,
+        description=governed_session_tool_definition(
+            "publish_knowledge_object"
+        ).description,
+    )
     @logged_tool("publish_knowledge_object", query_arg="draft_id")
     async def publish_knowledge_object(
         draft_id: str,
@@ -451,6 +503,146 @@ def register_tools(mcp: FastMCP):
             )
             if payload.get("persisted") is True:
                 await session.commit()
+        return _serialize_tool_result(payload)
+
+    @kb_tool(
+        mcp,
+        requires=CAN_CONTRIBUTE_WIKI,
+        name=governed_session_tool_definition("propose_knowledge_object").name,
+        description=governed_session_tool_definition(
+            "propose_knowledge_object"
+        ).description,
+    )
+    @logged_tool("propose_knowledge_object", query_arg="title")
+    async def propose_knowledge_object(
+        proposed_object_type: str,
+        title: str,
+        input_summary: str,
+        audience_context: dict[str, Any],
+        source_refs: list[dict[str, Any]] | None = None,
+        evidence_refs: list[dict[str, Any]] | None = None,
+        ticket_cluster_ref: str | None = None,
+    ) -> str:
+        """Create a durable staged knowledge draft without entering review."""
+        identity, error = await _get_identity()
+        if identity is None:
+            return _structured_tool_error(error or "Authentication required.")
+
+        from cygnus.runtime.database import async_session_factory
+
+        async with async_session_factory() as session:
+            tools, error = await _get_governed_draft_review_tools(identity, session)
+            if tools is None:
+                return _structured_tool_error(
+                    error or "Governed draft lifecycle is unavailable."
+                )
+            payload = await tools.propose_knowledge_object(
+                proposed_object_type=proposed_object_type,
+                title=title,
+                input_summary=input_summary,
+                audience_context=audience_context,
+                source_refs=source_refs,
+                evidence_refs=evidence_refs,
+                ticket_cluster_ref=ticket_cluster_ref,
+            )
+            if payload.get("persisted") is True:
+                await session.commit()
+        return _serialize_tool_result(payload)
+
+    @kb_tool(
+        mcp,
+        requires=CAN_CONTRIBUTE_WIKI,
+        name=governed_session_tool_definition("update_draft_object").name,
+        description=governed_session_tool_definition("update_draft_object").description,
+    )
+    @logged_tool("update_draft_object", query_arg="draft_id")
+    async def update_draft_object(
+        draft_id: str,
+        expected_version: int,
+        patch: dict[str, Any],
+    ) -> str:
+        """Update an authored staged draft with optimistic version protection."""
+        identity, error = await _get_identity()
+        if identity is None:
+            return _structured_tool_error(error or "Authentication required.")
+
+        from cygnus.runtime.database import async_session_factory
+
+        async with async_session_factory() as session:
+            tools, error = await _get_governed_draft_review_tools(identity, session)
+            if tools is None:
+                return _structured_tool_error(
+                    error or "Governed draft lifecycle is unavailable."
+                )
+            payload = await tools.update_draft_object(
+                draft_id=draft_id,
+                expected_version=expected_version,
+                patch=patch,
+            )
+            if payload.get("persisted") is True:
+                await session.commit()
+        return _serialize_tool_result(payload)
+
+    @kb_tool(
+        mcp,
+        requires=CAN_CONTRIBUTE_WIKI,
+        name=governed_session_tool_definition("request_review").name,
+        description=governed_session_tool_definition("request_review").description,
+    )
+    @logged_tool("request_review", query_arg="draft_id")
+    async def request_review(
+        draft_id: str,
+        review_type: str,
+        expected_version: int,
+        notes: str | None = None,
+    ) -> str:
+        """Submit an authored staged draft into the durable review queue."""
+        identity, error = await _get_identity()
+        if identity is None:
+            return _structured_tool_error(error or "Authentication required.")
+
+        from cygnus.runtime.database import async_session_factory
+
+        async with async_session_factory() as session:
+            tools, error = await _get_governed_draft_review_tools(identity, session)
+            if tools is None:
+                return _structured_tool_error(
+                    error or "Governed draft lifecycle is unavailable."
+                )
+            payload = await tools.request_review(
+                draft_id=draft_id,
+                review_type=review_type,
+                expected_version=expected_version,
+                notes=notes,
+            )
+            if payload.get("persisted") is True:
+                await session.commit()
+        return _serialize_tool_result(payload)
+
+    @kb_tool(
+        mcp,
+        requires=ANY_AUTHENTICATED,
+        name=governed_session_tool_definition("read_review_feedback").name,
+        description=governed_session_tool_definition(
+            "read_review_feedback"
+        ).description,
+    )
+    @logged_tool("read_review_feedback", query_arg="draft_id")
+    async def read_review_feedback(draft_id: str) -> str:
+        """Read scoped durable review feedback and approval truth."""
+        identity, error = await _get_identity()
+        if identity is None:
+            return _structured_tool_error(error or "Authentication required.")
+
+        from cygnus.runtime.database import async_session_factory
+
+        async with async_session_factory() as session:
+            tools, error = await _get_governed_draft_review_tools(identity, session)
+            if tools is None:
+                return _structured_tool_error(
+                    error or "Governed draft lifecycle is unavailable."
+                )
+            payload = await tools.read_review_feedback(draft_id=draft_id)
         return _serialize_tool_result(payload)
 
     # =========================================================================
@@ -2047,8 +2239,9 @@ def register_tools(mcp: FastMCP):
     @logged_tool("withdraw_draft", query_arg="draft_id")
     async def withdraw_draft(draft_id: str) -> str:
         """
-        Withdraw your own draft (pending or needs_revision). Removes it from
-        the reviewer queue. Author-only — admins can also withdraw via API.
+        Withdraw your own staged, pending, or needs_revision draft. Removes it
+        from the reviewer queue when applicable. Author-only — admins can also
+        withdraw through this tool.
 
         Args:
             draft_id: UUID of the draft to withdraw.

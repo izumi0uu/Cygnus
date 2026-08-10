@@ -4,6 +4,9 @@ import asyncio
 
 import unittest
 
+from cygnus.integrations.governed_session_tools import (
+    governed_session_tool_definitions,
+)
 from cygnus.integrations.nanobot_tools import (
     GovernedKnowledgeTools,
     build_governed_tool_registry,
@@ -18,6 +21,7 @@ from cygnus.substrate.tool_runtime import dispatch_tool_calls
 from cygnus.runtime.mcp.permissions import (
     ADMIN_ONLY,
     ANY_AUTHENTICATED,
+    CAN_CONTRIBUTE_WIKI,
     requirement_for,
 )
 from cygnus.runtime.mcp.server import create_mcp_server
@@ -128,21 +132,50 @@ class NanobotToolIntegrationTests(unittest.TestCase):
         mcp = create_mcp_server()
         tool_names = {tool.name for tool in asyncio.run(mcp.list_tools())}
 
-        self.assertTrue(
-            {
-                "search_knowledge_objects",
-                "read_knowledge_object",
-                "search_support_evidence",
-                "get_source_trace",
-                "validate_publish_policy",
-            }.issubset(tool_names)
-        )
-        validate_tool = asyncio.run(mcp.get_tool("validate_publish_policy"))
-        publish_tool = asyncio.run(mcp.get_tool("publish_knowledge_object"))
-        self.assertIsNotNone(validate_tool)
-        self.assertIsNotNone(publish_tool)
-        if validate_tool is None or publish_tool is None:
-            raise AssertionError("governed publish tools were not registered")
+        governed_tool_names = {
+            definition.name for definition in governed_session_tool_definitions()
+        }
+        registered_tools = {
+            name: asyncio.run(mcp.get_tool(name)) for name in governed_tool_names
+        }
+        unrestricted_governed_names = {
+            "get_source_trace",
+            "read_knowledge_object",
+            "read_review_feedback",
+            "search_knowledge_objects",
+            "search_support_evidence",
+            "validate_publish_policy",
+        }
+        restricted_writer_names = {
+            "propose_knowledge_object",
+            "update_draft_object",
+            "request_review",
+            "publish_knowledge_object",
+        }
+
+        self.assertTrue(all(tool is not None for tool in registered_tools.values()))
+        self.assertTrue(unrestricted_governed_names.issubset(tool_names))
+        self.assertTrue(restricted_writer_names.isdisjoint(tool_names))
+
+        validate_tool = registered_tools["validate_publish_policy"]
+        publish_tool = registered_tools["publish_knowledge_object"]
+        propose_tool = registered_tools["propose_knowledge_object"]
+        update_tool = registered_tools["update_draft_object"]
+        review_tool = registered_tools["request_review"]
+        feedback_tool = registered_tools["read_review_feedback"]
+        if (
+            validate_tool is None
+            or publish_tool is None
+            or propose_tool is None
+            or update_tool is None
+            or review_tool is None
+            or feedback_tool is None
+        ):
+            raise AssertionError("governed session tools were not registered")
         self.assertIs(requirement_for(validate_tool.fn), ANY_AUTHENTICATED)
         self.assertIs(requirement_for(publish_tool.fn), ADMIN_ONLY)
+        self.assertIs(requirement_for(propose_tool.fn), CAN_CONTRIBUTE_WIKI)
+        self.assertIs(requirement_for(update_tool.fn), CAN_CONTRIBUTE_WIKI)
+        self.assertIs(requirement_for(review_tool.fn), CAN_CONTRIBUTE_WIKI)
+        self.assertIs(requirement_for(feedback_tool.fn), ANY_AUTHENTICATED)
         self.assertIn("Never treat chat history", mcp.instructions)

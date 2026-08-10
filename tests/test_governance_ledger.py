@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import asyncio
 import os
 from types import SimpleNamespace
@@ -25,6 +26,7 @@ from cygnus.governance import (
     create_audience_binding,
     list_draft_events,
 )
+from cygnus.governance.ledger import record_draft_update
 from cygnus.publish import (
     DurablePublishCommand,
     DurablePublishConflict,
@@ -135,6 +137,54 @@ class GovernanceLedgerUnitTests(unittest.TestCase):
         self.assertEqual(event.from_state, "in_review")
         self.assertEqual(event.to_state, "approved")
         self.assertEqual(fake.added, [event])
+        fake.flush.assert_awaited_once()
+
+    def test_record_draft_update_traces_content_version_and_action(self) -> None:
+        draft_id = uuid.uuid4()
+        content = "# Rebased billing policy\n\nUse the current threshold."
+        draft = SimpleNamespace(
+            id=draft_id,
+            version=4,
+            base_version=7,
+            revision_round=2,
+            content_md=content,
+        )
+        current = SimpleNamespace(sequence=3, to_state="in_review")
+        fake = _LedgerSession([None, current])
+
+        event = asyncio.run(
+            record_draft_update(
+                cast(AsyncSession, cast(object, fake)),
+                draft,
+                previous_draft_version=3,
+                from_state="in_review",
+                to_state="in_review",
+                actor_id=uuid.uuid4(),
+                action="branch_rebase",
+                reason="branch conflict rebase",
+                extra_payload={
+                    "branch_id": str(uuid.uuid4()),
+                    "base_page_version": 7,
+                },
+                lock=False,
+            )
+        )
+
+        self.assertEqual(event.event_type, GovernanceEventType.DRAFT_UPDATED.value)
+        self.assertEqual(event.sequence, 4)
+        self.assertEqual(
+            event.idempotency_key,
+            f"wiki-draft:{draft_id}:draft_updated:4",
+        )
+        self.assertEqual(event.payload["action"], "branch_rebase")
+        self.assertEqual(event.payload["previous_draft_version"], 3)
+        self.assertEqual(event.payload["draft_version"], 4)
+        self.assertEqual(event.payload["base_version"], 7)
+        self.assertEqual(
+            event.payload["content_sha256"],
+            hashlib.sha256(content.encode("utf-8")).hexdigest(),
+        )
+        self.assertEqual(event.reason, "branch conflict rebase")
         fake.flush.assert_awaited_once()
 
     def test_publish_command_normalizes_channels_and_fingerprints_request(self) -> None:

@@ -14,12 +14,11 @@ The intended relationship is:
 - **Cygnus** is the repository where that Arkon-enhanced support product is being defined
 
 Current engineering strategy (status as of 2026-08):
-- ✅ the Arkon full-port baseline, runability recovery (compose stack), and the post-P2 internalization / upstream-cutover lane are **complete** (Jira CYG-23, CYG-24, CYG-69–91; the stop-line is enforced by the guard-test suite and `scripts/upstream_cutover_gate.py`)
-- ✅ the first P3 support-verticalization story wave (CYG-6–17) is closed on typed rehearsal providers; the first durable governance write/publication ledger slice now lands real approved Wiki truth with append-only events, idempotent publications, and explicit pending propagation (CYG-98)
-- ✅ the Nanobot ↔ Cygnus governed session seam (CYG-92–96) is implemented: request-scoped query handoff, four truthful R0 governed retrieval tools, structured governance fallback, and continuity revalidation all keep session memory outside the knowledge-truth boundary
-- ✅ the governed audit read surface now exposes durable, permission-scoped review / approval / publish / recovery transitions with stable trace refs and truthful empty observations (CYG-99)
-- ✅ governance notifications now use migration-owned, recipient-scoped durable records with explicit unread/read lifecycle and committed-only external fan-out (CYG-100)
-- ▶ the current mainline moves to durable review ownership and the remaining provider convergence (CYG-104); fixture-backed pressure/drift/recovery inputs keep their rehearsal labels until their own durable providers land
+- P1/P2/P2.5—the Arkon full-port baseline, runability recovery, and post-P2 internalization/upstream-cutover lane—and the first support-verticalization waves are complete (CYG-6–17, CYG-23, CYG-24, CYG-69–91)
+- CYG-92–96 implements a request-scoped governed Nanobot ↔ Cygnus session seam that reloads and revalidates Cygnus truth on every turn without treating session memory as knowledge truth
+- CYG-98–105 plus CYG-108/109/111/112/113 provide durable ledger/audit, notifications, ticket/rewrite pressure, release/incident drift, audience bindings/conflicts, review assignments, source impact, publish/propagation, golden-path proof, durable publish tools, and durable draft/review tools
+- the shared session/MCP contract marks ten governed tools `ready`: four retrieval tools; `propose_knowledge_object`, `update_draft_object`, `request_review`, and `read_review_feedback`; `validate_publish_policy`; and `publish_knowledge_object`
+- only `list_drift_alerts` and `record_feedback_signal` remain explicitly `not_exposed`; unless Jira selects another issue, they are the next code-ready session-seam convergence lane
 - keep product-shell parity as a deferred non-roadmap lane by default
 - classify `auth / admin / wiki` shell candidates before any shell-parity implementation, and keep non-support pages isolated unless they directly unblock support verticalization
 
@@ -138,7 +137,7 @@ This package is intentionally focused on:
 - human/AI shared source of truth
 - request-scoped governed reads whose explicit observation coverage prevents empty risk arrays from being interpreted as healthy truth
 - a governed Nanobot ↔ Cygnus session seam that revalidates substrate truth on every turn and never treats session memory as knowledge truth
-- a governed Nanobot ↔ Cygnus write seam for policy validation and approval-backed durable publication, with explicit idempotency and propagation state
+- a governed Nanobot ↔ Cygnus draft/review and publish seam for the durable draft/review lifecycle, policy validation, and approval-backed publication, with explicit versioning, idempotency, and propagation state
 
 This package intentionally does **not** expand into:
 - GTM / pricing / sales collateral
@@ -152,8 +151,8 @@ Cygnus is no longer only a documentation package. It now combines:
 - Arkon full-port substrate import work
 - runability recovery work
 - Arkon internalization / upstream-cutover planning
-- early governance/control-plane prototype surfaces
+- durable governance/control-plane implementation surfaces
 
-So downstream readers should not treat this repo as docs-only, and should not assume the visual/product-story pack is the current engineering entry point. The migration mainline and first support-verticalization wave are complete; the governed session seam (CYG-92–96) sits on request-scoped substrate truth, the governance audit lane (CYG-99) reads durable ledger truth inside Wiki permission scope, and notifications (CYG-100) now read committed recipient-scoped records. The next delivery lane is durable review ownership plus the remaining provider convergence.
+So downstream readers should not treat this repo as docs-only, and should not assume the visual/product-story pack is the current engineering entry point. P1/P2/P2.5 and the first support-verticalization waves are complete; CYG-92–96 provides a request-scoped governed session seam that revalidates Cygnus truth.
 
-The governed plane currently exposes sparse, request-scoped truth: governance ledger transitions, committed notification records, and source errors are observable facts, while ticket pressure, release/incident drift, audience conflict, review assignment, and source-impact inference remain explicitly partial or unavailable rather than fixture-backed claims.
+CYG-98–105 plus CYG-108/109/111/112/113 now provide durable ledger/audit, notifications, ticket/rewrite pressure, release/incident drift, audience bindings/conflicts, review assignments, source impact, publish/propagation, golden-path proof, and durable publish and draft/review tools. The shared session/MCP contract marks ten governed tools `ready`: four retrieval tools; `propose_knowledge_object`, `update_draft_object`, `request_review`, and `read_review_feedback`; `validate_publish_policy`; and `publish_knowledge_object`. Only `list_drift_alerts` and `record_feedback_signal` remain explicitly `not_exposed`; they are the next code-ready session-seam convergence lane unless Jira selects another issue.

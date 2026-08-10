@@ -26,7 +26,7 @@ Cygnus now ships with an Arkon-shaped local Docker stack:
 - `minio`
 - `migrator` (one-shot schema + MinIO bucket bootstrap job)
 - `api` (`uvicorn cygnus.runtime.main:app`)
-- `worker` (`arq cygnus.runtime.worker.WorkerSettings`)
+- `worker` (`arq cygnus.runtime.worker.WorkerSettings`; drains durable AI pre-review outbox intents at startup and on its recovery cron)
 - `worker-skills` (`arq cygnus.runtime.worker.SkillWorkerSettings`)
 - `frontend` (built SPA served by Nginx, reverse-proxying `/api`, `/oauth`, `/mcp`, `/.well-known`)
 

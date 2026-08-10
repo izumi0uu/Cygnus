@@ -14,11 +14,12 @@ from cygnus.domain.objects import (
     TroubleshootingFlow,
 )
 from cygnus.evidence.records import FreshnessState
-from cygnus.integrations.governed_publish_tools import publish_tool_definitions
+from cygnus.integrations.governed_session_tools import (
+    governed_session_tool_definitions,
+)
 from cygnus.integrations.nanobot_tools import (
     GovernedKnowledgeTools,
     allowed_channels_for,
-    build_governed_tool_registry,
 )
 from cygnus.retrieval import SubstrateKnowledgeSnapshot
 from cygnus.retrieval.contracts import KnowledgeObjectHit, SourceTrace
@@ -204,10 +205,9 @@ class GovernedSessionBridge:
 
 
 def session_bridge_capabilities(
-    snapshot: SubstrateKnowledgeSnapshot,
+    _snapshot: SubstrateKnowledgeSnapshot,
 ) -> dict[str, object]:
-    registry = build_governed_tool_registry(snapshot)
-    definitions = (*registry.list_definitions(), *publish_tool_definitions())
+    definitions = governed_session_tool_definitions()
     return {
         "contract_version": "2026-08-10",
         "owners": {
@@ -238,10 +238,6 @@ def session_bridge_capabilities(
                 "reason": "durable_governance_command_adapter_required",
             }
             for name in (
-                "propose_knowledge_object",
-                "update_draft_object",
-                "request_review",
-                "read_review_feedback",
                 "list_drift_alerts",
                 "record_feedback_signal",
             )

@@ -83,7 +83,7 @@ Agent 必须保留以下纪律：
 ### 4.1.2 Governed session seam
 - `/api/session-bridge/query` 必须在当前用户权限范围内重新装载 substrate truth；前一轮 `governance_context` 只能用于判断 continuity，不能作为回答依据。
 - `session_memory_used_as_truth` 必须保持 `false`。audience/object/version/trace/freshness 变化时返回 `invalidated`；未变化时也必须重新检索后才能返回 `revalidated`。
-- runtime MCP 自动暴露四个真实可执行的 R0 governed retrieval tools，以及已接入 durable 内核的 `validate_publish_policy` / `publish_knowledge_object`；后者分别受作用域与 admin/approval gate 约束，其他未接入真实写治理链路的工具必须显式 `not_exposed`。
+- Runtime MCP 与 session capabilities 为四个 R0 governed retrieval tools、R1 `propose_knowledge_object` / `update_draft_object` / `request_review` 生命周期 adapter、R0 `read_review_feedback` 以及 durable-core `validate_publish_policy` / `publish_knowledge_object` 共用一份 adapter-definition contract。R1 tools 在 catalog 中受 contributor gate 约束，feedback 受 authenticated gate 约束；每个 state-changing adapter 都必须在服务端重新检查作用域内 identity、author authority、source visibility 与 optimistic draft version。只有 `list_drift_alerts` 和 `record_feedback_signal` 仍显式为 `not_exposed`。
 - no match、pending review、audience mismatch、stale/unknown evidence 与 source blindness 必须返回结构化 `fallback`、`restricted` 或 `escalate`，不得补写答案。
 
 ### 4.1.3 工程执行控制权

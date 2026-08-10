@@ -14,6 +14,9 @@ from cygnus.domain import (
     Visibility,
 )
 from cygnus.evidence.records import FreshnessState
+from cygnus.integrations.governed_session_tools import (
+    governed_session_tool_definitions,
+)
 from cygnus.integrations.session_bridge import (
     GovernanceDisposition,
     GovernedQueryRequest,
@@ -241,14 +244,23 @@ class GovernedSessionBridgeTests(unittest.TestCase):
                 "read_knowledge_object",
                 "search_support_evidence",
                 "get_source_trace",
+                "propose_knowledge_object",
+                "update_draft_object",
+                "request_review",
+                "read_review_feedback",
                 "validate_publish_policy",
                 "publish_knowledge_object",
             },
         )
+        self.assertEqual(
+            {tool["name"] for tool in governed_tools},
+            {definition.name for definition in governed_session_tool_definitions()},
+        )
         unavailable_names = {tool["name"] for tool in not_exposed}
-        self.assertNotIn("validate_publish_policy", unavailable_names)
-        self.assertNotIn("publish_knowledge_object", unavailable_names)
-        self.assertIn("request_review", unavailable_names)
+        self.assertEqual(
+            unavailable_names,
+            {"list_drift_alerts", "record_feedback_signal"},
+        )
         self.assertFalse(query_handoff["session_memory_is_truth"])
 
     def test_http_query_handoff_serializes_the_same_contract(self) -> None:

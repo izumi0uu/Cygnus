@@ -32,6 +32,7 @@ router = APIRouter()
 # Pydantic schemas
 # ---------------------------------------------------------------------------
 
+
 class BranchCreate(BaseModel):
     name: str
     description: Optional[str] = None
@@ -91,7 +92,10 @@ class ResolveConflictRequest(BaseModel):
 # Permission helpers
 # ---------------------------------------------------------------------------
 
-async def _can_create_branch(db: AsyncSession, user: Employee, scope_type: str, scope_id: Optional[uuid.UUID]) -> bool:
+
+async def _can_create_branch(
+    db: AsyncSession, user: Employee, scope_type: str, scope_id: Optional[uuid.UUID]
+) -> bool:
     if user.role == "admin":
         return True
     perms = _get_user_permissions(user)
@@ -104,7 +108,9 @@ async def _can_create_branch(db: AsyncSession, user: Employee, scope_type: str, 
     return has_any_permission(list(perms), "wiki", "write")
 
 
-async def _can_review_branch(db: AsyncSession, user: Employee, scope_type: str, scope_id: Optional[uuid.UUID]) -> bool:
+async def _can_review_branch(
+    db: AsyncSession, user: Employee, scope_type: str, scope_id: Optional[uuid.UUID]
+) -> bool:
     if user.role == "admin":
         return True
     perms = _get_user_permissions(user)
@@ -114,10 +120,14 @@ async def _can_review_branch(db: AsyncSession, user: Employee, scope_type: str, 
 async def _to_branch_response(db: AsyncSession, branch: WikiBranch) -> BranchResponse:
     # Resolve author/reviewer names
     author = await db.get(Employee, branch.author_id)
-    reviewer = await db.get(Employee, branch.reviewer_id) if branch.reviewer_id else None
+    reviewer = (
+        await db.get(Employee, branch.reviewer_id) if branch.reviewer_id else None
+    )
 
     # Count drafts
-    stmt = select(func.count(WikiPageDraft.id)).where(WikiPageDraft.branch_id == branch.id)
+    stmt = select(func.count(WikiPageDraft.id)).where(
+        WikiPageDraft.branch_id == branch.id
+    )
     count = (await db.execute(stmt)).scalar_one()
 
     return BranchResponse(
@@ -144,6 +154,7 @@ async def _to_branch_response(db: AsyncSession, branch: WikiBranch) -> BranchRes
 # Routes
 # ---------------------------------------------------------------------------
 
+
 @router.post("/wiki/branches", response_model=BranchResponse, status_code=201)
 async def create_branch(
     body: BranchCreate,
@@ -152,7 +163,9 @@ async def create_branch(
 ):
     """Create a new named contribution branch."""
     if not await _can_create_branch(db, user, body.scope_type, body.scope_id):
-        raise HTTPException(403, "You do not have permission to contribute in this scope")
+        raise HTTPException(
+            403, "You do not have permission to contribute in this scope"
+        )
 
     branch = WikiBranch(
         name=body.name.strip(),
@@ -272,7 +285,9 @@ async def close_branch(
     is_reviewer = await _can_review_branch(db, user, branch.scope_type, branch.scope_id)
 
     if not is_author and not is_reviewer:
-        raise HTTPException(403, "You do not have permission to close or cancel this branch")
+        raise HTTPException(
+            403, "You do not have permission to close or cancel this branch"
+        )
 
     try:
         await branch_service.close_wiki_branch(
@@ -304,7 +319,9 @@ async def merge_branch(
         raise HTTPException(404, "Contribution branch not found")
 
     if not await _can_review_branch(db, user, branch.scope_type, branch.scope_id):
-        raise HTTPException(403, "You do not have permission to merge documents in this scope")
+        raise HTTPException(
+            403, "You do not have permission to merge documents in this scope"
+        )
 
     try:
         await branch_service.merge_wiki_branch(
@@ -327,7 +344,9 @@ async def merge_branch(
     return await _to_branch_response(db, branch)
 
 
-@router.post("/wiki/branches/{branch_id}/rebase/{draft_id}", response_model=DraftResponse)
+@router.post(
+    "/wiki/branches/{branch_id}/rebase/{draft_id}", response_model=DraftResponse
+)
 async def rebase_draft(
     branch_id: uuid.UUID,
     draft_id: uuid.UUID,
@@ -354,7 +373,7 @@ async def rebase_draft(
         )
     except branch_service.InvalidTransition as e:
         message = str(e)
-        if "Only the branch author" in message:
+        if "Only the branch author" in message or "Only the original author" in message:
             raise HTTPException(403, message)
         raise HTTPException(400, message)
     except ValueError as e:

@@ -282,6 +282,7 @@ Nanobot 只消费结果，不拥有检索真相。
 ```json
 {
   "draft_id": "string",
+  "expected_version": 1,
   "patch": {
     "title": "optional-string",
     "content": "optional-string",
@@ -308,6 +309,7 @@ Nanobot 只消费结果，不拥有检索真相。
 {
   "draft_id": "string",
   "review_type": "content|policy|compliance|publish_readiness",
+  "expected_version": 2,
   "notes": "optional-string"
 }
 ```
@@ -336,6 +338,9 @@ Nanobot 只消费结果，不拥有检索真相。
 - reviewer notes
 - blocking issues
 - approval state
+
+### 当前 durable 并发行为
+`propose_knowledge_object` 现在会持久化真实的 `WikiPageDraft`，初始状态为 `draft`，并返回 `draft_version`。`update_draft_object` 与 `request_review` 都必须携带当前整数 `expected_version`；过期写入返回 `conflict` / `stale_draft`。成功的 review request 会经由 append-only ledger 将 durable draft 推进到 `in_review`，且只会重放完全相同的请求。
 
 ## 8. Tool Group C — Governance
 
@@ -554,35 +559,38 @@ Nanobot 只消费结果，不拥有检索真相。
 - 后续 workflow orchestration、eval、UI 都可以围绕这些 contract 继续长出来
 
 ## 13. 当前实现状态（与代码对账）
-本节对账 `cygnus/integrations/nanobot_tools.py` 与 `cygnus/integrations/governed_publish_tools.py` 的当前实现，明确区分：
-- **目标 contract**
-- **当前可调用接口**
-- **尚未兑现的治理语义**
-
-不要把本文件前半部分的目标接口，误读成当前代码已经全部完成。
+本节对账 `cygnus/integrations/nanobot_tools.py`、`cygnus/integrations/governed_draft_review_tools.py` 与 `cygnus/integrations/governed_publish_tools.py`，明确区分：
+- 上文的**目标 contract**
+- 下文当前可调用的 **durable interface**
+- 仍有意保持不可用的治理语义
 
 ### 13.1 当前真正已兑现的能力
 - **Group A — Retrieval（4/4）**：`search_knowledge_objects` / `read_knowledge_object` / `search_support_evidence` / `get_source_trace` 已接入 substrate-backed、请求级权限过滤的检索面。
-- **Group B — Draft/Review（2/4）**：`propose_knowledge_object`、`request_review` 仍只兑现接口形状；真实 draft/review 写路径尚未通过 governed session seam 暴露。
-- **Group C — Governance（3/4）**：`validate_publish_policy` 与 `publish_knowledge_object` 已通过 `cygnus/integrations/governed_publish_tools.py` 接入真实 durable draft、approval、audience-binding 与 publication 服务；`list_drift_alerts` 仍是既有 drift 读取面；`record_feedback_signal` 尚未接入。
+- **Group B — Draft/Review（4/4）**：`propose_knowledge_object` / `update_draft_object` / `request_review` / `read_review_feedback` 使用 durable `WikiPageDraft` 生命周期、review queue、source/evidence metadata、ledger event、notification path 与已作用域化的反馈真相。
+- **Group C — Governance（已暴露 2/4）**：`validate_publish_policy` 与 `publish_knowledge_object` 使用 durable draft、approval、audience-binding 与 publication 服务；`list_drift_alerts` 与 `record_feedback_signal` 仍有意不暴露。
 
-### 13.2 尚未兑现的目标接口
-- `update_draft_object`（Group B，R1）
-- `read_review_feedback`（Group B，R0）
+### 13.2 仍有意不暴露的目标接口
+- `list_drift_alerts`（Group C，R0）
 - `record_feedback_signal`（Group C，R1）
 
-这些名字已经进入目标 contract，但当前代码尚未提供对应的 governed session adapter。
+它们仍只是目标名称，因为当前 session seam 没有对应的 governed adapter；已有 fixture 或 observation surface 不得被表述为 session-domain tool truth。
 
-### 13.3 已兑现的 durable publish seam
+### 13.3 已兑现的 durable draft/review seam
+- `propose_knowledge_object` 会创建 typed、create-kind 的 `WikiPageDraft`，持久化在 `draft` 状态，仅记录 `proposal_created`，并保存 proposed object type、audience context、source refs、evidence refs 与 source IDs，供后续 materialization 使用。
+- `update_draft_object` 按 author/admin 作用域和 version 校验执行，绝不 publish；`needs_revision` 之后的修改会回到 durable `draft`，递增 draft content version，快照保存上一轮，并追加 `draft_updated`。
+- `request_review` 按 author/admin 作用域和 version 校验执行，经由 `review_requested` 推进 `draft -> in_review`，并在 `(draft_id, draft_version, revision_round)` 上写入唯一 durable pre-review outbox intent；请求 middleware 只能加速派发，worker startup/cron recovery 会清扫已提交 intent，deterministic ARQ job ID 使重放幂等，worker 会拒绝缺少两个 revision 字段的 job，stale、config-disabled 与 retry-exhausted 结果均保留显式 terminal state。相同 draft revision 只重放完全相同的 ledger request。
+- `read_review_feedback` 在投影前先以 SQL 对 draft 做作用域过滤，再仅向 author、具备资格的 reviewer 或 administrator 暴露 review state、durable feedback、blocking issues、approval ref 与 review-event history。隐藏与缺失的 draft/source IDs 都返回不含资源细节的 `not_found`。
+
+### 13.4 已兑现的 durable publish seam
 - `validate_publish_policy` 是请求级只读 adapter：重新加载当前 draft、typed object、approval ledger、ready sources、active audience bindings 与可选 audience/version 条件；越权对象统一隐藏为结构化 `not_found`。
 - `publish_knowledge_object` 只构造 `DurablePublishCommand` 并调用 `cygnus/publish/durable.py`；admin、approval、source readiness、binding、锁、幂等、ledger、publication 与 propagation 真相仍由既有治理内核负责。
 - 成功与 replay 都保留 `persisted:true`、`rehearsal:false`、publication/ledger/approval/command IDs 和 propagation records；传播成功不会从 publish 成功推导，初始状态仍为 `pending`。
 - `expected_version` 在 adapter 与锁定后的 durable core 双重校验，避免 stale write；`command_id` 重放返回原 publication，payload 改变则返回 conflict。
 
-### 13.4 边界提醒
-该切片兑现了 approval truth 的 durable publish 边界，但没有把 Cygnus 变成第二套 session loop：Nanobot 仍拥有会话与通用工具循环，Cygnus 只暴露 typed domain adapter。Draft/review/feedback 的未实现接口不能被 capability 文档表述为 ready。
+### 13.5 边界提醒
+该 seam 不会创建第二套 session loop 或 memory store。Nanobot 仍拥有 session continuity 与 general-purpose loop；Cygnus 拥有 typed draft versions、review state、permission checks、audit events、source/evidence traceability、approval truth 与 publication decisions。
 
-### 13.5 已落地的 governed observation 边界（CYG-97、CYG-101～104、CYG-108）
+### 13.6 已落地的 governed observation 边界（CYG-97、CYG-101～104、CYG-108）
 `/api/command-center`、`/api/review-intake`、`/api/drift` 与 `/api/source-blindness` 现在都从请求级、权限已过滤的 `GovernanceReadSnapshot` 读取；这些 runtime path 不得隐式调用 `sample_*` fixture。
 
 - 每个治理 risk surface 返回 `observation`：`ready` 表示覆盖完整，`partial` 表示同时列出已覆盖和缺失 detector，`unavailable` 表示 detector 尚未接入而不是“没有风险”。`reason` 和 signal 均为 machine code，由客户端 i18n 展示。
@@ -592,11 +600,11 @@ Nanobot 只消费结果，不拥有检索真相。
 
 CYG-101～104 与 CYG-108 已把工单/改写压力、发布/事故 drift、受众冲突、审阅分配和 source impact 接入持久化或持久化派生 provider。只有 detector 完整执行且没有未解析关系时才可返回 `ready`；例如未解析 audience binding 仍必须返回 `partial`，provider 异常必须作为 `5xx` 暴露，不能用空数组或绿色 UI 冒充健康状态。
 
-### 13.6 已落地的 governed session seam（CYG-92～96）
+### 13.7 已落地的 governed session seam（CYG-92～96）
 Nanobot 现在可以通过 `POST /api/session-bridge/query` 把 `request_ref`、可选 `session_ref`、support query、`audience_context` 与可选的前一轮 `governance_context` 交给 Cygnus。Cygnus 在请求级权限范围内重新装载 substrate-backed knowledge snapshot，并返回统一 envelope：`answer`、`source_trace`、`tool_trace`、`governance`、`continuity` 与下一轮可携带的 `governance_context`。
 
-- `GET /api/session-bridge/capabilities` 现在把六个已兑现的 governed tools 标为 ready：四个 R0 retrieval tools，加上请求级只读的 `validate_publish_policy` 与 admin/approval-gated 的 `publish_knowledge_object`；其余 draft/review/feedback tools 仍留在 `not_exposed`。
-- runtime MCP 注册同一份 durable publish adapter contract；`publish_knowledge_object` 通过 admin visibility gate 隐藏给非 admin，但 handler 仍在服务端保持显式权限校验。不能回退到 generic chat history、sample fixtures 或不受权限约束的全局索引。
+- `GET /api/session-bridge/capabilities` 与 Runtime MCP 消费同一份 shared adapter-definition contract，并将十个 governed tools 标为 ready：四个 R0 retrieval tools、R1 durable draft/review writes、已作用域化的 R0 `read_review_feedback`、请求级 `validate_publish_policy`，以及 administrator/approval-gated 的 `publish_knowledge_object`。只有 `list_drift_alerts` 与 `record_feedback_signal` 仍为 `not_exposed`。
+- Runtime MCP 为三个 R1 draft/review writes 使用 contributor visibility gate，为 feedback 使用 authenticated visibility gate；每个 adapter 都会在服务端重新检查 identity、作用域内 draft/source visibility、author/reviewer authority 与 optimistic version。`publish_knowledge_object` 仍对非 admin 隐藏。任何 governed adapter 都不得回退到 generic chat history、sample fixtures 或未作用域化的全局索引。
 - audience mismatch、pending review、stale/unknown freshness、source blindness 与 no-match 都返回结构化治理状态；分别收敛为 `restricted`、`escalate` 或 `fallback`，不能生成看似可直接外发的答案。
 - continuity 每轮都重新查询 Cygnus truth。受众、对象、版本、trace 或 freshness 改变时前一轮 context 必须失效；即使没有变化也只能标记为 revalidated，且始终返回 `session_memory_used_as_truth:false`。
 

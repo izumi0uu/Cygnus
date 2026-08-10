@@ -89,7 +89,10 @@ def resolve_retry_task(
     """
     if pipeline_phase in ("refine", "verify", "commit"):
         return "ingest_refine_task"
-    if pipeline_phase in ("map", "reduce", "plan_review") or current_status == "plan_ready":
+    if (
+        pipeline_phase in ("map", "reduce", "plan_review")
+        or current_status == "plan_ready"
+    ):
         return "ingest_map_reduce_task"
     return "ingest_url_task" if source_type == "url" else "ingest_file_task"
 
@@ -104,7 +107,10 @@ from cygnus.runtime.utils.progress import ProgressTracker  # noqa: E402
 # Ingestion tasks
 # ---------------------------------------------------------------------------
 
-async def enqueue_post_extraction_pipeline(source_id: str, has_images: bool) -> Optional[str]:
+
+async def enqueue_post_extraction_pipeline(
+    source_id: str, has_images: bool
+) -> Optional[str]:
     """Enqueue caption_images_task (if images) or ingest_map_reduce_task directly.
 
     Shared by ingest_file_task auto-proceed and the approve-extraction API.
@@ -162,7 +168,9 @@ async def enqueue_source_retry(
     return (job.job_id if job else None, task_name)
 
 
-async def enqueue_source_plan_regeneration(source_id: str, reviewer_note: str) -> Optional[str]:
+async def enqueue_source_plan_regeneration(
+    source_id: str, reviewer_note: str
+) -> Optional[str]:
     """Enqueue the source plan-regeneration worker path."""
     pool = await get_arq_pool()
     job = await pool.enqueue_job("regenerate_plan_task", source_id, reviewer_note)
@@ -183,7 +191,8 @@ async def finalize_verbatim_source(session, source, tracker) -> dict:
     mark_source_ready(
         source,
         progress_message=(
-            f"Verbatim: indexed {n_chunks} chunks, no wiki" if n_chunks
+            f"Verbatim: indexed {n_chunks} chunks, no wiki"
+            if n_chunks
             else "Verbatim: stored, no embedding model (keyword search only)"
         ),
     )
@@ -239,13 +248,18 @@ async def ingest_file_task(ctx: dict, source_id: str):
             vision_provider = None
             try:
                 from cygnus.runtime.ai.registry import ProviderRegistry
+
                 registry = ProviderRegistry(session)
                 vision_provider = await registry.get_vision()
             except Exception:
                 pass  # OCR fallback unavailable — continue without it
-            pages_data = await _extract_text_from_file(file_data, file_name, vision_provider=vision_provider)
+            pages_data = await _extract_text_from_file(
+                file_data, file_name, vision_provider=vision_provider
+            )
 
-            if not pages_data or not any((p.get("content") or "").strip() for p in pages_data):
+            if not pages_data or not any(
+                (p.get("content") or "").strip() for p in pages_data
+            ):
                 mark_source_runtime_error(
                     source,
                     error_message="Unable to extract text content",
@@ -254,8 +268,6 @@ async def ingest_file_task(ctx: dict, source_id: str):
                 return {"status": "error", "message": "No text content"}
 
             await tracker.update(25, "Text extraction complete")
-
-
 
             # --- Step 3: Extract images (40%) ---
             # Captioning is offloaded to caption_images_task (enqueued below) so
@@ -293,7 +305,10 @@ async def ingest_file_task(ctx: dict, source_id: str):
             token_count = count_tokens(full_text)
             source.extracted_token_count = token_count
             await session.commit()
-            await tracker.update(50, f"Outline: {len(source.outline_json or [])} top-level sections, ~{token_count} tokens")
+            await tracker.update(
+                50,
+                f"Outline: {len(source.outline_json or [])} top-level sections, ~{token_count} tokens",
+            )
 
             # --- Verbatim: skip MRP + approval gate, index raw chunks, done ---
             if source.preserve_verbatim:
@@ -312,10 +327,16 @@ async def ingest_file_task(ctx: dict, source_id: str):
                     f"Source {source_id} gated at awaiting_approval: {token_count} tokens "
                     f"({len(images)} images extracted, captioning deferred)"
                 )
-                return {"status": "awaiting_approval", "token_count": token_count, "images": len(images)}
+                return {
+                    "status": "awaiting_approval",
+                    "token_count": token_count,
+                    "images": len(images),
+                }
 
             await tracker.update(55, "Queuing compilation pipeline...")
-            job_id = await enqueue_post_extraction_pipeline(source_id, has_images=bool(images))
+            job_id = await enqueue_post_extraction_pipeline(
+                source_id, has_images=bool(images)
+            )
             mark_source_post_extraction_resume(
                 source,
                 has_images=bool(images),
@@ -324,8 +345,14 @@ async def ingest_file_task(ctx: dict, source_id: str):
             )
             await session.commit()
 
-            logger.info(f"Source {source_id} pre-processing done; next: {'caption→MRP' if images else 'MRP'}")
-            return {"status": "processing", "token_count": token_count, "images": len(images)}
+            logger.info(
+                f"Source {source_id} pre-processing done; next: {'caption→MRP' if images else 'MRP'}"
+            )
+            return {
+                "status": "processing",
+                "token_count": token_count,
+                "images": len(images),
+            }
 
         except BaseException as e:
             logger.error(f"Pre-processing failed for {source_id}: {e}")
@@ -335,6 +362,7 @@ async def ingest_file_task(ctx: dict, source_id: str):
             async def _mark_error_file() -> None:
                 from cygnus.runtime.database import async_session_factory as _sf
                 from cygnus.runtime.database.models import Source as _Source
+
                 async with _sf() as err_session:
                     src = await err_session.get(_Source, sid)
                     if src:
@@ -383,7 +411,9 @@ async def ingest_url_task(ctx: dict, source_id: str):
                 return {"status": "error"}
             pages_data = await _extract_text_from_url(source.url)
 
-            if not pages_data or not any((p.get("content") or "").strip() for p in pages_data):
+            if not pages_data or not any(
+                (p.get("content") or "").strip() for p in pages_data
+            ):
                 mark_source_runtime_error(
                     source,
                     error_message="Unable to fetch content from URL",
@@ -412,7 +442,9 @@ async def ingest_url_task(ctx: dict, source_id: str):
                     threshold=threshold,
                 )
                 await session.commit()
-                logger.info(f"URL source {source_id} gated at awaiting_approval: {token_count} tokens")
+                logger.info(
+                    f"URL source {source_id} gated at awaiting_approval: {token_count} tokens"
+                )
                 return {"status": "awaiting_approval", "token_count": token_count}
 
             await tracker.update(55, "Queuing compilation pipeline...")
@@ -425,7 +457,9 @@ async def ingest_url_task(ctx: dict, source_id: str):
             )
             await session.commit()
 
-            logger.info(f"URL source {source_id} pre-processing done, MRP task enqueued: {job_id or 'n/a'}")
+            logger.info(
+                f"URL source {source_id} pre-processing done, MRP task enqueued: {job_id or 'n/a'}"
+            )
             return {"status": "processing", "token_count": token_count}
 
         except BaseException as e:
@@ -435,6 +469,7 @@ async def ingest_url_task(ctx: dict, source_id: str):
             async def _mark_error_url() -> None:
                 from cygnus.runtime.database import async_session_factory as _sf
                 from cygnus.runtime.database.models import Source as _Source
+
                 async with _sf() as err_session:
                     src = await err_session.get(_Source, sid)
                     if src:
@@ -456,7 +491,9 @@ async def ingest_url_task(ctx: dict, source_id: str):
 # ---------------------------------------------------------------------------
 
 
-async def ingest_skill_task(ctx: dict, skill_id: str, version_id: str, file_path: str, file_name: str):
+async def ingest_skill_task(
+    ctx: dict, skill_id: str, version_id: str, file_path: str, file_name: str
+):
     """
     arq task: unzip skill package from disk buffer, store in MinIO, and extract metadata.
     """
@@ -469,13 +506,13 @@ async def ingest_skill_task(ctx: dict, skill_id: str, version_id: str, file_path
     sid = uuid.UUID(skill_id)
     vid = uuid.UUID(version_id)
     skill_name = file_name.rsplit(".", 1)[0]
-    
+
     logger.info(f"Starting ingestion for skill: {skill_name} ({skill_id})")
 
     async with async_session_factory() as session:
         skill = await session.get(Skill, sid)
         version = await session.get(SkillVersion, vid)
-        
+
         if not skill or not version:
             logger.error(f"Skill {skill_id} or Version {version_id} not found in DB")
             return
@@ -510,25 +547,35 @@ async def ingest_skill_task(ctx: dict, skill_id: str, version_id: str, file_path
                     with zipfile.ZipFile(zf_path) as local_zf:
                         with local_zf.open(member_name) as f_stream:
                             await storage_service.upload_stream_async(
-                                obj_name, f_stream, file_size, _guess_content_type(member_name)
+                                obj_name,
+                                f_stream,
+                                file_size,
+                                _guess_content_type(member_name),
                             )
 
             with zipfile.ZipFile(file_path) as zf:
                 for member in zf.infolist():
                     if member.is_dir():
                         continue
-                    
+
                     filename = member.filename
-                    
+
                     # [Security] Zip Slip check
-                    if filename.startswith("/") or filename.startswith("\\") or "../" in filename or "..\\" in filename:
-                        raise ValueError(f"Security risk: Zip Slip detected in {filename}")
-                        
+                    if (
+                        filename.startswith("/")
+                        or filename.startswith("\\")
+                        or "../" in filename
+                        or "..\\" in filename
+                    ):
+                        raise ValueError(
+                            f"Security risk: Zip Slip detected in {filename}"
+                        )
+
                     # [Security] File count check
                     file_count += 1
                     if file_count > MAX_FILE_COUNT:
                         raise ValueError(f"Too many files (exceeds {MAX_FILE_COUNT})")
-                        
+
                     # [Security] Zip Bomb check
                     total_size += member.file_size
                     if total_size > MAX_UNCOMPRESSED_SIZE:
@@ -537,25 +584,31 @@ async def ingest_skill_task(ctx: dict, skill_id: str, version_id: str, file_path
                     object_name = f"skills/{skill_id}/versions/{version.version_number}/content/{filename}"
                     target_readme = f"{skill_name}/SKILL.md".lower()
 
-                    if filename.lower() == target_readme or filename.lower().endswith("/skill.md"):
+                    if filename.lower() == target_readme or filename.lower().endswith(
+                        "/skill.md"
+                    ):
                         with zf.open(member) as f:
                             content = f.read()
-                        
+
                         storage_service.upload_file(
                             object_name=object_name,
                             data=content,
-                            content_type=_guess_content_type(filename)
+                            content_type=_guess_content_type(filename),
                         )
                     else:
                         upload_tasks.append(
-                            _upload_worker(file_path, filename, object_name, member.file_size)
+                            _upload_worker(
+                                file_path, filename, object_name, member.file_size
+                            )
                         )
 
             if upload_tasks:
                 await asyncio.gather(*upload_tasks)
 
             # 3. Calculate content-based hash (consistent with contribution workflow)
-            storage_path = f"skills/{skill_id}/versions/{version.version_number}/content/"
+            storage_path = (
+                f"skills/{skill_id}/versions/{version.version_number}/content/"
+            )
             file_hash = storage_service.calculate_prefix_hash(storage_path)
 
             # 4. Update DB with extracted metadata
@@ -564,12 +617,14 @@ async def ingest_skill_task(ctx: dict, skill_id: str, version_id: str, file_path
             skill.current_version = version.version_number
             skill.storage_path = storage_path
             skill.status = "active"
-            
+
             version.version_hash = file_hash
             version.storage_path = storage_path
-            
+
             await session.commit()
-            logger.success(f"Skill {skill_name} version {version.version_number} processed successfully")
+            logger.success(
+                f"Skill {skill_name} version {version.version_number} processed successfully"
+            )
 
         except Exception as e:
             logger.exception(f"Failed to process skill {skill_name}: {e}")
@@ -594,7 +649,7 @@ async def delete_skill_task(ctx: dict, skill_id: str):
     from cygnus.runtime.services.storage_service import storage_service
 
     sid = uuid.UUID(skill_id)
-    
+
     logger.info(f"Starting deletion task for skill: {skill_id}")
 
     async with async_session_factory() as session:
@@ -605,8 +660,13 @@ async def delete_skill_task(ctx: dict, skill_id: str):
 
         try:
             from sqlalchemy.orm import selectinload
+
             # 1. Fetch skill with contributions to get their storage paths
-            stmt = select(Skill).where(Skill.id == sid).options(selectinload(Skill.contributions))
+            stmt = (
+                select(Skill)
+                .where(Skill.id == sid)
+                .options(selectinload(Skill.contributions))
+            )
             res = await session.execute(stmt)
             skill = res.scalars().first()
             if not skill:
@@ -615,18 +675,22 @@ async def delete_skill_task(ctx: dict, skill_id: str):
             # 2. Delete files from MinIO for the skill itself
             prefix = f"skills/{skill_id}/"
             storage_service.delete_prefix(prefix)
-            
+
             # 3. Delete files for all associated contributions
             for contrib in skill.contributions:
                 if contrib.storage_path:
-                    logger.info(f"Deleting storage for contribution {contrib.id}: {contrib.storage_path}")
+                    logger.info(
+                        f"Deleting storage for contribution {contrib.id}: {contrib.storage_path}"
+                    )
                     storage_service.delete_prefix(contrib.storage_path)
 
             # 4. Delete skill from DB (cascades to SkillVersion and SkillContribution DB rows)
             await session.delete(skill)
             await session.commit()
-            
-            logger.success(f"Skill {skill_id} and all related assets (versions, contributions) deleted successfully")
+
+            logger.success(
+                f"Skill {skill_id} and all related assets (versions, contributions) deleted successfully"
+            )
 
         except Exception as e:
             logger.exception(f"Failed to delete skill {skill_id}: {e}")
@@ -639,13 +703,13 @@ async def cleanup_temp_uploads_cron(ctx: dict):
     """
     import os
     import time
-    
+
     temp_dir = "temp_uploads"
     if not os.path.exists(temp_dir):
         return
-        
+
     cutoff_time = time.time() - 3600  # 1 hour ago
-    
+
     for filename in os.listdir(temp_dir):
         file_path = os.path.join(temp_dir, filename)
         if os.path.isfile(file_path):
@@ -660,6 +724,7 @@ async def cleanup_temp_uploads_cron(ctx: dict):
 # ---------------------------------------------------------------------------
 # Embedding migration: re-embed every wiki page with a new model
 # ---------------------------------------------------------------------------
+
 
 async def reembed_all_pages_task(ctx: dict, job_id: str) -> None:
     """
@@ -713,9 +778,7 @@ async def reembed_all_pages_task(ctx: dict, job_id: str) -> None:
         # Provision a provider bound to the NEW spec (not the active one).
         registry = ProviderRegistry(session)
         try:
-            provider = await registry.get_embedding(
-                task="document", spec_id=spec.id
-            )
+            provider = await registry.get_embedding(task="document", spec_id=spec.id)
         except Exception as e:
             job.status = "failed"
             job.error_message = f"Provider init failed: {e}"
@@ -725,12 +788,14 @@ async def reembed_all_pages_task(ctx: dict, job_id: str) -> None:
 
         # Count work and mark running.
         total = (
-            await session.execute(
-                select(WikiPage.id).where(
-                    WikiPage.slug.notin_(["_index", "_log"])
+            (
+                await session.execute(
+                    select(WikiPage.id).where(WikiPage.slug.notin_(["_index", "_log"]))
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         job.total_pages = len(total)
         job.done_pages = 0
         job.status = "running"
@@ -753,10 +818,14 @@ async def reembed_all_pages_task(ctx: dict, job_id: str) -> None:
                 return
 
             pages = (
-                await session.execute(
-                    select(WikiPage).where(WikiPage.id.in_(batch_ids))
+                (
+                    await session.execute(
+                        select(WikiPage).where(WikiPage.id.in_(batch_ids))
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             inputs = [
                 embedding_input_text(p.title, p.summary or "", p.content_md or "")
                 for p in pages
@@ -791,13 +860,17 @@ async def reembed_all_pages_task(ctx: dict, job_id: str) -> None:
         from cygnus.retrieval.source_chunks import index_verbatim_source
 
         verbatim_sources = (
-            await session.execute(
-                select(Source).where(
-                    Source.preserve_verbatim.is_(True),
-                    Source.status == "ready",
+            (
+                await session.execute(
+                    select(Source).where(
+                        Source.preserve_verbatim.is_(True),
+                        Source.status == "ready",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for vs in verbatim_sources:
             try:
                 await index_verbatim_source(session, vs, spec_id=spec.id)
@@ -814,7 +887,9 @@ async def reembed_all_pages_task(ctx: dict, job_id: str) -> None:
         svc = ConfigService(session)
         await svc.set(ACTIVE_EMBEDDING_MODEL_KEY, spec.id)
         deleted = await cleanup_stale_embeddings(session, keep_spec_id=spec.id)
-        deleted += await cleanup_stale_source_chunk_embeddings(session, keep_spec_id=spec.id)
+        deleted += await cleanup_stale_source_chunk_embeddings(
+            session, keep_spec_id=spec.id
+        )
         job.status = "completed"
         job.finished_at = datetime.now(timezone.utc)
         await session.commit()
@@ -827,6 +902,7 @@ async def reembed_all_pages_task(ctx: dict, job_id: str) -> None:
 # ---------------------------------------------------------------------------
 # MRP arq tasks
 # ---------------------------------------------------------------------------
+
 
 async def ingest_map_reduce_task(ctx: dict, source_id: str):
     """
@@ -853,7 +929,9 @@ async def ingest_map_reduce_task(ctx: dict, source_id: str):
             logger.warning(f"Source {source_id} not found, it may have been deleted.")
             return
         if not source.full_text:
-            raise ValueError(f"Source {source_id} has no full_text — run pre-processing first")
+            raise ValueError(
+                f"Source {source_id} has no full_text — run pre-processing first"
+            )
 
         # Verbatim sources never run MRP, regardless of which task enqueued them
         # (e.g. a dept-change re-ingest). Index raw chunks and finish.
@@ -909,7 +987,9 @@ async def ingest_map_reduce_task(ctx: dict, source_id: str):
                     attach_source_runtime_job(src, job_id=job_id)
                     src.auto_recover_count = 0
                     await session.commit()
-                logger.info(f"Source {source_id} plan auto-approved, refine task enqueued")
+                logger.info(
+                    f"Source {source_id} plan auto-approved, refine task enqueued"
+                )
             else:
                 logger.info(f"Source {source_id} map-reduce result: {result}")
 
@@ -923,6 +1003,7 @@ async def ingest_map_reduce_task(ctx: dict, source_id: str):
             async def _mark_error_mr() -> None:
                 from cygnus.runtime.database import async_session_factory as _sf
                 from cygnus.runtime.database.models import Source as _Source
+
                 async with _sf() as err_session:
                     src = await err_session.get(_Source, sid)
                     if src:
@@ -1006,6 +1087,7 @@ async def ingest_refine_task(ctx: dict, source_id: str):
             async def _mark_error_refine() -> None:
                 from cygnus.runtime.database import async_session_factory as _sf
                 from cygnus.runtime.database.models import Source as _Source
+
                 async with _sf() as err_session:
                     src = await err_session.get(_Source, sid)
                     if src:
@@ -1034,24 +1116,34 @@ async def regenerate_plan_task(ctx: dict, source_id: str, user_note: str):
     from cygnus.runtime.ai.registry import ProviderRegistry
     from cygnus.runtime.database import async_session_factory
     from cygnus.runtime.database.models import Source, SourceCompilationPlan
-    from cygnus.review import fail_source_plan_regeneration, restore_source_plan_pending_review
+    from cygnus.review import (
+        fail_source_plan_regeneration,
+        restore_source_plan_pending_review,
+    )
 
     sid = uuid.UUID(source_id)
 
     async with async_session_factory() as session:
         from sqlalchemy.orm import selectinload
-        source = (await session.execute(
-            select(Source)
-            .options(selectinload(Source.knowledge_type))
-            .where(Source.id == sid)
-        )).scalar_one_or_none()
+
+        source = (
+            await session.execute(
+                select(Source)
+                .options(selectinload(Source.knowledge_type))
+                .where(Source.id == sid)
+            )
+        ).scalar_one_or_none()
         if not source:
             logger.warning(f"regenerate_plan_task: source {source_id} not found")
             return
 
-        plan = (await session.execute(
-            select(SourceCompilationPlan).where(SourceCompilationPlan.source_id == sid)
-        )).scalar_one_or_none()
+        plan = (
+            await session.execute(
+                select(SourceCompilationPlan).where(
+                    SourceCompilationPlan.source_id == sid
+                )
+            )
+        ).scalar_one_or_none()
         if not plan:
             logger.warning(f"regenerate_plan_task: no plan for source {source_id}")
             return
@@ -1073,13 +1165,20 @@ async def regenerate_plan_task(ctx: dict, source_id: str, user_note: str):
             if embedding_provider and (canonical_entities or canonical_concepts):
                 try:
                     reconciliation = await reconcile_with_kb(
-                        session, canonical_entities, canonical_concepts, embedding_provider, source, llm=llm,
+                        session,
+                        canonical_entities,
+                        canonical_concepts,
+                        embedding_provider,
+                        source,
+                        llm=llm,
                     )
                 except Exception as exc:
                     logger.warning(f"regenerate_plan_task: KB reconcile failed: {exc}")
 
             kt_name = source.knowledge_type.name if source.knowledge_type else None
-            kt_desc = source.knowledge_type.description if source.knowledge_type else None
+            kt_desc = (
+                source.knowledge_type.description if source.knowledge_type else None
+            )
             strategy = source.pipeline_strategy or "standard"
 
             new_plan_dict = await run_planning_call(
@@ -1095,13 +1194,17 @@ async def regenerate_plan_task(ctx: dict, source_id: str, user_note: str):
             )
 
             internal_keys = {
-                k: plan_json[k] for k in ("_claims", "_entities", "_concepts") if k in plan_json
+                k: plan_json[k]
+                for k in ("_claims", "_entities", "_concepts")
+                if k in plan_json
             }
             new_plan_dict.update(internal_keys)
 
             restore_source_plan_pending_review(plan, plan_json=new_plan_dict)
             await session.commit()
-            logger.success(f"regenerate_plan_task: plan refreshed for source {source_id}")
+            logger.success(
+                f"regenerate_plan_task: plan refreshed for source {source_id}"
+            )
         except Exception as exc:
             logger.exception(f"regenerate_plan_task failed for {source_id}: {exc}")
             # Restore plan to pending_review so user isn't stuck on 'regenerating'
@@ -1111,41 +1214,83 @@ async def regenerate_plan_task(ctx: dict, source_id: str, user_note: str):
                 await session.commit()
 
 
-async def sweep_stuck_ai_review_cron(ctx: dict):
-    """Periodic safety net: flip any draft stuck in ai_check_status='running'
-    for longer than the worker job_timeout back to 'skipped'.
+async def sweep_ai_pre_review_dispatch_cron(ctx: dict):
+    """Drain committed AI-review outbox intents on the worker schedule."""
+    _ = ctx
+    from cygnus.review.pre_review.dispatch import sweep_ai_pre_review_dispatches
 
-    A draft can get stuck if the worker process is SIGKILL/OOM-killed AFTER
-    committing status='running' but BEFORE finishing the checks — the
-    try/except in the runner only catches Python exceptions, not process
-    death. Without this sweep the UI shows a perpetual "running" spinner.
+    try:
+        count = await sweep_ai_pre_review_dispatches()
+    except Exception as exc:
+        logger.warning("AI pre-review outbox sweep failed: {}", exc)
+        return
+    if count:
+        logger.info("AI pre-review outbox sweep leased {} intent(s)", count)
+
+
+async def sweep_stuck_ai_review_cron(ctx: dict):
+    """Resolve worker-death states for drafts and their delivery intents.
+
+    A hard worker death can happen after the runner commits ``running`` but
+    before it writes a verdict.  Both the draft and its exact outbox row must
+    become explicit terminal truth so neither can spin forever.
     """
+    _ = ctx
     from datetime import datetime, timedelta, timezone
 
     from sqlalchemy import or_, update
 
     from cygnus.runtime.database import async_session_factory
-    from cygnus.runtime.database.models import WikiPageDraft
+    from cygnus.runtime.database.models import (
+        WikiDraftAiPreReviewDispatch,
+        WikiPageDraft,
+    )
 
-    # Anything still "running" beyond 2x the job timeout (or 30 min, whichever
-    # is larger) is almost certainly a dead worker. Use updated_at since the
-    # runner doesn't bump ai_checked_at until it writes the final verdict.
     timeout_sec = max(int(settings.worker_job_timeout) * 2, 1800)
-    cutoff = datetime.now(timezone.utc) - timedelta(seconds=timeout_sec)
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(seconds=timeout_sec)
 
     async with async_session_factory() as session:
-        stmt = (
+        stuck_ids = list(
+            (
+                await session.execute(
+                    select(WikiPageDraft.id).where(
+                        WikiPageDraft.ai_check_status == "running",
+                        or_(
+                            WikiPageDraft.updated_at < cutoff,
+                            WikiPageDraft.updated_at.is_(None),
+                        ),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not stuck_ids:
+            return
+
+        result = await session.execute(
             update(WikiPageDraft)
             .where(
+                WikiPageDraft.id.in_(stuck_ids),
                 WikiPageDraft.ai_check_status == "running",
-                or_(
-                    WikiPageDraft.updated_at < cutoff,
-                    WikiPageDraft.updated_at.is_(None),
-                ),
             )
             .values(ai_check_status="skipped")
         )
-        result = await session.execute(stmt)
+        await session.execute(
+            update(WikiDraftAiPreReviewDispatch)
+            .where(
+                WikiDraftAiPreReviewDispatch.draft_id.in_(stuck_ids),
+                WikiDraftAiPreReviewDispatch.dispatch_status == "running",
+            )
+            .values(
+                dispatch_status="failed",
+                terminal_reason="worker_timeout",
+                last_error="worker exceeded the AI pre-review timeout",
+                lease_expires_at=None,
+                completed_at=now,
+            )
+        )
         await session.commit()
         n = result.rowcount or 0
         if n:
@@ -1187,12 +1332,18 @@ async def sweep_stuck_processing_cron(ctx: dict):
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=timeout_sec)
 
     async with async_session_factory() as session:
-        rows = (await session.execute(
-            select(Source).where(
-                Source.status == "processing",
-                or_(Source.updated_at < cutoff, Source.updated_at.is_(None)),
+        rows = (
+            (
+                await session.execute(
+                    select(Source).where(
+                        Source.status == "processing",
+                        or_(Source.updated_at < cutoff, Source.updated_at.is_(None)),
+                    )
+                )
             )
-        )).scalars().all()
+            .scalars()
+            .all()
+        )
 
         if not rows:
             return
@@ -1244,12 +1395,18 @@ async def cleanup_orphan_awaiting_approval_cron(ctx: dict):
     cutoff = datetime.now(timezone.utc) - timedelta(hours=ttl_hours)
 
     async with async_session_factory() as session:
-        rows = (await session.execute(
-            select(Source).where(
-                Source.status == "awaiting_approval",
-                Source.updated_at < cutoff,
+        rows = (
+            (
+                await session.execute(
+                    select(Source).where(
+                        Source.status == "awaiting_approval",
+                        Source.updated_at < cutoff,
+                    )
+                )
             )
-        )).scalars().all()
+            .scalars()
+            .all()
+        )
 
         for src in rows:
             try:
@@ -1257,7 +1414,9 @@ async def cleanup_orphan_awaiting_approval_cron(ctx: dict):
                     try:
                         storage_service.delete_object(src.minio_key)
                     except Exception as exc:
-                        logger.warning(f"cleanup_orphan: minio delete failed for {src.id}: {exc}")
+                        logger.warning(
+                            f"cleanup_orphan: minio delete failed for {src.id}: {exc}"
+                        )
                 await session.delete(src)
             except Exception as exc:
                 logger.warning(f"cleanup_orphan: delete failed for {src.id}: {exc}")
@@ -1320,9 +1479,15 @@ async def caption_images_task(ctx: dict, source_id: str):
             logger.info("caption_images_task: no vision provider configured, skipping")
             return
 
-        rows = (await session.execute(
-            select(SourceImage).where(SourceImage.source_id == sid)
-        )).scalars().all()
+        rows = (
+            (
+                await session.execute(
+                    select(SourceImage).where(SourceImage.source_id == sid)
+                )
+            )
+            .scalars()
+            .all()
+        )
 
         # Snapshot only the fields we need — session closes after this block.
         image_records = [(row.id, row.minio_key, row.content_type) for row in rows]
@@ -1330,14 +1495,18 @@ async def caption_images_task(ctx: dict, source_id: str):
     if not image_records:
         return
 
-    logger.info(f"caption_images_task: captioning {len(image_records)} images for {source_id}")
+    logger.info(
+        f"caption_images_task: captioning {len(image_records)} images for {source_id}"
+    )
 
     MAX_CONCURRENCY = 4
     PER_IMAGE_TIMEOUT = 120
     sem = asyncio.Semaphore(MAX_CONCURRENCY)
     total = len(image_records)
 
-    async def _caption_one(image_id, minio_key: str, content_type: str, idx: int) -> None:
+    async def _caption_one(
+        image_id, minio_key: str, content_type: str, idx: int
+    ) -> None:
         async with sem:
             try:
                 img_bytes = storage_service.download_file(minio_key)
@@ -1349,23 +1518,33 @@ async def caption_images_task(ctx: dict, source_id: str):
                     "'Based on the image' or similar filler phrases."
                 )
                 caption = await asyncio.wait_for(
-                    vision_provider.analyze_image(img_bytes, content_type, prompt=vision_prompt),
+                    vision_provider.analyze_image(
+                        img_bytes, content_type, prompt=vision_prompt
+                    ),
                     timeout=PER_IMAGE_TIMEOUT,
                 )
                 # Each image gets its own session — no concurrent session access.
                 async with async_session_factory() as upd_session:
                     await upd_session.execute(
-                        sa_update(SourceImage).where(SourceImage.id == image_id).values(caption=caption)
+                        sa_update(SourceImage)
+                        .where(SourceImage.id == image_id)
+                        .values(caption=caption)
                     )
                     await upd_session.commit()
-                logger.info(f"caption_images_task: image {idx}/{total} done for {source_id}")
+                logger.info(
+                    f"caption_images_task: image {idx}/{total} done for {source_id}"
+                )
             except Exception as e:
-                logger.warning(f"caption_images_task: failed {minio_key}: {type(e).__name__}: {e}")
+                logger.warning(
+                    f"caption_images_task: failed {minio_key}: {type(e).__name__}: {e}"
+                )
 
-    await asyncio.gather(*[
-        _caption_one(img_id, mkey, ctype, idx)
-        for idx, (img_id, mkey, ctype) in enumerate(image_records, 1)
-    ])
+    await asyncio.gather(
+        *[
+            _caption_one(img_id, mkey, ctype, idx)
+            for idx, (img_id, mkey, ctype) in enumerate(image_records, 1)
+        ]
+    )
     logger.success(f"caption_images_task: {total} images processed for {source_id}")
 
     # Bake captions into source.full_text so MAP-phase LLM sees ![<caption>](image://uuid)
@@ -1376,22 +1555,36 @@ async def caption_images_task(ctx: dict, source_id: str):
         source = await session.get(Source, sid)
         if not source:
             return
-        rows = (await session.execute(
-            select(SourceImage).where(SourceImage.source_id == sid)
-        )).scalars().all()
-        caption_by_id = {str(r.id): (r.caption or "").replace("\n", " ").strip() for r in rows}
+        rows = (
+            (
+                await session.execute(
+                    select(SourceImage).where(SourceImage.source_id == sid)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        caption_by_id = {
+            str(r.id): (r.caption or "").replace("\n", " ").strip() for r in rows
+        }
 
         if source.full_text and caption_by_id:
+
             def _sub(match: re.Match) -> str:
                 uid = match.group(1)
                 cap = caption_by_id.get(uid, "")
                 return f"![{cap}](image://{uid})"
+
             # Replace any marker (empty or already-captioned) so re-runs are idempotent.
-            new_text = re.sub(r"!\[[^\]]*\]\(image://([0-9a-fA-F-]+)\)", _sub, source.full_text)
+            new_text = re.sub(
+                r"!\[[^\]]*\]\(image://([0-9a-fA-F-]+)\)", _sub, source.full_text
+            )
             if new_text != source.full_text:
                 source.full_text = new_text
                 await session.commit()
-                logger.info(f"caption_images_task: refreshed full_text with {len(caption_by_id)} captions for {source_id}")
+                logger.info(
+                    f"caption_images_task: refreshed full_text with {len(caption_by_id)} captions for {source_id}"
+                )
 
     # Chain into MAP-REDUCE (only now that captions are baked in).
     pool = await get_arq_pool()
@@ -1411,18 +1604,25 @@ async def caption_images_task(ctx: dict, source_id: str):
 
 
 async def ai_pre_review_draft_task(
-    ctx: dict, draft_id: str, expected_round: Optional[int] = None,
+    ctx: dict,
+    draft_id: str,
+    expected_round: Optional[int] = None,
+    expected_version: Optional[int] = None,
 ) -> None:
-    """Run all four AI pre-review layers on a wiki draft.
+    """Run all four AI pre-review layers on one exact draft content revision.
 
-    `expected_round` is the draft's revision_round at enqueue time — used by
-    the runner to drop stale verdicts when the author resubmits mid-flight.
-    Optional for backward-compat with jobs enqueued by older code.
-    Permissive: never blocks the draft regardless of verdict.
+    Jobs without both durable revision fields are rejected. Migration backfill
+    and the durable sweep replay any still-active revision with its deterministic
+    ARQ job ID rather than letting a legacy job write an unversioned verdict.
     """
     from cygnus.review.pre_review import run_async_checks
+
     _ = ctx
-    await run_async_checks(draft_id, expected_round=expected_round)
+    await run_async_checks(
+        draft_id,
+        expected_round=expected_round,
+        expected_version=expected_version,
+    )
 
 
 class WorkerSettings:
@@ -1447,6 +1647,12 @@ class WorkerSettings:
 
     cron_jobs = [
         cron(daily_stats_rollup_cron, hour=2, minute=0),
+        # Every 5 minutes — recover committed pre-review intents after an API
+        # crash or an enqueue acknowledgement window.
+        cron(
+            sweep_ai_pre_review_dispatch_cron,
+            minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55},
+        ),
         # Every 10 minutes — quick recovery from stuck 'running' AI reviews
         # caused by hard worker death (OOM, SIGKILL, container restart).
         cron(sweep_stuck_ai_review_cron, minute={0, 10, 20, 30, 40, 50}),
@@ -1460,6 +1666,15 @@ class WorkerSettings:
     @staticmethod
     async def on_startup(ctx: dict):
         logger.info("arq worker started — listening for ingestion jobs...")
+        from cygnus.review.pre_review.dispatch import sweep_ai_pre_review_dispatches
+
+        try:
+            count = await sweep_ai_pre_review_dispatches()
+        except Exception as exc:
+            logger.warning("AI pre-review startup sweep failed: {}", exc)
+        else:
+            if count:
+                logger.info("AI pre-review startup sweep leased {} intent(s)", count)
 
     @staticmethod
     async def on_shutdown(ctx: dict):
@@ -1477,10 +1692,8 @@ class SkillWorkerSettings:
     max_tries = 3
     retry_delay = 10
     health_check_interval = 30
-    
-    cron_jobs = [
-        cron(cleanup_temp_uploads_cron, minute=0)
-    ]
+
+    cron_jobs = [cron(cleanup_temp_uploads_cron, minute=0)]
 
     @staticmethod
     async def on_startup(ctx: dict):

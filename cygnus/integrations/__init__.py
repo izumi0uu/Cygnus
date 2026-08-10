@@ -13,6 +13,15 @@ from cygnus.integrations.governed_publish_tools import (
     publish_tool_bindings,
     publish_tool_definitions,
 )
+from cygnus.integrations.governed_draft_review_tools import (
+    GovernedDraftReviewTools,
+    draft_review_tool_bindings,
+    draft_review_tool_definitions,
+)
+from cygnus.integrations.governed_session_tools import (
+    governed_session_tool_definition,
+    governed_session_tool_definitions,
+)
 from cygnus.integrations.mcp_auth import (
     MCPAuthService,
     ResolvedIdentity,
@@ -38,6 +47,7 @@ __all__ = [
     "ContinuityDisposition",
     "GovernanceDisposition",
     "GovernedKnowledgeTools",
+    "GovernedDraftReviewTools",
     "GovernedPublishTools",
     "GovernedQueryRequest",
     "GovernedSessionBridge",
@@ -47,6 +57,10 @@ __all__ = [
     "ResolvedIdentity",
     "apply_scope_filter",
     "build_governed_tool_registry",
+    "draft_review_tool_bindings",
+    "draft_review_tool_definitions",
+    "governed_session_tool_definition",
+    "governed_session_tool_definitions",
     "publish_tool_bindings",
     "publish_tool_definitions",
     "dispatch_external",

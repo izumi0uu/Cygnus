@@ -28,22 +28,28 @@ state-machine ownership for governed knowledge changes belongs here.
 
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, Protocol
+from typing import Any, Optional, Protocol
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cygnus.governance import (
+from cygnus.governance.ledger import (
     GovernanceEventType,
+    GovernanceLedgerConflict,
     append_draft_event,
+    lock_draft_aggregate,
     record_created_draft,
+    record_draft_proposal,
+    record_draft_review_request,
+    record_draft_update,
+    transition_key,
 )
-from cygnus.governance.ledger import transition_key
 from cygnus.runtime.database.models import (
     Employee,
     Skill,
     SkillContribution,
     SkillContributionStatus,
+    GovernanceLedgerEvent,
     WikiDraftRound,
     WikiPage,
     WikiPageDraft,
@@ -52,51 +58,7 @@ from cygnus.runtime.database.models import (
 from cygnus.runtime.services import notification_service, wiki_service
 from cygnus.runtime.services.audit_service import log_audit
 from cygnus.runtime.services.notification_service import NotificationType
-
-
-async def _enqueue_ai_review(db, draft: WikiPageDraft) -> None:
-    """Queue the AI pre-review worker job for a draft.
-
-    All four check layers (L1 regex, L2 structural, L3 semantic, L4 LLM) run
-    inside the arq worker — submit path stays fast and unblockable.
-
-    Permissive: never raises. Skips entirely if `ai_pre_review_enabled` config
-    is "false". If enqueue fails (e.g. Redis down) status flips to "skipped"
-    so the UI never gets stuck on a transient state.
-    """
-    from loguru import logger
-
-    try:
-        from cygnus.runtime.services.config_service import ConfigService
-
-        cfg = ConfigService(db)
-        enabled = await cfg.get("ai_pre_review_enabled")
-        # Default ON. Only the literal string "false" disables it.
-        if enabled is not None and str(enabled).lower() == "false":
-            draft.ai_check_status = "skipped"
-            return
-    except Exception:
-        # Config service failure shouldn't break submit — proceed.
-        pass
-
-    draft.ai_check_status = "queued"
-    draft.ai_check_results = None
-
-    try:
-        from cygnus.runtime.worker import get_arq_pool
-
-        pool = await get_arq_pool()
-        # Pass revision_round so the worker can detect if the draft was
-        # resubmitted (round bumped) while it was running and skip its
-        # stale verdict instead of overwriting the newer one.
-        await pool.enqueue_job(
-            "ai_pre_review_draft_task",
-            str(draft.id),
-            int(draft.revision_round or 0),
-        )
-    except Exception as e:
-        logger.warning(f"AI review enqueue failed for draft {draft.id}: {e}")
-        draft.ai_check_status = "skipped"
+from cygnus.review.pre_review.dispatch import stage_ai_pre_review
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +78,18 @@ class DraftConflictError(Exception):
         )
 
 
+class DraftVersionConflict(Exception):
+    """Raised when a session draft write races a newer draft content version."""
+
+    def __init__(self, expected_version: int, actual_version: int):
+        self.expected_version = expected_version
+        self.actual_version = actual_version
+        super().__init__(
+            "Draft version conflict: "
+            f"expected {expected_version}, current {actual_version}."
+        )
+
+
 async def create_wiki_draft(
     session: AsyncSession,
     page_id: Optional[uuid.UUID],
@@ -123,24 +97,24 @@ async def create_wiki_draft(
     content_md: str,
     note: Optional[str] = None,
     source: str = "web_ui",
-    source_metadata: Optional[dict] = None,
+    source_metadata: Optional[dict[str, Any]] = None,
     base_version: Optional[int] = None,
     draft_kind: str = "edit",
-    suggested_metadata: Optional[dict] = None,
+    suggested_metadata: Optional[dict[str, Any]] = None,
+    submit_for_review: bool = True,
 ) -> WikiPageDraft:
-    """Create a pending draft for editor review.
+    """Persist a draft, optionally submitting it to the existing review queue.
 
-    For draft_kind='edit', page_id is required. For 'create', page_id stays
-    None and suggested_metadata holds the contributor's proposed slug/title/
-    page_type/knowledge_type_slugs/scope. The reviewer can override the
-    metadata at approve time before the page is materialised.
+    Legacy runtime callers retain the historical create-and-submit behavior.
+    Session-facing adapters can persist a real ``draft`` first, then invoke
+    :func:`submit_wiki_draft` when the author explicitly requests review.
     """
     draft = WikiPageDraft(
         page_id=page_id,
         author_id=author_id,
         content_md=content_md,
         note=note,
-        status="pending",
+        status="pending" if submit_for_review else "draft",
         source=source,
         source_metadata=source_metadata,
         base_version=base_version,
@@ -149,8 +123,191 @@ async def create_wiki_draft(
     )
     session.add(draft)
     await session.flush()
-    _ = await record_created_draft(session, draft)
+    if submit_for_review:
+        _ = await record_created_draft(session, draft)
+        await stage_ai_pre_review(session, draft)
+    else:
+        _ = await record_draft_proposal(session, draft)
     return draft
+
+
+def _draft_source_ids(draft: WikiPageDraft) -> list[uuid.UUID]:
+    """Read adapter-persisted source links without inventing source truth."""
+    metadata = draft.source_metadata or {}
+    raw_source_ids = metadata.get("source_ids")
+    if raw_source_ids is None:
+        return []
+    if not isinstance(raw_source_ids, list):
+        raise ValueError("draft source_ids must be a list")
+
+    source_ids: list[uuid.UUID] = []
+    for raw_source_id in raw_source_ids:
+        if isinstance(raw_source_id, uuid.UUID):
+            source_id = raw_source_id
+        elif isinstance(raw_source_id, str):
+            try:
+                source_id = uuid.UUID(raw_source_id)
+            except ValueError as exc:
+                raise ValueError("draft source_ids must contain UUIDs") from exc
+        else:
+            raise ValueError("draft source_ids must contain UUIDs")
+        if source_id not in source_ids:
+            source_ids.append(source_id)
+    return source_ids
+
+
+async def update_wiki_draft(
+    db: AsyncSession,
+    draft: WikiPageDraft,
+    author: Employee,
+    *,
+    expected_version: int,
+    content_md: str | None = None,
+    suggested_metadata: dict[str, Any] | None = None,
+    source_metadata: dict[str, Any] | None = None,
+) -> tuple[GovernanceLedgerEvent | None, bool]:
+    """Apply one version-checked draft edit without placing it in review."""
+    if expected_version < 1:
+        raise ValueError("expected_version must be positive")
+
+    await lock_draft_aggregate(db, draft.id)
+    await db.refresh(draft)
+    if draft.author_id != author.id and author.role != "admin":
+        raise InvalidTransition("Only the original author can update this draft.")
+    _assert_status(wiki_draft_adapter, draft, ("draft", "needs_revision"))
+    if draft.version != expected_version:
+        raise DraftVersionConflict(expected_version, draft.version)
+
+    changed = (
+        (content_md is not None and content_md != draft.content_md)
+        or (
+            suggested_metadata is not None
+            and suggested_metadata != draft.suggested_metadata
+        )
+        or source_metadata is not None
+        and source_metadata != draft.source_metadata
+    )
+    if not changed:
+        return None, True
+
+    previous_state = draft.status
+    previous_version = draft.version
+    if previous_state == "needs_revision":
+        db.add(
+            WikiDraftRound(
+                draft_id=draft.id,
+                round_no=draft.revision_round or 0,
+                content_md=draft.content_md,
+                author_note=draft.note,
+                reviewer_return_note=draft.last_returned_note,
+                ai_check_results=draft.ai_check_results,
+                submitted_at=datetime.now(timezone.utc),
+            )
+        )
+        wiki_draft_adapter.bump_revision_round(draft)
+        draft.last_returned_note = None
+        draft.ai_check_status = "pending"
+        draft.ai_check_results = None
+        draft.ai_checked_at = None
+        wiki_draft_adapter.set_status(draft, "draft")
+    if content_md is not None:
+        draft.content_md = content_md
+    if suggested_metadata is not None:
+        draft.suggested_metadata = suggested_metadata
+    if source_metadata is not None:
+        draft.source_metadata = source_metadata
+    draft.version += 1
+    await db.flush()
+    event = await record_draft_update(
+        db,
+        draft,
+        previous_draft_version=previous_version,
+        from_state=previous_state,
+        to_state="draft",
+        actor_id=author.id,
+        action="draft_update",
+        lock=False,
+    )
+    await log_audit(
+        db,
+        author,
+        "update",
+        wiki_draft_adapter.artifact_type,
+        str(draft.id),
+        reason=f"draft_version={draft.version}",
+    )
+    return event, False
+
+
+async def submit_wiki_draft(
+    db: AsyncSession,
+    draft: WikiPageDraft,
+    author: Employee,
+    *,
+    expected_version: int,
+    review_type: str,
+    notes: str | None,
+) -> tuple[GovernanceLedgerEvent, bool]:
+    """Move one authored staged draft into review with an idempotent ledger event."""
+    if expected_version < 1:
+        raise ValueError("expected_version must be positive")
+
+    await lock_draft_aggregate(db, draft.id)
+    await db.refresh(draft)
+    if draft.page_id is not None:
+        draft.page = await db.get(WikiPage, draft.page_id)
+    if draft.author_id != author.id and author.role != "admin":
+        raise InvalidTransition("Only the original author can request review.")
+    if draft.version != expected_version:
+        raise DraftVersionConflict(expected_version, draft.version)
+
+    try:
+        if draft.status == "pending":
+            event = await record_draft_review_request(
+                db,
+                draft,
+                actor_id=author.id,
+                reason=notes,
+                review_type=review_type,
+                expected_version=expected_version,
+                lock=False,
+            )
+            # A repeated request may recover a committed draft whose prior
+            # request ended before its post-commit dispatcher ran.
+            await stage_ai_pre_review(db, draft)
+            return event, True
+
+        _assert_status(wiki_draft_adapter, draft, ("draft",))
+        metadata = dict(draft.source_metadata or {})
+        metadata["review_type"] = review_type
+        draft.source_metadata = metadata
+        if notes is not None:
+            draft.note = notes
+        wiki_draft_adapter.set_status(draft, "pending")
+        await db.flush()
+        event = await record_draft_review_request(
+            db,
+            draft,
+            actor_id=author.id,
+            reason=notes,
+            review_type=review_type,
+            expected_version=expected_version,
+            lock=False,
+        )
+    except GovernanceLedgerConflict as exc:
+        raise InvalidTransition(str(exc)) from exc
+
+    await log_audit(
+        db,
+        author,
+        "submit",
+        wiki_draft_adapter.artifact_type,
+        str(draft.id),
+        reason=f"review_type={review_type}",
+    )
+    # notify_submitted stages committed-only Wiki pre-review and reviewer fan-out.
+    await notify_submitted(db, wiki_draft_adapter, draft, author)
+    return event, False
 
 
 class CreateDraftSlugConflict(Exception):
@@ -270,7 +427,7 @@ async def approve_wiki_draft(
             content_md=final_content,
             summary="",
             knowledge_type_slugs=list(kt_slugs),
-            source_ids=[],
+            source_ids=_draft_source_ids(draft),
             scope_type=scope_type,
             scope_id=scope_id,
         )
@@ -539,10 +696,10 @@ async def notify_submitted(
     actor: Employee,
 ) -> None:
     """Fire when a contribution first enters pending state."""
-    # Trigger AI pre-review on wiki drafts only — skill contributions have a
-    # different content model (file tree in MinIO) and aren't in scope yet.
+    # The intent is inserted in this lifecycle transaction; request middleware
+    # and worker recovery drain it only after commit.
     if isinstance(obj, WikiPageDraft):
-        await _enqueue_ai_review(db, obj)
+        await stage_ai_pre_review(db, obj)
 
     recipients = await adapter.reviewers(db, obj)
     await notification_service.notify_many(
@@ -621,10 +778,15 @@ async def resubmit_wiki_draft(
     what the previous submission looked like. Skill contributions snapshot via
     MinIO and aren't covered here.
     """
+    await lock_draft_aggregate(db, draft.id)
+    await db.refresh(draft)
     adapter = wiki_draft_adapter
     _assert_status(adapter, draft, ("needs_revision",))
-    if draft.author_id is not None and draft.author_id != author.id:
+    if draft.author_id != author.id and author.role != "admin":
         raise InvalidTransition("Only the original author can resubmit this draft.")
+
+    previous_state = draft.status
+    previous_version = draft.version
 
     # Snapshot the state being replaced — including the AI verdict so the
     # reviewer can compare AI checks across rounds.
@@ -649,22 +811,25 @@ async def resubmit_wiki_draft(
     draft.ai_check_results = None
     draft.ai_checked_at = None
     adapter.bump_revision_round(draft)
+    draft.version += 1
     adapter.set_status(draft, "pending")
-    await _enqueue_ai_review(db, draft)
-
-    await log_audit(
+    await db.flush()
+    _ = await record_draft_update(
         db,
-        author,
-        "resubmit",
-        adapter.artifact_type,
-        str(draft.id),
-        reason=f"round {draft.revision_round}",
+        draft,
+        previous_draft_version=previous_version,
+        from_state=previous_state,
+        to_state="draft",
+        actor_id=author.id,
+        action="resubmit",
+        reason=author_note,
+        lock=False,
     )
     _ = await append_draft_event(
         db,
         draft_id=draft.id,
         event_type=GovernanceEventType.REVIEW_RESUBMITTED,
-        from_state="needs_revision",
+        from_state="draft",
         to_state="in_review",
         actor_id=author.id,
         idempotency_key=transition_key(
@@ -674,6 +839,16 @@ async def resubmit_wiki_draft(
         ),
         reason=author_note,
         payload={"revision_round": draft.revision_round},
+        lock=False,
+    )
+    await stage_ai_pre_review(db, draft)
+    await log_audit(
+        db,
+        author,
+        "resubmit",
+        adapter.artifact_type,
+        str(draft.id),
+        reason=f"round {draft.revision_round};draft_version={draft.version}",
     )
     recipients = await adapter.reviewers(db, draft)
     await notification_service.notify_many(
@@ -818,14 +993,10 @@ async def withdraw(
     obj,
     author: Employee,
 ) -> None:
-    """pending|needs_revision → withdrawn. Author-only (admin override caller-side)."""
-    _assert_status(adapter, obj, ("pending", "needs_revision"))
+    """draft|pending|needs_revision → withdrawn. Author-only unless admin."""
+    _assert_status(adapter, obj, ("draft", "pending", "needs_revision"))
     previous_state = adapter.status(obj)
-    if (
-        adapter.author_id(obj) is not None
-        and adapter.author_id(obj) != author.id
-        and author.role != "admin"
-    ):
+    if author.role != "admin" and adapter.author_id(obj) != author.id:
         raise InvalidTransition(
             "Only the original author can withdraw this contribution."
         )

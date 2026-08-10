@@ -5,7 +5,7 @@ from enum import Enum
 from typing import cast
 import uuid
 
-from sqlalchemy import and_, exists, func, or_, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -17,7 +17,7 @@ from cygnus.runtime.database.models import (
     WikiPageDraft,
 )
 from cygnus.runtime.services.permission_engine import (
-    build_wiki_scope_clause,
+    build_wiki_draft_scope_clause,
     get_effective_permissions,
     get_scope_level,
 )
@@ -33,6 +33,7 @@ class GovernanceAuditPhase(str, Enum):
 _PHASE_EVENT_TYPES: dict[GovernanceAuditPhase, tuple[GovernanceEventType, ...]] = {
     GovernanceAuditPhase.REVIEW: (
         GovernanceEventType.PROPOSAL_CREATED,
+        GovernanceEventType.DRAFT_UPDATED,
         GovernanceEventType.REVIEW_REQUESTED,
         GovernanceEventType.CHANGES_REQUESTED,
         GovernanceEventType.REVIEW_RESUBMITTED,
@@ -59,11 +60,29 @@ _DETAIL_KEYS: dict[str, tuple[str, ...]] = {
         "draft_kind",
         "page_id",
         "base_version",
+        "draft_version",
         "revision_round",
         "source",
         "content_sha256",
     ),
-    GovernanceEventType.REVIEW_REQUESTED.value: ("revision_round", "source"),
+    GovernanceEventType.DRAFT_UPDATED.value: (
+        "action",
+        "previous_draft_version",
+        "draft_version",
+        "base_version",
+        "revision_round",
+        "content_sha256",
+        "branch_id",
+        "page_id",
+        "base_page_version",
+    ),
+    GovernanceEventType.REVIEW_REQUESTED.value: (
+        "draft_version",
+        "revision_round",
+        "source",
+        "review_type",
+        "expected_version",
+    ),
     GovernanceEventType.CHANGES_REQUESTED.value: ("revision_round",),
     GovernanceEventType.REVIEW_RESUBMITTED.value: ("revision_round",),
     GovernanceEventType.APPROVED.value: (
@@ -191,7 +210,6 @@ class GovernanceAuditEntry:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class GovernanceAuditPage:
-
     items: tuple[GovernanceAuditEntry, ...]
     total: int
     page: int
@@ -221,7 +239,9 @@ def governance_audit_phase(event_type: str) -> GovernanceAuditPhase:
     try:
         return _EVENT_PHASE[event_type]
     except KeyError as exc:
-        raise ValueError(f"unsupported governance ledger event_type={event_type}") from exc
+        raise ValueError(
+            f"unsupported governance ledger event_type={event_type}"
+        ) from exc
 
 
 def governance_audit_scope_clause(
@@ -235,44 +255,17 @@ def governance_audit_scope_clause(
     if scope_level is None:
         return GovernanceLedgerEvent.id.is_(None)
 
-    wiki_scope = build_wiki_scope_clause(current_user)
-    materialized_page_visible = exists(
-        select(WikiPage.id)
-        .correlate(GovernanceLedgerEvent)
-        .join(WikiPageDraft, WikiPageDraft.page_id == WikiPage.id)
-        .where(
-            WikiPageDraft.id == GovernanceLedgerEvent.draft_id,
-            *(() if wiki_scope is None else (wiki_scope,)),
-        )
-    )
-
-    suggested_scope_type = func.coalesce(
-        WikiPageDraft.suggested_metadata.op("->>")("scope_type"),
-        "global",
-    )
-    suggested_scope_id = WikiPageDraft.suggested_metadata.op("->>")("scope_id")
-    visible_unmaterialized_scope: ColumnElement[bool] = (
-        suggested_scope_type == "global"
-    )
-    department_ids = tuple(str(value) for value in current_user.department_ids)
-    if department_ids:
-        visible_unmaterialized_scope = or_(
-            visible_unmaterialized_scope,
-            and_(
-                suggested_scope_type == "department",
-                suggested_scope_id.in_(department_ids),
-            ),
-        )
-    unmaterialized_draft_visible = exists(
+    draft_scope = build_wiki_draft_scope_clause(current_user)
+    if draft_scope is None:
+        return None
+    return exists(
         select(WikiPageDraft.id)
         .correlate(GovernanceLedgerEvent)
         .where(
             WikiPageDraft.id == GovernanceLedgerEvent.draft_id,
-            WikiPageDraft.page_id.is_(None),
-            visible_unmaterialized_scope,
+            draft_scope,
         )
     )
-    return or_(materialized_page_visible, unmaterialized_draft_visible)
 
 
 async def list_governance_audit_events(
@@ -360,7 +353,6 @@ async def get_governance_audit_event(
     return governance_audit_entry(event=event, draft=draft, page=page, actor=actor)
 
 
-
 def governance_audit_entry(
     *,
     event: GovernanceLedgerEvent,
@@ -370,9 +362,7 @@ def governance_audit_entry(
 ) -> GovernanceAuditEntry:
     payload = event.payload or {}
     details = {
-        key: payload[key]
-        for key in _DETAIL_KEYS[event.event_type]
-        if key in payload
+        key: payload[key] for key in _DETAIL_KEYS[event.event_type] if key in payload
     }
     if event.event_type in {
         GovernanceEventType.APPROVED.value,
@@ -429,8 +419,7 @@ def _audit_filters(
         filters.append(
             GovernanceLedgerEvent.event_type.in_(
                 tuple(
-                    event_type.value
-                    for event_type in _PHASE_EVENT_TYPES[query.phase]
+                    event_type.value for event_type in _PHASE_EVENT_TYPES[query.phase]
                 )
             )
         )
@@ -444,7 +433,6 @@ def _audit_filters(
                 select(WikiPageDraft.id)
                 .correlate(GovernanceLedgerEvent)
                 .where(
-
                     WikiPageDraft.id == GovernanceLedgerEvent.draft_id,
                     WikiPageDraft.page_id == query.page_id,
                 )

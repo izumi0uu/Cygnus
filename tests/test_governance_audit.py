@@ -178,7 +178,9 @@ class GovernanceAuditContractTests(unittest.TestCase):
             GovernanceAuditPhase.APPROVAL,
         )
 
-    def test_projection_whitelists_trace_fields_and_excludes_internal_payload(self) -> None:
+    def test_projection_whitelists_trace_fields_and_excludes_internal_payload(
+        self,
+    ) -> None:
         payload = _entry().to_dict()
         details = cast(dict[str, object], payload["details"])
         resource = cast(dict[str, object], payload["resource"])
@@ -209,6 +211,39 @@ class GovernanceAuditContractTests(unittest.TestCase):
 
         self.assertEqual(payload["phase"], "approval")
         self.assertEqual(details["approval_ref"], str(_EVENT_ID))
+
+    def test_draft_update_projection_exposes_rebase_integrity_trace(self) -> None:
+        event = _event(
+            GovernanceEventType.DRAFT_UPDATED,
+            payload={
+                "action": "branch_rebase",
+                "previous_draft_version": 1,
+                "draft_version": 2,
+                "base_version": 3,
+                "revision_round": 0,
+                "content_sha256": "content-digest",
+                "branch_id": "branch-1",
+                "page_id": str(_PAGE_ID),
+                "base_page_version": 3,
+                "unrelated": "must-not-leak",
+            },
+        )
+        event.from_state = "in_review"
+        event.to_state = "in_review"
+        payload = governance_audit_entry(
+            event=event,
+            draft=_draft(),
+            page=_page(),
+            actor=_employee(role="admin"),
+        ).to_dict()
+        details = cast(dict[str, object], payload["details"])
+
+        self.assertEqual(payload["phase"], "review")
+        self.assertEqual(details["action"], "branch_rebase")
+        self.assertEqual(details["draft_version"], 2)
+        self.assertEqual(details["content_sha256"], "content-digest")
+        self.assertEqual(details["base_page_version"], 3)
+        self.assertNotIn("unrelated", details)
 
     def test_ready_observation_stays_explicit_when_scoped_result_is_empty(self) -> None:
         payload = GovernanceAuditPage(items=(), total=0, page=1, page_size=50).to_dict()
@@ -241,7 +276,9 @@ class GovernanceAuditContractTests(unittest.TestCase):
         self.assertIn("suggested_metadata ->> 'scope_type'", sql)
         self.assertIn(str(_DEPARTMENT_ID), sql)
 
-    def test_admin_is_unrestricted_and_missing_wiki_permission_is_always_false(self) -> None:
+    def test_admin_is_unrestricted_and_missing_wiki_permission_is_always_false(
+        self,
+    ) -> None:
         self.assertIsNone(governance_audit_scope_clause(_employee(role="admin")))
 
         with patch(
@@ -266,9 +303,7 @@ class GovernanceAuditContractTests(unittest.TestCase):
         fake_session = AsyncMock()
         fake_session.execute.side_effect = [
             _ScalarResult(1),
-            _RowsResult(
-                [(_event(), _draft(), _page(), _employee(role="admin"))]
-            ),
+            _RowsResult([(_event(), _draft(), _page(), _employee(role="admin"))]),
         ]
 
         result = asyncio.run(
@@ -320,7 +355,6 @@ class GovernanceAuditApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
 
-
     def test_list_route_serializes_durable_contract_and_filters(self) -> None:
         client = self.api_client(authenticated=True)
         page = GovernanceAuditPage(items=(_entry(),), total=1, page=1, page_size=10)
@@ -329,9 +363,7 @@ class GovernanceAuditApiTests(unittest.TestCase):
             "list_governance_audit_events",
             AsyncMock(return_value=page),
         ) as list_events:
-            response = client.get(
-                "/api/governance/audit?phase=publish&page_size=10"
-            )
+            response = client.get("/api/governance/audit?phase=publish&page_size=10")
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()

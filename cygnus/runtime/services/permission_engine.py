@@ -20,7 +20,7 @@ Workspace Realm:
 
 from typing import Optional
 
-from sqlalchemy import and_, exists, or_, select
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.runtime.database.models import (
@@ -29,11 +29,13 @@ from cygnus.runtime.database.models import (
     Source,
     SourceDepartment,
     WikiPage,
+    WikiPageDraft,
 )
 
 # ---------------------------------------------------------------------------
 # Permission string parsing
 # ---------------------------------------------------------------------------
+
 
 def parse_permission(perm: str) -> tuple[str, str, str]:
     """Parse 'resource:action:scope' → (resource, action, scope).
@@ -45,9 +47,11 @@ def parse_permission(perm: str) -> tuple[str, str, str]:
     return perm, "", ""
 
 
-def has_permission(permissions: list[str], resource: str, action: str, scope: str = "any") -> bool:
+def has_permission(
+    permissions: list[str], resource: str, action: str, scope: str = "any"
+) -> bool:
     """Check if a permission list contains the required permission.
-    
+
     scope = "any" → matches either own_dept or all
     scope = "all" → only matches :all
     scope = "own_dept" → matches :own_dept or :all
@@ -68,7 +72,9 @@ def has_any_permission(permissions: list[str], resource: str, action: str) -> bo
     return has_permission(permissions, resource, action, "any")
 
 
-def get_scope_level(permissions: list[str], resource: str, action: str) -> Optional[str]:
+def get_scope_level(
+    permissions: list[str], resource: str, action: str
+) -> Optional[str]:
     """Get the effective scope level for a resource:action.
     Returns 'all', 'own_dept', or None.
     """
@@ -84,6 +90,7 @@ def get_scope_level(permissions: list[str], resource: str, action: str) -> Optio
 # ---------------------------------------------------------------------------
 # Global Realm: Document access
 # ---------------------------------------------------------------------------
+
 
 async def can_access_document(
     db: AsyncSession,
@@ -118,8 +125,9 @@ async def can_access_document(
     # Check if source is global (no departments) or belongs to any of the
     # user's departments.
     dept_result = await db.execute(
-        select(SourceDepartment.department_id)
-        .where(SourceDepartment.source_id == source.id)
+        select(SourceDepartment.department_id).where(
+            SourceDepartment.source_id == source.id
+        )
     )
     source_dept_ids = {row[0] for row in dept_result.all()}
 
@@ -164,6 +172,54 @@ def build_wiki_scope_clause(user: Employee, action: str = "read"):
     return WikiPage.id.is_(None)
 
 
+def build_wiki_draft_scope_clause(user: Employee, action: str = "read"):
+    """Return the SQL visibility predicate for materialized and staged drafts.
+
+    Unmaterialized create drafts carry their intended Wiki scope in
+    ``suggested_metadata``. Keeping that condition in SQL gives hidden and
+    absent draft IDs the same result before any adapter projection occurs.
+    """
+    if user.role == "admin":
+        return None
+
+    permissions = _get_user_permissions(user)
+    scope_level = get_scope_level(list(permissions), "wiki", action)
+    if scope_level == "all":
+        return None
+    if scope_level is None:
+        return WikiPageDraft.id.is_(None)
+
+    wiki_scope = build_wiki_scope_clause(user, action)
+    materialized_visible = exists(
+        select(WikiPage.id).where(
+            WikiPage.id == WikiPageDraft.page_id,
+            *(() if wiki_scope is None else (wiki_scope,)),
+        )
+    )
+    suggested_scope_type = func.coalesce(
+        WikiPageDraft.suggested_metadata.op("->>")("scope_type"),
+        "global",
+    )
+    suggested_scope_id = WikiPageDraft.suggested_metadata.op("->>")("scope_id")
+    unmaterialized_visible = suggested_scope_type == "global"
+    department_ids = tuple(str(value) for value in user.department_ids)
+    if department_ids:
+        unmaterialized_visible = or_(
+            unmaterialized_visible,
+            and_(
+                suggested_scope_type == "department",
+                suggested_scope_id.in_(department_ids),
+            ),
+        )
+    return or_(
+        materialized_visible,
+        and_(
+            WikiPageDraft.page_id.is_(None),
+            unmaterialized_visible,
+        ),
+    )
+
+
 def build_document_scope_clause(user: Employee, action: str = "read"):
     """Return the SQL clause limiting source rows to the user's governed scope.
 
@@ -203,6 +259,7 @@ def build_document_scope_clause(user: Employee, action: str = "read"):
 # ---------------------------------------------------------------------------
 # Global Realm: AI Skill access
 # ---------------------------------------------------------------------------
+
 
 async def can_access_skill(
     db: AsyncSession,
@@ -257,17 +314,18 @@ def build_skill_filter(user: Employee, action: str = "read"):
     return True, None
 
 
-
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_user_permissions(user: Employee) -> set[str]:
     """Extract effective permissions from user's fixed system role."""
-    from cygnus.runtime.services.permissions import ALL_PERMISSIONS, ROLE_PERMISSIONS_MAP
-    
+    from cygnus.runtime.services.permissions import (
+        ALL_PERMISSIONS,
+        ROLE_PERMISSIONS_MAP,
+    )
+
     if user.role == "admin" or getattr(user, "global_role", None) == "admin":
         return set(ALL_PERMISSIONS)
 
@@ -280,5 +338,6 @@ def _get_user_permissions(user: Employee) -> set[str]:
 def get_effective_permissions(user: Employee) -> list[str]:
     """Public version — returns sorted list for API responses."""
     from cygnus.runtime.services.permissions import ALL_PERMISSIONS
+
     perms = _get_user_permissions(user)
     return sorted(p for p in perms if p in ALL_PERMISSIONS)

@@ -8,6 +8,7 @@ from pathlib import Path
 SERVICE_BASELINE_FILES = [
     "cygnus/runtime/services/__init__.py",
     "cygnus/review/pre_review/__init__.py",
+    "cygnus/review/pre_review/dispatch.py",
     "cygnus/review/pre_review/llm_checks.py",
     "cygnus/review/pre_review/regex_checks.py",
     "cygnus/review/pre_review/runner.py",
@@ -107,6 +108,10 @@ SERVICE_BASELINE_MODULES = {
         "delete_page_cascade",
     ],
     "cygnus.review.pre_review.llm_checks": ["run"],
+    "cygnus.review.pre_review.dispatch": [
+        "stage_ai_pre_review",
+        "dispatch_pending_ai_pre_reviews",
+    ],
     "cygnus.review.pre_review.regex_checks": ["run"],
     "cygnus.review.pre_review.runner": [
         "CheckResult",
@@ -122,14 +127,19 @@ SERVICE_BASELINE_MODULES = {
 class ServicesBaselineImportTests(unittest.TestCase):
     def test_services_baseline_files_exist(self) -> None:
         for relative_path in SERVICE_BASELINE_FILES:
-            self.assertTrue(Path(relative_path).is_file(), f"missing mirrored service file: {relative_path}")
+            self.assertTrue(
+                Path(relative_path).is_file(),
+                f"missing mirrored service file: {relative_path}",
+            )
 
     def test_services_baseline_files_are_syntax_valid(self) -> None:
         for relative_path in SERVICE_BASELINE_FILES:
             source = Path(relative_path).read_text(encoding="utf-8")
             compile(source, relative_path, "exec")
 
-    def test_services_baseline_topology_is_exactly_the_upstream_module_family(self) -> None:
+    def test_services_baseline_topology_is_exactly_the_upstream_module_family(
+        self,
+    ) -> None:
         expected = {Path(path).relative_to("cygnus") for path in SERVICE_BASELINE_FILES}
         actual = {
             path.relative_to("cygnus")
@@ -150,7 +160,9 @@ class ServicesBaselineImportTests(unittest.TestCase):
 
             for symbol in symbols:
                 value = getattr(module, symbol, None)
-                self.assertIsNotNone(value, f"{module_name} missing upstream service symbol: {symbol}")
+                self.assertIsNotNone(
+                    value, f"{module_name} missing upstream service symbol: {symbol}"
+                )
                 self.assertTrue(
                     inspect.isclass(value) or callable(value),
                     f"{module_name}.{symbol} should remain an importable service entrypoint",
@@ -164,7 +176,9 @@ class ServicesBaselineImportTests(unittest.TestCase):
             self.assertNotIn("import app.", source)
             self.assertNotIn(" app.", source)
 
-    def test_service_baseline_keeps_runtime_substrate_and_review_pre_review_split(self) -> None:
+    def test_service_baseline_keeps_runtime_substrate_and_review_pre_review_split(
+        self,
+    ) -> None:
         baselines = {Path(path).as_posix() for path in SERVICE_BASELINE_FILES}
 
         for relative_path in [

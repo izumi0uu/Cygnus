@@ -893,7 +893,7 @@ async def withdraw_draft(
     db: AsyncSession = Depends(get_db),
     user: Employee = Depends(get_current_user),
 ):
-    """Author withdraws a pending or needs_revision draft. Admin override allowed."""
+    """Author withdraws a draft, pending, or needs_revision contribution. Admin override allowed."""
     draft = await _load_draft(db, draft_id)
     if draft.page_id:
         page = await db.get(WikiPage, draft.page_id)

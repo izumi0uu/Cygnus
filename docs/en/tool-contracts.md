@@ -282,6 +282,7 @@ Update a draft object without publishing it.
 ```json
 {
   "draft_id": "string",
+  "expected_version": 1,
   "patch": {
     "title": "optional-string",
     "content": "optional-string",
@@ -308,6 +309,7 @@ Submit a draft into the review queue.
 {
   "draft_id": "string",
   "review_type": "content|policy|compliance|publish_readiness",
+  "expected_version": 2,
   "notes": "optional-string"
 }
 ```
@@ -336,6 +338,9 @@ Read review feedback for a draft.
 - reviewer notes
 - blocking issues
 - approval state
+
+### Current durable concurrency behavior
+`propose_knowledge_object` now persists a real `WikiPageDraft` in `draft` state and returns `draft_version`. Both `update_draft_object` and `request_review` require that current integer as `expected_version`; stale writes return `conflict` / `stale_draft`. A successful review request moves the durable draft into `in_review` through the append-only ledger and can replay only the identical request.
 
 ## 8. Tool Group C — Governance
 
@@ -554,35 +559,38 @@ It is successful if:
 - later workflow orchestration, eval, and UI work can grow on top of the same contract surface
 
 ## 13. Current implementation status (reconciled with code)
-This section reconciles the current implementations in `cygnus/integrations/nanobot_tools.py` and `cygnus/integrations/governed_publish_tools.py` and explicitly separates:
-- the **target contract**
-- the **currently callable interface**
-- the **governance semantics not yet fulfilled**
-
-The goal is to avoid reading the target contract above as if the code were already complete.
+This section reconciles `cygnus/integrations/nanobot_tools.py`, `cygnus/integrations/governed_draft_review_tools.py`, and `cygnus/integrations/governed_publish_tools.py`. It explicitly separates:
+- the **target contract** above
+- the **currently callable durable interface** below
+- governance semantics that remain intentionally unavailable
 
 ### 13.1 Capabilities actually fulfilled today
 - **Group A — Retrieval (4/4):** `search_knowledge_objects`, `read_knowledge_object`, `search_support_evidence`, and `get_source_trace` use the substrate-backed, request-scoped governed retrieval surface.
-- **Group B — Draft/Review (2/4):** `propose_knowledge_object` and `request_review` still provide interface shape only; real draft/review writes are not exposed through the governed session seam.
-- **Group C — Governance (3/4):** `validate_publish_policy` and `publish_knowledge_object` now use `cygnus/integrations/governed_publish_tools.py` and the durable draft, approval, audience-binding, and publication services; `list_drift_alerts` remains the existing drift read surface; `record_feedback_signal` is not wired.
+- **Group B — Draft/Review (4/4):** `propose_knowledge_object`, `update_draft_object`, `request_review`, and `read_review_feedback` use the durable `WikiPageDraft` lifecycle, review queue, source/evidence metadata, ledger events, notification path, and scoped feedback truth.
+- **Group C — Governance (2/4 exposed):** `validate_publish_policy` and `publish_knowledge_object` use durable draft, approval, audience-binding, and publication services. `list_drift_alerts` and `record_feedback_signal` remain intentionally unexposed.
 
-### 13.2 Target interfaces not yet fulfilled
-- `update_draft_object` (Group B, R1)
-- `read_review_feedback` (Group B, R0)
+### 13.2 Target interfaces intentionally not exposed
+- `list_drift_alerts` (Group C, R0)
 - `record_feedback_signal` (Group C, R1)
 
-These names are part of the target contract, but the current code does not provide a governed session adapter for them.
+They remain target names only because this session seam has no corresponding governed adapter. Their existing fixture or observation surfaces must not be represented as session-domain tool truth.
 
-### 13.3 Implemented durable publish seam
+### 13.3 Implemented durable draft/review seam
+- `propose_knowledge_object` creates a typed create-kind `WikiPageDraft` in durable `draft` state, records only `proposal_created`, and stores the proposed object type, audience context, source refs, evidence refs, and source IDs for later materialization.
+- `update_draft_object` is author/admin scoped and version-checked. It never publishes; a revision after `needs_revision` returns to durable `draft`, increments the draft content version, snapshots the prior round, and appends `draft_updated`.
+- `request_review` is author/admin scoped and version-checked. It transitions `draft -> in_review` through `review_requested`, writes a unique durable pre-review outbox intent keyed by `(draft_id, draft_version, revision_round)`, and lets request middleware only accelerate delivery; worker startup/cron recovery drains committed intents with deterministic ARQ job IDs and rejects jobs without both revision fields, while stale, config-disabled, and retry-exhausted outcomes remain explicit terminal state. Replays only an identical ledger request for the same draft revision.
+- `read_review_feedback` scopes the draft in SQL before projection, then exposes review state, durable feedback, blocking issues, approval ref, and review-event history only to the author, an eligible reviewer, or an administrator. Hidden and absent draft/source IDs both return `not_found` without resource details.
+
+### 13.4 Implemented durable publish seam
 - `validate_publish_policy` is a request-scoped read adapter. It reloads the current draft, typed object, approval ledger, ready sources, active audience bindings, and optional audience/version conditions; out-of-scope objects are returned as structured `not_found`.
 - `publish_knowledge_object` only constructs `DurablePublishCommand` and delegates to `cygnus/publish/durable.py`; the existing governance kernel remains authoritative for admin and approval gates, source readiness, bindings, locks, idempotency, ledger, publication, and propagation.
 - Success and replay preserve `persisted:true`, `rehearsal:false`, publication/ledger/approval/command IDs, and propagation records. Publish success never implies downstream sync; initial propagation remains `pending`.
 - `expected_version` is checked in both the adapter and the locked durable core to prevent stale writes. Reusing a `command_id` returns the original publication; changing the payload returns a conflict.
 
-### 13.4 Boundary reminder
-This slice substantiates the durable publish boundary for approval truth without turning Cygnus into a second session loop. Nanobot still owns the session and general tool loop; Cygnus exposes typed domain adapters only. Unimplemented draft/review/feedback interfaces must not be described as ready.
+### 13.5 Boundary reminder
+This seam does not create a second session loop or memory store. Nanobot still owns session continuity and the general-purpose loop; Cygnus owns typed draft versions, review state, permission checks, audit events, source/evidence traceability, approval truth, and publication decisions.
 
-### 13.5 Implemented governed-observation boundary (CYG-97, CYG-101–104, CYG-108)
+### 13.6 Implemented governed-observation boundary (CYG-97, CYG-101–104, CYG-108)
 `/api/command-center`, `/api/review-intake`, `/api/drift`, and `/api/source-blindness` now read from a request-scoped, permission-filtered `GovernanceReadSnapshot`; those runtime paths must not implicitly call `sample_*` fixtures.
 
 - Every governance-risk surface returns `observation`: `ready` means complete coverage, `partial` names both covered and missing detectors, and `unavailable` means a detector is not connected—not that there is no risk. Reasons and signals are machine codes rendered through client i18n.
@@ -592,11 +600,11 @@ This slice substantiates the durable publish boundary for approval truth without
 
 CYG-101–104 and CYG-108 connect ticket/rewrite pressure, release/incident drift, audience conflict, review assignment, and source impact to persisted or persistently derived providers. A surface may return `ready` only after its detectors run completely with no unresolved relationship; an unresolved audience binding still requires `partial`, and provider failures must surface as `5xx` rather than an empty array or green UI.
 
-### 13.6 Implemented governed session seam (CYG-92–96)
+### 13.7 Implemented governed session seam (CYG-92–96)
 Nanobot can now hand `request_ref`, optional `session_ref`, the support query, `audience_context`, and an optional prior `governance_context` to Cygnus through `POST /api/session-bridge/query`. Cygnus reloads the substrate-backed knowledge snapshot inside the request permission scope and returns one envelope containing `answer`, `source_trace`, `tool_trace`, `governance`, `continuity`, and the next portable `governance_context`.
 
-- `GET /api/session-bridge/capabilities` now marks six fulfilled governed tools as ready: the four R0 retrieval tools plus request-scoped read-only `validate_publish_policy` and the administrator/approval-gated `publish_knowledge_object`; remaining draft/review/feedback tools stay `not_exposed`.
-- Runtime MCP registers the same durable publish adapter contract. `publish_knowledge_object` is hidden from non-admins by the visibility gate, while its server-side permission check remains authoritative. It must not fall back to generic chat history, sample fixtures, or an unscoped global index.
+- `GET /api/session-bridge/capabilities` and Runtime MCP consume the same shared adapter-definition contract. They mark ten governed tools ready: four R0 retrieval tools, the R1 durable draft/review write tools, scoped R0 `read_review_feedback`, request-scoped `validate_publish_policy`, and administrator/approval-gated `publish_knowledge_object`. Only `list_drift_alerts` and `record_feedback_signal` remain `not_exposed`.
+- Runtime MCP uses contributor visibility gates for the three R1 draft/review writes and an authenticated visibility gate for feedback; every adapter re-checks identity, scoped draft/source visibility, author/reviewer authority, and optimistic version server-side. `publish_knowledge_object` remains hidden from non-admins. No governed adapter may fall back to generic chat history, sample fixtures, or an unscoped global index.
 - Audience mismatch, pending review, stale or unknown freshness, source blindness, and no match all return structured governance states. They converge to `restricted`, `escalate`, or `fallback` rather than fabricating an externally usable answer.
 - Continuity re-queries Cygnus truth on every turn. An audience, object, version, trace, or freshness change invalidates the prior context; an unchanged context is only `revalidated`, and the response always carries `session_memory_used_as_truth:false`.
 

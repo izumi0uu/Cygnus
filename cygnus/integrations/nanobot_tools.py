@@ -180,76 +180,25 @@ def build_governed_tool_registry(snapshot: SubstrateKnowledgeSnapshot) -> ToolRe
     return registry
 
 
+def knowledge_tool_definitions() -> tuple[ToolDefinition, ...]:
+    """Return the stable governed retrieval contract without binding request state."""
+    return _KNOWLEDGE_TOOL_DEFINITIONS
+
+
 def tool_bindings(
     tools: GovernedKnowledgeTools,
 ) -> tuple[tuple[ToolDefinition, Any], ...]:
-    return (
-        (
-            ToolDefinition(
-                name="search_knowledge_objects",
-                description="Search Cygnus knowledge objects with audience-aware filtering.",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string"},
-                        "audience_context": {"type": "object"},
-                        "object_types": {"type": "array", "items": {"type": "string"}},
-                        "limit": {"type": "integer"},
-                        "include_unpublished": {"type": "boolean"},
-                    },
-                    "required": ["query"],
-                },
-                risk_level="R0",
+    return tuple(
+        zip(
+            knowledge_tool_definitions(),
+            (
+                tools.search_knowledge_objects,
+                tools.read_knowledge_object,
+                tools.search_support_evidence,
+                tools.get_source_trace,
             ),
-            tools.search_knowledge_objects,
-        ),
-        (
-            ToolDefinition(
-                name="read_knowledge_object",
-                description="Read a single Cygnus knowledge object with optional trace summary.",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "id_or_slug": {"type": "string"},
-                        "include_variants": {"type": "boolean"},
-                        "include_trace": {"type": "boolean"},
-                    },
-                    "required": ["id_or_slug"],
-                },
-                risk_level="R0",
-            ),
-            tools.read_knowledge_object,
-        ),
-        (
-            ToolDefinition(
-                name="search_support_evidence",
-                description="Search support evidence without collapsing it to object truth.",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string"},
-                        "filters": {"type": "object"},
-                        "limit": {"type": "integer"},
-                    },
-                    "required": ["query"],
-                },
-                risk_level="R0",
-            ),
-            tools.search_support_evidence,
-        ),
-        (
-            ToolDefinition(
-                name="get_source_trace",
-                description="Return the governed source trace for a Cygnus knowledge object.",
-                parameters={
-                    "type": "object",
-                    "properties": {"object_id": {"type": "string"}},
-                    "required": ["object_id"],
-                },
-                risk_level="R0",
-            ),
-            tools.get_source_trace,
-        ),
+            strict=True,
+        )
     )
 
 
@@ -286,3 +235,61 @@ def allowed_channels_for(object_: KnowledgeObject) -> tuple[str, ...]:
     if isinstance(object_, EscalationRoute):
         return ("copilot", "queue-sidebar")
     return ()
+
+
+_KNOWLEDGE_TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
+    ToolDefinition(
+        name="search_knowledge_objects",
+        description="Search Cygnus knowledge objects with audience-aware filtering.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "audience_context": {"type": "object"},
+                "object_types": {"type": "array", "items": {"type": "string"}},
+                "limit": {"type": "integer"},
+                "include_unpublished": {"type": "boolean"},
+            },
+            "required": ["query"],
+        },
+        risk_level="R0",
+    ),
+    ToolDefinition(
+        name="read_knowledge_object",
+        description="Read a single Cygnus knowledge object with optional trace summary.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "id_or_slug": {"type": "string"},
+                "include_variants": {"type": "boolean"},
+                "include_trace": {"type": "boolean"},
+            },
+            "required": ["id_or_slug"],
+        },
+        risk_level="R0",
+    ),
+    ToolDefinition(
+        name="search_support_evidence",
+        description="Search support evidence without collapsing it to object truth.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "filters": {"type": "object"},
+                "limit": {"type": "integer"},
+            },
+            "required": ["query"],
+        },
+        risk_level="R0",
+    ),
+    ToolDefinition(
+        name="get_source_trace",
+        description="Return the governed source trace for a Cygnus knowledge object.",
+        parameters={
+            "type": "object",
+            "properties": {"object_id": {"type": "string"}},
+            "required": ["object_id"],
+        },
+        risk_level="R0",
+    ),
+)

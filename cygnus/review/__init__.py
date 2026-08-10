@@ -15,11 +15,19 @@ from cygnus.review.branches import (
     rebase_wiki_branch_draft,
     submit_wiki_branch,
 )
-from cygnus.review.briefing import OwnerState, ReviewCommandBrief, ReviewRiskItem, ReviewRiskType, WhyNowFrame, risk_item_from_proposal
+from cygnus.review.briefing import (
+    OwnerState,
+    ReviewCommandBrief,
+    ReviewRiskItem,
+    ReviewRiskType,
+    WhyNowFrame,
+    risk_item_from_proposal,
+)
 from cygnus.review.contributions import (
     ContributionAdapter,
     CreateDraftSlugConflict,
     DraftConflictError,
+    DraftVersionConflict,
     InvalidTransition,
     SkillContributionAdapter,
     WikiDraftAdapter,
@@ -32,10 +40,12 @@ from cygnus.review.contributions import (
     reject_skill_contribution,
     reject_wiki_draft,
     request_changes,
-    submit_skill_contribution,
     resubmit_skill_contribution,
     resubmit_wiki_draft,
     skill_contribution_adapter,
+    submit_skill_contribution,
+    submit_wiki_draft,
+    update_wiki_draft,
     wiki_draft_adapter,
     withdraw,
 )
@@ -50,8 +60,16 @@ from cygnus.review.drift import (
     build_drift_governance_surface,
     get_drift_governance_surface,
 )
-from cygnus.review.drilldown import ReviewQueueDrilldownQuery, ReviewQueueDrilldownSurface, get_review_queue_drilldown
-from cygnus.review.fixtures import sample_review_bundles, sample_review_command_brief, sample_review_command_surface
+from cygnus.review.drilldown import (
+    ReviewQueueDrilldownQuery,
+    ReviewQueueDrilldownSurface,
+    get_review_queue_drilldown,
+)
+from cygnus.review.fixtures import (
+    sample_review_bundles,
+    sample_review_command_brief,
+    sample_review_command_surface,
+)
 from cygnus.review.home import ReviewHomeQuery, get_review_home_surface
 from cygnus.review.intake import (
     PressureIntakeBundle,
@@ -66,7 +84,13 @@ from cygnus.review.intake import (
     get_pressure_intake_review_queue_drilldown,
     sample_pressure_intake_records,
 )
-from cygnus.review.item import AudienceImpact, EvidenceStrength, ReviewItemDetailSurface, RiskFrame, build_review_item_detail_surface
+from cygnus.review.item import (
+    AudienceImpact,
+    EvidenceStrength,
+    ReviewItemDetailSurface,
+    RiskFrame,
+    build_review_item_detail_surface,
+)
 from cygnus.review.pressure import (
     PressureCommand,
     PressureCommandType,
@@ -114,9 +138,18 @@ from cygnus.review.source_blindness import (
     build_source_failure_observations,
     get_source_blindness_surface,
 )
-from cygnus.review.providers import build_review_command_surface, build_review_command_surface_from_bundles
+from cygnus.review.providers import (
+    build_review_command_surface,
+    build_review_command_surface_from_bundles,
+)
 from cygnus.review.queries import build_review_command_brief, summarize_review_items
-from cygnus.review.service import ProposalBundle, ReviewSignal, assemble_review_command_brief, build_review_risk_item, rank_review_item
+from cygnus.review.service import (
+    ProposalBundle,
+    ReviewSignal,
+    assemble_review_command_brief,
+    build_review_risk_item,
+    rank_review_item,
+)
 from cygnus.review.surface import (
     ObservationState,
     PriorityStackCard,
@@ -130,6 +163,7 @@ __all__ = [
     "ContributionAdapter",
     "CreateDraftSlugConflict",
     "DraftConflictError",
+    "DraftVersionConflict",
     "InvalidTransition",
     "SkillContributionAdapter",
     "WikiDraftAdapter",
@@ -141,7 +175,9 @@ __all__ = [
     "merge_wiki_branch",
     "rebase_wiki_branch_draft",
     "submit_skill_contribution",
+    "submit_wiki_draft",
     "submit_wiki_branch",
+    "update_wiki_draft",
     "withdraw",
     "wiki_draft_adapter",
     "skill_contribution_adapter",

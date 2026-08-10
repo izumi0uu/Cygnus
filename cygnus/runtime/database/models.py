@@ -60,11 +60,22 @@ class SkillContributionStatus(str, PyEnum):
 # column was historically `String(20)` with free-form values; centralising the
 # set here lets services validate transitions consistently.
 WIKI_DRAFT_STATUSES: tuple[str, ...] = (
+    "draft",
     "pending",
     "needs_revision",
     "withdrawn",
     "approved",
     "rejected",
+)
+AI_PRE_REVIEW_DISPATCH_STATUSES: tuple[str, ...] = (
+    "pending",
+    "dispatching",
+    "enqueued",
+    "running",
+    "completed",
+    "disabled",
+    "stale",
+    "failed",
 )
 
 
@@ -516,11 +527,17 @@ class WikiPageDraft(Base):
     # version of the target page when this draft was authored; compared at
     # approve-time to detect mid-air collisions (None = pre-migration drafts).
     base_version: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Monotonic draft-content version used by session-facing optimistic writes.
+    # It is distinct from ``base_version``, which protects the target WikiPage.
+    version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
     # Increments each time the author resubmits after needs_revision.
     revision_round: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # Reviewer's note when sending the draft back for revisions.
     last_returned_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    # pending | running | passed | warned | failed — set by AI pre-review worker.
+    # pending | queued | running | passed | warned | failed | skipped — set by
+    # pre-review dispatch and worker.
     ai_check_status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="pending"
     )
@@ -530,7 +547,7 @@ class WikiPageDraft(Base):
         DateTime(timezone=True),
         nullable=True,
     )
-    # pending | needs_revision | withdrawn | approved | rejected
+    # draft | pending | needs_revision | withdrawn | approved | rejected
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     # web_ui | mcp_claude_desktop | mcp_claude_code | mcp_other | api_direct
     source: Mapped[str] = mapped_column(String(40), nullable=False, default="web_ui")
@@ -574,6 +591,99 @@ class WikiPageDraft(Base):
         Index("ix_wiki_drafts_status", "status"),
         Index("ix_wiki_drafts_author_id", "author_id"),
         Index("ix_wiki_drafts_branch_id", "branch_id"),
+    )
+
+
+class WikiDraftAiPreReviewDispatch(Base):
+    """Durable delivery intent for one exact Wiki draft revision.
+
+    The row is written in the lifecycle transaction and owns every ARQ
+    acknowledgement/recovery state.  It is deliberately specific to AI
+    pre-review rather than a general-purpose queue abstraction.
+    """
+
+    __tablename__ = "wiki_draft_ai_pre_review_dispatches"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    draft_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("wiki_page_drafts.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    draft_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    revision_round: Mapped[int] = mapped_column(Integer, nullable=False)
+    # This is stable for the triple above and is passed as ARQ's _job_id.
+    job_id: Mapped[str] = mapped_column(String(180), nullable=False)
+    # pending | dispatching | enqueued | running | completed | disabled |
+    # stale | failed
+    dispatch_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default="pending"
+    )
+    # Number of delivery leases claimed. Enqueue exceptions consume the retry
+    # budget; deterministic ARQ duplicate responses are acknowledgements.
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    terminal_reason: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    next_attempt_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    lease_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    enqueued_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "draft_id",
+            "draft_version",
+            "revision_round",
+            name="uq_wiki_draft_ai_pre_review_dispatch_revision",
+        ),
+        UniqueConstraint(
+            "job_id",
+            name="uq_wiki_draft_ai_pre_review_dispatch_job",
+        ),
+        CheckConstraint(
+            "dispatch_status IN ('pending', 'dispatching', 'enqueued', "
+            "'running', 'completed', 'disabled', 'stale', 'failed')",
+            name="ck_wiki_draft_ai_pre_review_dispatch_status",
+        ),
+        CheckConstraint(
+            "(dispatch_status IN ('pending', 'dispatching', 'enqueued', 'running') "
+            "AND terminal_reason IS NULL) OR "
+            "(dispatch_status IN ('completed', 'disabled', 'stale', 'failed') "
+            "AND terminal_reason IS NOT NULL)",
+            name="ck_wiki_draft_ai_pre_review_dispatch_terminal_reason",
+        ),
+        CheckConstraint(
+            "attempt_count >= 0",
+            name="ck_wiki_draft_ai_pre_review_dispatch_attempts",
+        ),
+        CheckConstraint(
+            "draft_version >= 1 AND revision_round >= 0",
+            name="ck_wiki_draft_ai_pre_review_dispatch_revision_values",
+        ),
+        Index(
+            "ix_wiki_draft_ai_pre_review_dispatch_recovery",
+            "dispatch_status",
+            "next_attempt_at",
+            "lease_expires_at",
+        ),
     )
 
 

@@ -6,6 +6,7 @@ Ownership:
 - callers provide the storage adapter so substrate does not depend on runtime wiring
 """
 
+from collections.abc import MutableMapping, Sequence
 import io
 from typing import Optional, Protocol
 
@@ -17,7 +18,9 @@ MIN_IMAGE_BYTES = 2048
 
 
 class SourceImageStorage(Protocol):
-    def upload_file(self, object_name: str, data: bytes, content_type: str) -> None: ...
+    def upload_file(
+        self, object_name: str, data: bytes, content_type: str
+    ) -> str | None: ...
 
 
 def _mime_from_ext(ext: str) -> str:
@@ -36,6 +39,7 @@ def _mime_from_ext(ext: str) -> str:
 
 class ImageInfo:
     """Metadata about an extracted image."""
+
     def __init__(
         self,
         minio_key: str,
@@ -101,17 +105,21 @@ def extract_images_from_pdf(
                     content_type=content_type,
                 )
 
-                images.append(ImageInfo(
-                    minio_key=object_name,
-                    page_number=page_num + 1,
-                    image_index=image_index,
-                    content_type=content_type,
-                    size_bytes=len(img_bytes),
-                ))
+                images.append(
+                    ImageInfo(
+                        minio_key=object_name,
+                        page_number=page_num + 1,
+                        image_index=image_index,
+                        content_type=content_type,
+                        size_bytes=len(img_bytes),
+                    )
+                )
                 image_index += 1
 
             except Exception as e:
-                logger.warning(f"Failed to extract image {img_ref} from page {page_num}: {e}")
+                logger.warning(
+                    f"Failed to extract image {img_ref} from page {page_num}: {e}"
+                )
                 continue
 
     doc.close()
@@ -156,13 +164,15 @@ def extract_images_from_docx(
                     content_type=content_type,
                 )
 
-                images.append(ImageInfo(
-                    minio_key=object_name,
-                    page_number=None,  # DOCX doesn't expose page numbers easily
-                    image_index=image_index,
-                    content_type=content_type,
-                    size_bytes=len(img_blob),
-                ))
+                images.append(
+                    ImageInfo(
+                        minio_key=object_name,
+                        page_number=None,  # DOCX doesn't expose page numbers easily
+                        image_index=image_index,
+                        content_type=content_type,
+                        size_bytes=len(img_blob),
+                    )
+                )
                 image_index += 1
 
             except Exception as e:
@@ -197,7 +207,9 @@ def _sanitize_caption_for_alt(caption: str) -> str:
     return cleaned.strip()
 
 
-def inline_image_markers(pages_data: list[dict], images: list[ImageInfo]) -> None:
+def inline_image_markers(
+    pages_data: Sequence[MutableMapping[str, object]], images: list[ImageInfo]
+) -> None:
     """Inject markdown image markers into per-page text."""
     if not images:
         return
@@ -215,9 +227,13 @@ def inline_image_markers(pages_data: list[dict], images: list[ImageInfo]) -> Non
         return
 
     for page in pages_data:
-        pnum = page.get("page_number") or 1
+        page_number = page.get("page_number")
+        pnum = page_number if isinstance(page_number, int) else 1
         markers = by_page.get(pnum)
         if not markers:
             continue
         joined = "\n\n".join(markers)
-        page["content"] = (page.get("content") or "") + f"\n\n{joined}\n"
+        current_content = page.get("content")
+        page["content"] = (
+            current_content if isinstance(current_content, str) else ""
+        ) + f"\n\n{joined}\n"

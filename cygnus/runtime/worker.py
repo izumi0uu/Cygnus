@@ -11,7 +11,7 @@ Start with:
 import asyncio
 import uuid
 import zipfile
-from typing import Optional
+from typing import Optional, cast
 from time import monotonic_ns
 
 from arq import cron
@@ -19,6 +19,7 @@ from arq import func as arq_func
 from arq.connections import ArqRedis, RedisSettings, create_pool
 from loguru import logger
 from sqlalchemy import select
+from sqlalchemy.engine import CursorResult
 
 from cygnus.governance.feedback_execution import (
     FeedbackRouteClaim,
@@ -47,6 +48,7 @@ from cygnus.runtime.source_state import (
 settings = get_settings()
 
 _FEEDBACK_ROUTE_SWEEP_LIMIT = 25
+WorkerContext = dict[str, object]
 
 
 def get_redis_settings() -> RedisSettings:
@@ -80,9 +82,7 @@ async def reset_arq_pool() -> None:
     """Drop the shared arq pool so infra wiring can be rebuilt cleanly."""
     global _arq_pool
     if _arq_pool is not None:
-        close = getattr(_arq_pool, "aclose", None)
-        if callable(close):
-            await close()
+        await _arq_pool.aclose()
     _arq_pool = None
 
 
@@ -193,7 +193,7 @@ async def enqueue_source_plan_regeneration(
     return job.job_id if job else None
 
 
-async def finalize_verbatim_source(session, source, tracker) -> dict:
+async def finalize_verbatim_source(session, source, tracker) -> dict[str, str | int]:
     """Verbatim path: index raw chunks (no LLM) and mark the source ready.
 
     Skips the entire MRP wiki pipeline AND the awaiting_approval token gate —
@@ -217,7 +217,7 @@ async def finalize_verbatim_source(session, source, tracker) -> dict:
     return {"status": "ready", "verbatim_chunks": n_chunks}
 
 
-async def ingest_file_task(ctx: dict, source_id: str):
+async def ingest_file_task(ctx: WorkerContext, source_id: str):
     """
     arq task: full file ingestion → wiki compilation.
     Steps: download from MinIO → extract text → outline → enqueue MRP + caption_images_task.
@@ -396,7 +396,7 @@ async def ingest_file_task(ctx: dict, source_id: str):
             raise
 
 
-async def ingest_url_task(ctx: dict, source_id: str):
+async def ingest_url_task(ctx: WorkerContext, source_id: str):
     """arq task: URL ingestion → wiki compilation."""
     from cygnus.runtime.database import async_session_factory
     from cygnus.runtime.database.models import Source
@@ -508,7 +508,7 @@ async def ingest_url_task(ctx: dict, source_id: str):
 
 
 async def ingest_skill_task(
-    ctx: dict, skill_id: str, version_id: str, file_path: str, file_name: str
+    ctx: WorkerContext, skill_id: str, version_id: str, file_path: str, file_name: str
 ):
     """
     arq task: unzip skill package from disk buffer, store in MinIO, and extract metadata.
@@ -656,7 +656,7 @@ async def ingest_skill_task(
                     logger.warning(f"Failed to delete temp file {file_path}: {e}")
 
 
-async def delete_skill_task(ctx: dict, skill_id: str):
+async def delete_skill_task(ctx: WorkerContext, skill_id: str):
     """
     arq task: delete skill files from MinIO and remove from DB.
     """
@@ -713,7 +713,7 @@ async def delete_skill_task(ctx: dict, skill_id: str):
             raise
 
 
-async def cleanup_temp_uploads_cron(ctx: dict):
+async def cleanup_temp_uploads_cron(ctx: WorkerContext):
     """
     Cronjob: Scan and clean orphaned files in temp_uploads left behind by a server crash (older than 1 hour).
     """
@@ -742,7 +742,7 @@ async def cleanup_temp_uploads_cron(ctx: dict):
 # ---------------------------------------------------------------------------
 
 
-async def reembed_all_pages_task(ctx: dict, job_id: str) -> None:
+async def reembed_all_pages_task(ctx: WorkerContext, job_id: str) -> None:
     """
     Re-embed every wiki page using the model spec referenced by the job.
 
@@ -920,7 +920,7 @@ async def reembed_all_pages_task(ctx: dict, job_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def ingest_map_reduce_task(ctx: dict, source_id: str):
+async def ingest_map_reduce_task(ctx: WorkerContext, source_id: str):
     """
     arq task: Phase 0-2 of MRP pipeline (Triage + MAP + REDUCE).
 
@@ -1037,7 +1037,7 @@ async def ingest_map_reduce_task(ctx: dict, source_id: str):
             raise
 
 
-async def ingest_refine_task(ctx: dict, source_id: str):
+async def ingest_refine_task(ctx: WorkerContext, source_id: str):
     """
     arq task: Phase 3-5 of MRP pipeline (REFINE + VERIFY + COMMIT).
 
@@ -1121,7 +1121,7 @@ async def ingest_refine_task(ctx: dict, source_id: str):
             raise
 
 
-async def regenerate_plan_task(ctx: dict, source_id: str, user_note: str):
+async def regenerate_plan_task(ctx: WorkerContext, source_id: str, user_note: str):
     """
     arq task: re-run KB reconciliation + planning call with reviewer feedback.
 
@@ -1177,7 +1177,7 @@ async def regenerate_plan_task(ctx: dict, source_id: str, user_note: str):
             except Exception:
                 pass
 
-            reconciliation: dict = {}
+            reconciliation: dict[str, dict[str, object]] = {}
             if embedding_provider and (canonical_entities or canonical_concepts):
                 try:
                     reconciliation = await reconcile_with_kb(
@@ -1466,7 +1466,7 @@ async def drain_feedback_routes(
     return len(sweep.claims)
 
 
-async def sweep_feedback_routes_cron(ctx: dict[str, object]) -> None:
+async def sweep_feedback_routes_cron(ctx: WorkerContext) -> None:
     """Drain a small durable feedback-route batch on the worker schedule."""
     _ = ctx
     try:
@@ -1478,7 +1478,7 @@ async def sweep_feedback_routes_cron(ctx: dict[str, object]) -> None:
         logger.info("Feedback route cron sweep claimed {} route(s)", count)
 
 
-async def sweep_ai_pre_review_dispatch_cron(ctx: dict):
+async def sweep_ai_pre_review_dispatch_cron(ctx: WorkerContext):
     """Drain committed AI-review outbox intents on the worker schedule."""
     _ = ctx
     from cygnus.review.pre_review.dispatch import sweep_ai_pre_review_dispatches
@@ -1492,7 +1492,7 @@ async def sweep_ai_pre_review_dispatch_cron(ctx: dict):
         logger.info("AI pre-review outbox sweep leased {} intent(s)", count)
 
 
-async def sweep_stuck_ai_review_cron(ctx: dict):
+async def sweep_stuck_ai_review_cron(ctx: WorkerContext):
     """Resolve worker-death states for drafts and their delivery intents.
 
     A hard worker death can happen after the runner commits ``running`` but
@@ -1533,13 +1533,16 @@ async def sweep_stuck_ai_review_cron(ctx: dict):
         if not stuck_ids:
             return
 
-        result = await session.execute(
-            update(WikiPageDraft)
-            .where(
-                WikiPageDraft.id.in_(stuck_ids),
-                WikiPageDraft.ai_check_status == "running",
-            )
-            .values(ai_check_status="skipped")
+        result = cast(
+            CursorResult[tuple[object, ...]],
+            await session.execute(
+                update(WikiPageDraft)
+                .where(
+                    WikiPageDraft.id.in_(stuck_ids),
+                    WikiPageDraft.ai_check_status == "running",
+                )
+                .values(ai_check_status="skipped")
+            ),
         )
         await session.execute(
             update(WikiDraftAiPreReviewDispatch)
@@ -1564,7 +1567,7 @@ async def sweep_stuck_ai_review_cron(ctx: dict):
             )
 
 
-async def sweep_stuck_processing_cron(ctx: dict):
+async def sweep_stuck_processing_cron(ctx: WorkerContext):
     """Periodic safety net: flip any Source stuck in status='processing' for
     longer than 2x the worker job_timeout back to 'error'.
 
@@ -1639,7 +1642,7 @@ async def sweep_stuck_processing_cron(ctx: dict):
         )
 
 
-async def cleanup_orphan_awaiting_approval_cron(ctx: dict):
+async def cleanup_orphan_awaiting_approval_cron(ctx: WorkerContext):
     """Delete sources stuck in status='awaiting_approval' longer than the TTL.
 
     A source enters this state after extraction when token count exceeds the
@@ -1693,7 +1696,7 @@ async def cleanup_orphan_awaiting_approval_cron(ctx: dict):
             )
 
 
-async def daily_stats_rollup_cron(ctx: dict):
+async def daily_stats_rollup_cron(ctx: WorkerContext):
     """
     Cronjob: recompute admin Statistics rollups for yesterday (UTC).
 
@@ -1709,7 +1712,7 @@ async def daily_stats_rollup_cron(ctx: dict):
     logger.info(f"daily_stats_rollup_cron: {target} -> {result}")
 
 
-async def caption_images_task(ctx: dict, source_id: str):
+async def caption_images_task(ctx: WorkerContext, source_id: str):
     """
     arq task: vision-caption all SourceImage rows for a source.
 
@@ -1834,7 +1837,7 @@ async def caption_images_task(ctx: dict, source_id: str):
 
         if source.full_text and caption_by_id:
 
-            def _sub(match: re.Match) -> str:
+            def _sub(match: re.Match[str]) -> str:
                 uid = match.group(1)
                 cap = caption_by_id.get(uid, "")
                 return f"![{cap}](image://{uid})"
@@ -1868,7 +1871,7 @@ async def caption_images_task(ctx: dict, source_id: str):
 
 
 async def ai_pre_review_draft_task(
-    ctx: dict,
+    ctx: WorkerContext,
     draft_id: str,
     expected_round: Optional[int] = None,
     expected_version: Optional[int] = None,
@@ -1934,7 +1937,7 @@ class WorkerSettings:
     ]
 
     @staticmethod
-    async def on_startup(ctx: dict):
+    async def on_startup(ctx: WorkerContext):
         logger.info("arq worker started — listening for ingestion jobs...")
         from cygnus.review.pre_review.dispatch import sweep_ai_pre_review_dispatches
 
@@ -1957,7 +1960,7 @@ class WorkerSettings:
                 logger.info("Feedback route startup sweep claimed {} route(s)", count)
 
     @staticmethod
-    async def on_shutdown(ctx: dict):
+    async def on_shutdown(ctx: WorkerContext):
         logger.info("arq worker shutting down...")
 
 
@@ -1976,9 +1979,9 @@ class SkillWorkerSettings:
     cron_jobs = [cron(cleanup_temp_uploads_cron, minute=0)]
 
     @staticmethod
-    async def on_startup(ctx: dict):
+    async def on_startup(ctx: WorkerContext):
         logger.info("arq skills worker started — listening for skill jobs...")
 
     @staticmethod
-    async def on_shutdown(ctx: dict):
+    async def on_shutdown(ctx: WorkerContext):
         logger.info("arq skills worker shutting down...")

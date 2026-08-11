@@ -13,6 +13,7 @@ const AudiencePublish = lazy(() => import('@/pages/AudiencePublish'))
 const KnowledgeObjects = lazy(() => import('@/pages/KnowledgeObjects'))
 const SourcesEvidence = lazy(() => import('@/pages/SourcesEvidence'))
 const CoverageDrift = lazy(() => import('@/pages/CoverageDrift'))
+const TicketInsights = lazy(() => import('@/pages/TicketInsights'))
 const Propagation = lazy(() => import('@/pages/Propagation'))
 const RecoveryDetail = lazy(() => import('@/pages/RecoveryDetail'))
 const Audit = lazy(() => import('@/pages/Audit'))
@@ -34,6 +35,7 @@ export default function App() {
               <Route path="queue" element={<ReviewQueue />} />
               <Route path="objects" element={<KnowledgeObjects />} />
               <Route path="sources" element={<SourcesEvidence />} />
+              <Route path="tickets" element={<TicketInsights />} />
               <Route path="audience" element={<AudiencePublish />} />
               <Route path="drift" element={<CoverageDrift />} />
               <Route path="propagation" element={<Propagation />} />

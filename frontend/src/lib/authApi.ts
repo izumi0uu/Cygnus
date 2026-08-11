@@ -31,17 +31,20 @@ export async function authApi<T = unknown>(path: string, options: RequestOptions
   const token = getToken()
   const controller = new AbortController()
   const timerId = setTimeout(() => controller.abort(), timeoutMs)
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData
 
   const config: RequestInit = {
     method,
     signal: controller.signal,
     headers: {
-      'Content-Type': 'application/json',
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...headers,
     },
   }
-  if (body && method !== 'GET') config.body = JSON.stringify(body)
+  if (body !== undefined && method !== 'GET') {
+    config.body = isFormData ? (body as FormData) : JSON.stringify(body)
+  }
 
   let res: Response
   try {

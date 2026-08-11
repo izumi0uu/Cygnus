@@ -13,25 +13,26 @@ import CommandPalette from '@/components/CommandPalette'
 import { useFocusTrap } from '@/lib/useFocusTrap'
 
 type Group = 'gov' | 'obs'
-type NavItem = { to: string; key: string; code: string; group: Group; end?: boolean; badge?: string }
+type NavItem = { to: string; key: string; code: string; group: Group; end?: boolean; badge?: string; adminOnly?: boolean }
 
 const NAV: NavItem[] = [
   { to: '/console', key: 'overview', code: 'DWG-01', group: 'gov', end: true },
   { to: '/console/queue', key: 'reviewQueue', code: 'SEC-A', group: 'gov', badge: '4' },
   { to: '/console/objects', key: 'objects', code: 'SEC-B', group: 'gov' },
   { to: '/console/sources', key: 'sources', code: 'SEC-C', group: 'gov' },
-  { to: '/console/audience', key: 'audience', code: 'SEC-D', group: 'gov' },
-  { to: '/console/drift', key: 'drift', code: 'SEC-E', group: 'obs' },
-  { to: '/console/propagation', key: 'propagation', code: 'SEC-F', group: 'obs' },
-  { to: '/console/audit', key: 'audit', code: 'SEC-G', group: 'obs' },
+  { to: '/console/tickets', key: 'ticketInsights', code: 'SEC-D', group: 'gov', adminOnly: true },
+  { to: '/console/audience', key: 'audience', code: 'SEC-E', group: 'gov' },
+  { to: '/console/drift', key: 'drift', code: 'SEC-F', group: 'obs' },
+  { to: '/console/propagation', key: 'propagation', code: 'SEC-G', group: 'obs' },
+  { to: '/console/audit', key: 'audit', code: 'SEC-H', group: 'obs' },
 ]
 
-function DirGroup({ group, onNavigate }: { group: Group; onNavigate?: () => void }) {
+function DirGroup({ group, onNavigate, isAdmin }: { group: Group; onNavigate?: () => void; isAdmin: boolean }) {
   const { t } = useTranslation()
   return (
     <div>
       <div className="bp-dir-group">{t(`nav.${group}Group`)}</div>
-      {NAV.filter((i) => i.group === group).map((item) => (
+      {NAV.filter((i) => i.group === group && (!i.adminOnly || isAdmin)).map((item) => (
         <NavLink
           key={item.to}
           to={item.to}
@@ -274,8 +275,8 @@ export default function AppShell() {
         </div>
         <div className="thin-scroll flex-1 overflow-y-auto pb-2">
           <nav aria-label={t('nav.primary')}>
-            <DirGroup group="gov" onNavigate={closeNav} />
-            <DirGroup group="obs" onNavigate={closeNav} />
+            <DirGroup group="gov" onNavigate={closeNav} isAdmin={user?.role === 'admin'} />
+            <DirGroup group="obs" onNavigate={closeNav} isAdmin={user?.role === 'admin'} />
           </nav>
         </div>
         <div className="bp-dir-footer">

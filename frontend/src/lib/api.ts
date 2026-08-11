@@ -258,6 +258,194 @@ export async function fetchSourceBlindnessSurface(): Promise<SourceBlindnessSurf
   return authApi<SourceBlindnessSurface>('/api/source-blindness')
 }
 
+// ============================================================
+// Ticket Cluster Insights — bounded, source-scoped pilot surface.
+// These projections point to the durable import and funnel owners;
+// the SPA must not derive a second lifecycle or analytics aggregate.
+// ============================================================
+
+export interface ReadySourceOption {
+  id: string
+  title: string | null
+  source_type: string | null
+  file_name: string | null
+  status: string
+  created_at: string
+  updated_at: string
+}
+
+export interface SourceListPage {
+  items: ReadySourceOption[]
+  total: number
+  page: number
+  page_size: number
+  total_pages: number
+}
+
+export async function fetchReadySources(): Promise<SourceListPage> {
+  return authApi<SourceListPage>('/api/sources?status=ready&page=1&page_size=500')
+}
+
+export type TicketExportFormat = 'csv' | 'jsonl'
+
+export interface TicketClusterCandidate {
+  cluster_ref: string
+  signal_ref: string | null
+  source_ref: string
+  issue_signature: string
+  title: string
+  object_type: string
+  audience_filter: Record<string, unknown>
+  feature: string | null
+  member_count: number
+  minimum_cluster_size: number
+  qualifies: boolean
+  window_start: string
+  window_end: string
+  evidence_ref_count: number
+  evidence_refs: Record<string, unknown>[]
+  representative_excerpt: string
+}
+
+export interface ImportedGovernanceSignal {
+  id: string
+  signal_ref: string
+  signal_type: string
+  object_ref: string
+  title: string
+  object_type: string
+  source_id: string | null
+  audience_filter: Record<string, unknown>
+  affected_surfaces: string[]
+  evidence_source_type: string
+  freshness: string
+  summary: string
+  reason: string
+  evidence_excerpt: string
+  evidence_refs: Record<string, unknown>[]
+  status: string
+  observed_at: string
+  created_at: string
+  updated_at: string
+  version: number
+}
+
+export interface TicketImportResult {
+  contract_version: string
+  source_ref: string
+  export_format: TicketExportFormat
+  import_digest: string
+  minimum_cluster_size: number
+  record_count: number
+  candidate_count: number
+  qualifying_candidate_count: number
+  candidates: TicketClusterCandidate[]
+  source_id: string
+  persisted_signal_count: number
+  persisted_signal_refs: string[]
+  governance_signals: ImportedGovernanceSignal[]
+  publication_state: 'not_published'
+  next_step: 'review_qualifying_candidates'
+}
+
+export interface TicketPilotDurationSummary {
+  observed_count: number
+  average: number | null
+  minimum: number | null
+  maximum: number | null
+}
+
+export interface TicketPilotSummary {
+  eligible_signal_count: number
+  promoted_draft_count: number
+  review_submitted_draft_count: number
+  review_decided_draft_count: number
+  approved_draft_count: number
+  rejected_draft_count: number
+  needs_revision_draft_count: number
+  published_draft_count: number
+  rates: {
+    signal_to_draft: number | null
+    draft_to_review: number | null
+    terminal_review_acceptance: number | null
+    draft_to_publish: number | null
+  }
+  durations_seconds: {
+    signal_to_draft: TicketPilotDurationSummary
+    draft_to_review: TicketPilotDurationSummary
+    signal_to_publish: TicketPilotDurationSummary
+  }
+}
+
+export interface TicketPilotItem {
+  source_ref: string
+  import_digest: string
+  signal_ref: string
+  ticket_cluster_ref: string
+  object_type: string
+  signal_status: string
+  signal_observed_at: string
+  signal_created_at: string
+  evidence_ref_count: number
+  promotion: { id: string | null; created_at: string | null }
+  draft: { id: string | null; status: string | null }
+  review: {
+    submitted_at: string | null
+    decision_at: string | null
+    decision: string | null
+  }
+  publication: { id: string | null; published_at: string | null }
+  durations_seconds: {
+    signal_to_draft: number | null
+    draft_to_review: number | null
+    signal_to_publish: number | null
+  }
+  persisted: true
+  rehearsal: false
+}
+
+export interface TicketPilotFunnelReport {
+  source_ref: string
+  import_digests: string[]
+  matched_signal_count: number
+  excluded_signal_count: number
+  summary: TicketPilotSummary
+  items: TicketPilotItem[]
+  observation: SurfaceObservation
+  metric_boundary: {
+    kind: 'durable_pilot_instrumentation'
+    business_impact_proven: false
+  }
+  persisted: true
+  rehearsal: false
+}
+
+export async function importResolvedTicketExport(input: {
+  file: File
+  sourceRef: string
+  sourceId: string
+  exportFormat: TicketExportFormat
+  minimumClusterSize: number
+}): Promise<TicketImportResult> {
+  const body = new FormData()
+  body.append('file', input.file)
+  body.append('source_ref', input.sourceRef)
+  body.append('source_id', input.sourceId)
+  body.append('export_format', input.exportFormat)
+  body.append('minimum_cluster_size', String(input.minimumClusterSize))
+  return authApi<TicketImportResult>('/api/governance/ticket-imports', {
+    method: 'POST',
+    body,
+    timeoutMs: 60_000,
+  })
+}
+
+export async function fetchTicketPilotFunnel(sourceRef: string): Promise<TicketPilotFunnelReport> {
+  return authApi<TicketPilotFunnelReport>(
+    `/api/governance/ticket-pilot?source_ref=${encodeURIComponent(sourceRef)}`,
+  )
+}
+
 export interface GovernanceOpenLoop {
   command_id: string
   command_type: string

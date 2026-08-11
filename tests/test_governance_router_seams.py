@@ -8,6 +8,7 @@ def test_governance_router_surface_adapters_exist() -> None:
         "cygnus/runtime/routers/governance/__init__.py",
         "cygnus/runtime/routers/governance/audit.py",
         "cygnus/runtime/routers/governance/command_center.py",
+        "cygnus/runtime/routers/governance/feedback_routes.py",
         "cygnus/runtime/routers/governance/review.py",
         "cygnus/runtime/routers/governance/publish.py",
         "cygnus/runtime/routers/governance/recovery.py",
@@ -34,6 +35,10 @@ def test_governance_router_is_thin_assembly() -> None:
         in text
     )
     assert (
+        "from cygnus.runtime.routers.governance.feedback_routes import router as feedback_routes_router"
+        in text
+    )
+    assert (
         "from cygnus.runtime.routers.governance.knowledge_graph import router as knowledge_graph_router"
         in text
     )
@@ -43,6 +48,7 @@ def test_governance_router_is_thin_assembly() -> None:
     )
     assert 'router.include_router(command_center_router, tags=["governance"])' in text
     assert 'router.include_router(governance_audit_router, tags=["governance"])' in text
+    assert 'router.include_router(feedback_routes_router, tags=["governance"])' in text
 
     assert 'router.include_router(knowledge_graph_router, tags=["governance"])' in text
     assert 'router.include_router(session_bridge_router, tags=["governance"])' in text

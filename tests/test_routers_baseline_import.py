@@ -16,6 +16,7 @@ ROUTER_BASELINE_FILES = [
     "cygnus/runtime/routers/governance/dependencies.py",
     "cygnus/runtime/routers/governance/audit.py",
     "cygnus/runtime/routers/governance/command_center.py",
+    "cygnus/runtime/routers/governance/feedback_routes.py",
     "cygnus/runtime/routers/governance/audience_bindings.py",
     "cygnus/runtime/routers/governance/assignments.py",
     "cygnus/runtime/routers/governance/knowledge_graph.py",
@@ -52,6 +53,7 @@ MAIN_ASSEMBLED_ROUTER_MODULES = {
     "cygnus.runtime.routers.governance.audience_bindings": ["router"],
     "cygnus.runtime.routers.governance.assignments": ["router"],
     "cygnus.runtime.routers.governance.command_center": ["router"],
+    "cygnus.runtime.routers.governance.feedback_routes": ["router"],
     "cygnus.runtime.routers.governance.knowledge_graph": ["router"],
     "cygnus.runtime.routers.governance.publish": ["router"],
     "cygnus.runtime.routers.governance.recovery": ["router"],
@@ -79,6 +81,9 @@ REQUIRED_ROUTER_SURFACE_TOKENS = {
     ],
     "cygnus/runtime/routers/governance/audience_bindings.py": [
         "/api/governance/audience-bindings"
+    ],
+    "cygnus/runtime/routers/governance/feedback_routes.py": [
+        "/api/governance/feedback-routes"
     ],
     "cygnus/runtime/routers/governance/session_bridge.py": ["/api/session-bridge"],
     "cygnus/runtime/routers/governance/signals.py": ["/api/governance-signals"],

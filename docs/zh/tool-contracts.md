@@ -583,10 +583,10 @@ Nanobot 只消费结果，不拥有检索真相。
 - 后续 workflow orchestration、eval、UI 都可以围绕这些 contract 继续长出来
 
 ## 13. 当前实现状态（与代码对账）
-本节对账 `cygnus/integrations/nanobot_tools.py`、`cygnus/integrations/governed_draft_review_tools.py`、`cygnus/integrations/governed_publish_tools.py`、`cygnus/integrations/governed_drift_tools.py` 与 `cygnus/integrations/governed_feedback_tools.py`，以及 CYG-119 的 route 执行模块 `cygnus/governance/feedback_execution.py`，明确区分：
+本节对账 `cygnus/integrations/nanobot_tools.py`、`cygnus/integrations/governed_draft_review_tools.py`、`cygnus/integrations/governed_publish_tools.py`、`cygnus/integrations/governed_drift_tools.py` 与 `cygnus/integrations/governed_feedback_tools.py`，以及 CYG-119 的 route 执行模块 `cygnus/governance/feedback_execution.py` 和 CYG-120 的运维读取模块 `cygnus/governance/feedback_operations.py`，明确区分：
 - 上文的**目标 contract**
 - 下文当前可调用的 **durable interface**
-- CYG-118 已实现的 replay-safe、durable feedback-routing 边界，以及 CYG-119 已实现的有界 route 执行生命周期
+- CYG-118 已实现的 replay-safe、durable feedback-routing 边界，CYG-119 已实现的有界 route 执行生命周期，以及 CYG-120 已实现的权限内运维读取与结构化 worker outcome 事件
 
 ### 13.1 当前真正已兑现的能力
 - **Group A — Retrieval（4/4）**：`search_knowledge_objects` / `read_knowledge_object` / `search_support_evidence` / `get_source_trace` 使用 substrate-backed、请求级权限过滤的检索面。
@@ -606,6 +606,12 @@ Nanobot 只消费结果，不拥有检索真相。
 - durable route row 携带 `attempt_count`、`next_attempt_at`、`lease_token`、`lease_expires_at`、`outcome_signal_id`、`terminal_reason`、`last_error` 与 `completed_at`。每次 mutation 只 flush；caller 拥有 commit；worker wrapper 先提交 claim，再以独立 transaction 提交每次 execution 或 failure。
 - completed route 物化一条 durable outcome `GovernanceSignal`，其 signal 身份恰好为 `route_ref=feedback-route:<route UUID>`，落在 `feedback` 与 `review_queue` surface；durable route row 存储 `outcome_signal_id`，response 从该 ID 投影 `outcome_signal_ref=governance-signal:<signal UUID>`（response projection，不是存储列）。`low_rating` 物化为 review pressure（`ticket_pressure`、unknown freshness），`stale_answer` 物化为疑似 freshness/drift review（`drift`、stale freshness）。low_rating/stale_answer 的派生由 worker 独占：feedback 派生类型不能通过 admin write endpoint 创建，admin read endpoint 可以读取 worker 创建的 row。route 执行不会记录原始 `source_context` 或 `notes` payload。`routing_state` 沿 `<route_kind>_<route_state>` 表达（`review_running`、`review_completed` 等）；route 为 `queued` 时，依据 route kind 恰有一个 queue flag 为真，其他所有 route state 的两个 queue flag 都为假。
 - 执行绝不自动修改知识内容，也绝不发布。Route 完成只证明已物化进 governed review truth——不代表 reviewer 已行动、草稿已创建、已发布、下游已传播、KPI 已改善或已产生业务影响。
+
+### 13.2.2 已实现的 feedback-route 运维真相（CYG-120）
+- `GET /api/governance/feedback-routes` 是 authenticated、SQL-first 的 R0 运维读取：在投影前按当前用户的 Wiki page/draft read scope 过滤，支持 `route_state`、`route_kind`、`page` 与 `page_size<=100`，并以 `updated_at DESC, id DESC` 稳定排序。summary 只聚合权限内 route，包含 state/kind 数量、最早到期 queued age、过期 running lease、retry 分布、completion latency，以及 blocked/failed 的稳定 terminal reason 数量。
+- `GET /api/governance/feedback-routes/{route_id}` 使用相同 SQL scope；隐藏与不存在的 route 均返回同一个 `404`。可见 drilldown 只链接 originating feedback ref、durable route、outcome governance signal、当前 review assignment 与相关 audit trace，不返回 `last_error`、`notes` 或 `source_context_ref`。
+- Worker 在 claim transaction 提交后发出 `claimed|lease_recovered|failed`，并在 execution/failure transaction commit 或 rollback 后发出 `completed|blocked|retry_scheduled|failed|lease_lost|execution_error|failure_recording_error`。事件 allowlist 仅含 event、route ID/kind、transition、attempt count、duration、outcome ref、稳定 terminal reason 与 exception class；不记录 exception text 或客户/来源 payload。
+- 运维 `completed` 与 worker outcome event 只证明 route 已推进或 outcome truth 已物化；它们不证明 reviewer action、draft、publication、propagation、KPI 改善或 business impact。本切片没有 manual retry/requeue mutation，也没有第二套 queue/session loop。
 
 ### 13.3 已兑现的 durable draft/review seam
 - `propose_knowledge_object` 会创建 typed、create-kind 的 `WikiPageDraft`，持久化在 `draft` 状态，仅记录 `proposal_created`，并保存 proposed object type、audience context、source refs、evidence refs 与 source IDs，供后续 materialization 使用。

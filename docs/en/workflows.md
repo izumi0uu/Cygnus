@@ -147,6 +147,7 @@ Drift / ticket / source signals are not just observations; they are governance c
 - source blindness → `repair_source` / `restrict_propagation` / `route_to_human_review`
 - review-queue re-stacking → `restack` / `reroute` / `escalate`
 - consumption feedback routes (CYG-118/119): `low_rating` materializes as review pressure (`ticket_pressure`, unknown freshness) and `stale_answer` as suspected freshness/drift review (`drift`, stale freshness); route execution only materializes durable governed review truth and never auto-changes content or publishes
+- CYG-120 operations observation: `GovernanceFeedbackRoute` remains the only queue truth; permission-scoped SQL summaries/drilldowns and structured worker-outcome events distinguish backlog, due age, lease expiry, retries, blocked/failed outcomes, and outcome/review traces, but this operational evidence is not reviewer action, publication, propagation, or a business KPI
 
 ## 5. Lifecycle principles
 1. **New knowledge defaults to draft**

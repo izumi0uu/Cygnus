@@ -79,10 +79,25 @@ from cygnus.governance.feedback_routing import (
 )
 from cygnus.governance.feedback_execution import (
     FeedbackRouteClaim,
+    FeedbackRouteClaimSweep,
     FeedbackRouteLeaseLost,
+    FeedbackRouteTerminalization,
     claim_feedback_routes,
     execute_feedback_route,
     record_feedback_route_failure,
+)
+from cygnus.governance.feedback_operations import (
+    FeedbackRouteOperationsDetail,
+    FeedbackRouteOperationsItem,
+    FeedbackRouteOperationsPage,
+    FeedbackRouteOperationsQuery,
+    FeedbackRouteOperationsSummary,
+    FeedbackRouteWorkerEvent,
+    emit_feedback_route_worker_event,
+    feedback_route_scope_clause,
+    feedback_route_worker_event_fields,
+    get_feedback_route_operation,
+    list_feedback_route_operations,
 )
 
 __all__ = [
@@ -111,7 +126,15 @@ __all__ = [
     "FeedbackRouteState",
     "FeedbackRoutingProjection",
     "FeedbackRouteClaim",
+    "FeedbackRouteClaimSweep",
     "FeedbackRouteLeaseLost",
+    "FeedbackRouteTerminalization",
+    "FeedbackRouteOperationsDetail",
+    "FeedbackRouteOperationsItem",
+    "FeedbackRouteOperationsPage",
+    "FeedbackRouteOperationsQuery",
+    "FeedbackRouteOperationsSummary",
+    "FeedbackRouteWorkerEvent",
     "GovernanceSignalStatus",
     "GovernanceLedgerConflict",
     "append_draft_event",
@@ -136,6 +159,11 @@ __all__ = [
     "claim_feedback_routes",
     "execute_feedback_route",
     "record_feedback_route_failure",
+    "emit_feedback_route_worker_event",
+    "feedback_route_scope_clause",
+    "feedback_route_worker_event_fields",
+    "get_feedback_route_operation",
+    "list_feedback_route_operations",
     "normalize_audience_context",
     "audience_binding_to_dict",
     "audience_filter_from_binding",

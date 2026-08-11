@@ -5,6 +5,14 @@ import unittest
 import uuid
 from unittest.mock import AsyncMock, call, patch
 
+from cygnus.governance.feedback_execution import (
+    FeedbackRouteClaim,
+    FeedbackRouteClaimSweep,
+    FeedbackRouteTerminalization,
+)
+from cygnus.governance.feedback_operations import FeedbackRouteWorkerEvent
+from cygnus.governance.feedback_routing import FeedbackRouteKind, FeedbackRouteState
+
 
 class _Session:
     def __init__(self, name: str, events: list[str]) -> None:
@@ -46,8 +54,34 @@ class _SessionFactory:
         return _SessionScope(session)
 
 
-def _claim() -> SimpleNamespace:
-    return SimpleNamespace(route_id=uuid.uuid4(), lease_token=uuid.uuid4())
+def _claim(*, recovered: bool = False, attempt_count: int = 1) -> FeedbackRouteClaim:
+    return FeedbackRouteClaim(
+        route_id=uuid.uuid4(),
+        route_kind=FeedbackRouteKind.REVIEW,
+        lease_token=uuid.uuid4().hex,
+        attempt_count=attempt_count,
+        claimed_from_state=(
+            FeedbackRouteState.RUNNING if recovered else FeedbackRouteState.QUEUED
+        ),
+    )
+
+
+def _sweep(*claims: FeedbackRouteClaim) -> FeedbackRouteClaimSweep:
+    return FeedbackRouteClaimSweep(claims=claims, terminalized=())
+
+
+def _route_result(
+    state: FeedbackRouteState,
+    *,
+    terminal_reason: str | None = None,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        lifecycle_state=state.value,
+        outcome_signal_id=(
+            uuid.uuid4() if state is FeedbackRouteState.COMPLETED else None
+        ),
+        terminal_reason=terminal_reason,
+    )
 
 
 class FeedbackRouteWorkerWiringTests(unittest.IsolatedAsyncioTestCase):
@@ -67,14 +101,24 @@ class FeedbackRouteWorkerWiringTests(unittest.IsolatedAsyncioTestCase):
             [claim_session, first_execution, second_execution]
         )
 
-        async def execute(session, claim, *, now) -> None:
+        async def execute(session, claim, *, now) -> SimpleNamespace:
             events.append(f"{session.name}.execute:{claim.route_id}")
+            if claim is second:
+                return _route_result(
+                    FeedbackRouteState.BLOCKED,
+                    terminal_reason="target_required",
+                )
+            return _route_result(FeedbackRouteState.COMPLETED)
+
+        def emit(**fields: object) -> dict[str, object]:
+            events.append(f"event:{fields['event']}")
+            return dict(fields)
 
         with (
             patch.object(
                 worker_module,
                 "claim_feedback_routes",
-                AsyncMock(return_value=[first, second]),
+                AsyncMock(return_value=_sweep(first, second)),
             ) as claim_routes,
             patch.object(
                 worker_module,
@@ -86,6 +130,11 @@ class FeedbackRouteWorkerWiringTests(unittest.IsolatedAsyncioTestCase):
                 "record_feedback_route_failure",
                 AsyncMock(),
             ) as record_failure,
+            patch.object(
+                worker_module,
+                "emit_feedback_route_worker_event",
+                side_effect=emit,
+            ) as emit_event,
         ):
             drained = await worker_module.drain_feedback_routes(
                 now=now,
@@ -118,6 +167,21 @@ class FeedbackRouteWorkerWiringTests(unittest.IsolatedAsyncioTestCase):
             ],
             [0, 0, 0],
         )
+        emitted = [item.kwargs for item in emit_event.call_args_list]
+        self.assertEqual(
+            [item["event"] for item in emitted],
+            [
+                FeedbackRouteWorkerEvent.CLAIMED,
+                FeedbackRouteWorkerEvent.CLAIMED,
+                FeedbackRouteWorkerEvent.COMPLETED,
+                FeedbackRouteWorkerEvent.BLOCKED,
+            ],
+        )
+        self.assertEqual(emitted[-1]["terminal_reason"], "target_required")
+        self.assertLess(
+            events.index("claim.commit"),
+            events.index(f"event:{FeedbackRouteWorkerEvent.CLAIMED}"),
+        )
         self.assertLess(
             events.index("claim.commit"),
             events.index(f"execute-first.execute:{first.route_id}"),
@@ -139,18 +203,19 @@ class FeedbackRouteWorkerWiringTests(unittest.IsolatedAsyncioTestCase):
         session_factory = _SessionFactory(
             [claim_session, bad_execution, bad_failure, good_execution]
         )
-        execution_error = RuntimeError("route execution failed")
+        execution_error = RuntimeError("route execution failed with customer payload")
 
-        async def execute(session, claim, *, now) -> None:
+        async def execute(session, claim, *, now) -> SimpleNamespace:
             events.append(f"{session.name}.execute:{claim.route_id}")
             if claim is bad_claim:
                 raise execution_error
+            return _route_result(FeedbackRouteState.COMPLETED)
 
         with (
             patch.object(
                 worker_module,
                 "claim_feedback_routes",
-                AsyncMock(return_value=[bad_claim, good_claim]),
+                AsyncMock(return_value=_sweep(bad_claim, good_claim)),
             ),
             patch.object(
                 worker_module,
@@ -160,8 +225,13 @@ class FeedbackRouteWorkerWiringTests(unittest.IsolatedAsyncioTestCase):
             patch.object(
                 worker_module,
                 "record_feedback_route_failure",
-                AsyncMock(),
+                AsyncMock(return_value=_route_result(FeedbackRouteState.QUEUED)),
             ) as record_failure,
+            patch.object(
+                worker_module,
+                "emit_feedback_route_worker_event",
+                return_value={},
+            ) as emit_event,
         ):
             drained = await worker_module.drain_feedback_routes(
                 now=now,
@@ -194,6 +264,19 @@ class FeedbackRouteWorkerWiringTests(unittest.IsolatedAsyncioTestCase):
                 call(good_execution, good_claim, now=now),
             ],
         )
+        emitted = [item.kwargs for item in emit_event.call_args_list]
+        self.assertEqual(
+            [item["event"] for item in emitted],
+            [
+                FeedbackRouteWorkerEvent.CLAIMED,
+                FeedbackRouteWorkerEvent.CLAIMED,
+                FeedbackRouteWorkerEvent.EXECUTION_ERROR,
+                FeedbackRouteWorkerEvent.RETRY_SCHEDULED,
+                FeedbackRouteWorkerEvent.COMPLETED,
+            ],
+        )
+        self.assertEqual(emitted[2]["exception_class"], "RuntimeError")
+        self.assertNotIn("customer payload", str(emitted))
         self.assertLess(
             events.index("failure-bad.commit"),
             events.index(f"execute-good.execute:{good_claim.route_id}"),
@@ -214,7 +297,7 @@ class FeedbackRouteWorkerWiringTests(unittest.IsolatedAsyncioTestCase):
             patch.object(
                 worker_module,
                 "claim_feedback_routes",
-                AsyncMock(return_value=[claim]),
+                AsyncMock(return_value=_sweep(claim)),
             ) as claim_routes,
             patch.object(
                 worker_module,
@@ -226,6 +309,11 @@ class FeedbackRouteWorkerWiringTests(unittest.IsolatedAsyncioTestCase):
                 "record_feedback_route_failure",
                 AsyncMock(),
             ) as record_failure,
+            patch.object(
+                worker_module,
+                "emit_feedback_route_worker_event",
+                return_value={},
+            ) as emit_event,
         ):
             drained = await worker_module.drain_feedback_routes(
                 session_factory=session_factory,
@@ -237,6 +325,67 @@ class FeedbackRouteWorkerWiringTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(execution_session.commit_count, 0)
         self.assertEqual(execution_session.rollback_count, 1)
         record_failure.assert_not_awaited()
+        emitted = [item.kwargs for item in emit_event.call_args_list]
+        self.assertEqual(
+            [item["event"] for item in emitted],
+            [FeedbackRouteWorkerEvent.CLAIMED, FeedbackRouteWorkerEvent.LEASE_LOST],
+        )
+        self.assertEqual(emitted[-1]["exception_class"], "FeedbackRouteLeaseLost")
+
+    async def test_claim_recovery_emits_recovered_and_terminal_failed_outcomes(
+        self,
+    ) -> None:
+        import cygnus.runtime.worker as worker_module
+
+        recovered = _claim(recovered=True, attempt_count=2)
+        terminalized = FeedbackRouteTerminalization(
+            route_id=uuid.uuid4(),
+            route_kind=FeedbackRouteKind.REFRESH,
+            previous_state=FeedbackRouteState.RUNNING,
+            attempt_count=3,
+            terminal_reason="retry_exhausted",
+        )
+        sweep = FeedbackRouteClaimSweep(
+            claims=(recovered,),
+            terminalized=(terminalized,),
+        )
+        events: list[str] = []
+        session_factory = _SessionFactory(
+            [_Session("claim", events), _Session("execute", events)]
+        )
+        with (
+            patch.object(
+                worker_module,
+                "claim_feedback_routes",
+                AsyncMock(return_value=sweep),
+            ),
+            patch.object(
+                worker_module,
+                "execute_feedback_route",
+                AsyncMock(return_value=_route_result(FeedbackRouteState.COMPLETED)),
+            ),
+            patch.object(
+                worker_module,
+                "emit_feedback_route_worker_event",
+                return_value={},
+            ) as emit_event,
+        ):
+            drained = await worker_module.drain_feedback_routes(
+                session_factory=session_factory
+            )
+
+        self.assertEqual(drained, 1)
+        emitted = [item.kwargs for item in emit_event.call_args_list]
+        self.assertEqual(
+            [item["event"] for item in emitted],
+            [
+                FeedbackRouteWorkerEvent.FAILED,
+                FeedbackRouteWorkerEvent.LEASE_RECOVERED,
+                FeedbackRouteWorkerEvent.COMPLETED,
+            ],
+        )
+        self.assertEqual(emitted[0]["transition"], "running_to_failed")
+        self.assertEqual(emitted[1]["transition"], "running_to_running")
 
     async def test_cron_and_startup_both_invoke_feedback_route_drain(self) -> None:
         import cygnus.runtime.worker as worker_module

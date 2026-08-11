@@ -12,6 +12,7 @@ import asyncio
 import uuid
 import zipfile
 from typing import Optional
+from time import monotonic_ns
 
 from arq import cron
 from arq import func as arq_func
@@ -26,6 +27,11 @@ from cygnus.governance.feedback_execution import (
     execute_feedback_route,
     record_feedback_route_failure,
 )
+from cygnus.governance.feedback_operations import (
+    FeedbackRouteWorkerEvent,
+    emit_feedback_route_worker_event,
+)
+from cygnus.governance.feedback_routing import FeedbackRouteState
 
 from cygnus.runtime.config import get_settings
 from cygnus.runtime.source_state import (
@@ -1224,74 +1230,177 @@ async def regenerate_plan_task(ctx: dict, source_id: str, user_note: str):
                 await session.commit()
 
 
+def _feedback_route_duration_ms(started_ns: int) -> int:
+    return max(0, (monotonic_ns() - started_ns) // 1_000_000)
+
+
+def _emit_feedback_route_terminal_outcome(
+    claim: FeedbackRouteClaim,
+    route,
+    *,
+    duration_ms: int,
+) -> None:
+    state = FeedbackRouteState(route.lifecycle_state)
+    if state is FeedbackRouteState.COMPLETED:
+        event = FeedbackRouteWorkerEvent.COMPLETED
+        transition = "running_to_completed"
+    elif state is FeedbackRouteState.BLOCKED:
+        event = FeedbackRouteWorkerEvent.BLOCKED
+        transition = "running_to_blocked"
+    elif state is FeedbackRouteState.FAILED:
+        event = FeedbackRouteWorkerEvent.FAILED
+        transition = "running_to_failed"
+    else:
+        event = FeedbackRouteWorkerEvent.EXECUTION_ERROR
+        transition = "unexpected_execution_result"
+    emit_feedback_route_worker_event(
+        event=event,
+        route_id=claim.route_id,
+        route_kind=claim.route_kind,
+        transition=transition,
+        attempt_count=claim.attempt_count,
+        duration_ms=duration_ms,
+        outcome_signal_id=route.outcome_signal_id,
+        terminal_reason=route.terminal_reason,
+        exception_class=(
+            "UnexpectedFeedbackRouteState"
+            if event is FeedbackRouteWorkerEvent.EXECUTION_ERROR
+            else None
+        ),
+    )
+
+
 async def _execute_feedback_route_claim(
     session_factory,
     claim: FeedbackRouteClaim,
     *,
     now=None,
 ) -> None:
-    """Execute one leased route without sharing its transaction with another."""
-    route_id = str(claim.route_id)
+    """Execute one leased route and emit only post-rollback/commit outcomes."""
+
+    started_ns = monotonic_ns()
     execution_error: Exception | None = None
+    route = None
 
     try:
         async with session_factory() as execution_session:
             try:
-                await execute_feedback_route(execution_session, claim, now=now)
+                route = await execute_feedback_route(execution_session, claim, now=now)
                 await execution_session.commit()
-            except FeedbackRouteLeaseLost:
+            except FeedbackRouteLeaseLost as exc:
                 await execution_session.rollback()
-                logger.info("Feedback route {} lease lost", route_id)
+                emit_feedback_route_worker_event(
+                    event=FeedbackRouteWorkerEvent.LEASE_LOST,
+                    route_id=claim.route_id,
+                    route_kind=claim.route_kind,
+                    transition="execution_lease_lost",
+                    attempt_count=claim.attempt_count,
+                    duration_ms=_feedback_route_duration_ms(started_ns),
+                    exception_class=type(exc).__name__,
+                )
                 return
             except Exception as exc:
                 execution_error = exc
                 await execution_session.rollback()
     except Exception as exc:
-        logger.warning(
-            "Feedback route {} execution transaction class {}",
-            route_id,
-            type(exc).__name__,
+        emit_feedback_route_worker_event(
+            event=FeedbackRouteWorkerEvent.EXECUTION_ERROR,
+            route_id=claim.route_id,
+            route_kind=claim.route_kind,
+            transition="execution_transaction_failed",
+            attempt_count=claim.attempt_count,
+            duration_ms=_feedback_route_duration_ms(started_ns),
+            exception_class=type(exc).__name__,
         )
         return
 
     if execution_error is None:
-        logger.info("Feedback route {} execution committed", route_id)
+        if route is None:
+            raise AssertionError("feedback route execution returned no route")
+        _emit_feedback_route_terminal_outcome(
+            claim,
+            route,
+            duration_ms=_feedback_route_duration_ms(started_ns),
+        )
         return
 
+    emit_feedback_route_worker_event(
+        event=FeedbackRouteWorkerEvent.EXECUTION_ERROR,
+        route_id=claim.route_id,
+        route_kind=claim.route_kind,
+        transition="execution_failed",
+        attempt_count=claim.attempt_count,
+        duration_ms=_feedback_route_duration_ms(started_ns),
+        exception_class=type(execution_error).__name__,
+    )
+    failure_route = None
     try:
         async with session_factory() as failure_session:
             try:
-                await record_feedback_route_failure(
+                failure_route = await record_feedback_route_failure(
                     failure_session,
                     claim,
                     error=execution_error,
                     now=now,
                 )
                 await failure_session.commit()
-            except FeedbackRouteLeaseLost:
+            except FeedbackRouteLeaseLost as exc:
                 await failure_session.rollback()
-                logger.info("Feedback route {} lease lost", route_id)
+                emit_feedback_route_worker_event(
+                    event=FeedbackRouteWorkerEvent.LEASE_LOST,
+                    route_id=claim.route_id,
+                    route_kind=claim.route_kind,
+                    transition="failure_recording_lease_lost",
+                    attempt_count=claim.attempt_count,
+                    duration_ms=_feedback_route_duration_ms(started_ns),
+                    exception_class=type(exc).__name__,
+                )
                 return
             except Exception as exc:
                 await failure_session.rollback()
-                logger.warning(
-                    "Feedback route {} failure transaction class {}",
-                    route_id,
-                    type(exc).__name__,
+                emit_feedback_route_worker_event(
+                    event=FeedbackRouteWorkerEvent.FAILURE_RECORDING_ERROR,
+                    route_id=claim.route_id,
+                    route_kind=claim.route_kind,
+                    transition="failure_recording_failed",
+                    attempt_count=claim.attempt_count,
+                    duration_ms=_feedback_route_duration_ms(started_ns),
+                    exception_class=type(exc).__name__,
                 )
                 return
     except Exception as exc:
-        logger.warning(
-            "Feedback route {} failure transaction class {}",
-            route_id,
-            type(exc).__name__,
+        emit_feedback_route_worker_event(
+            event=FeedbackRouteWorkerEvent.FAILURE_RECORDING_ERROR,
+            route_id=claim.route_id,
+            route_kind=claim.route_kind,
+            transition="failure_transaction_failed",
+            attempt_count=claim.attempt_count,
+            duration_ms=_feedback_route_duration_ms(started_ns),
+            exception_class=type(exc).__name__,
         )
         return
 
-    logger.warning(
-        "Feedback route {} failure recorded class {}",
-        route_id,
-        type(execution_error).__name__,
+    if failure_route is None:
+        raise AssertionError("feedback route failure recording returned no route")
+    failure_state = FeedbackRouteState(failure_route.lifecycle_state)
+    if failure_state is FeedbackRouteState.QUEUED:
+        event = FeedbackRouteWorkerEvent.RETRY_SCHEDULED
+        transition = "running_to_queued"
+    elif failure_state is FeedbackRouteState.FAILED:
+        event = FeedbackRouteWorkerEvent.FAILED
+        transition = "running_to_failed"
+    else:
+        event = FeedbackRouteWorkerEvent.FAILURE_RECORDING_ERROR
+        transition = "unexpected_failure_result"
+    emit_feedback_route_worker_event(
+        event=event,
+        route_id=claim.route_id,
+        route_kind=claim.route_kind,
+        transition=transition,
+        attempt_count=claim.attempt_count,
+        duration_ms=_feedback_route_duration_ms(started_ns),
+        terminal_reason=failure_route.terminal_reason,
+        exception_class=type(execution_error).__name__,
     )
 
 
@@ -1301,7 +1410,8 @@ async def drain_feedback_routes(
     limit: int = _FEEDBACK_ROUTE_SWEEP_LIMIT,
     session_factory=None,
 ) -> int:
-    """Claim a bounded route batch, then execute every claim in isolation."""
+    """Commit one bounded claim sweep, emit outcomes, then execute each lease."""
+
     if not 1 <= limit <= _FEEDBACK_ROUTE_SWEEP_LIMIT:
         raise ValueError(f"limit must be between 1 and {_FEEDBACK_ROUTE_SWEEP_LIMIT}")
 
@@ -1312,7 +1422,7 @@ async def drain_feedback_routes(
 
     async with session_factory() as claim_session:
         try:
-            claims = await claim_feedback_routes(
+            sweep = await claim_feedback_routes(
                 claim_session,
                 now=now,
                 limit=limit,
@@ -1322,16 +1432,41 @@ async def drain_feedback_routes(
             await claim_session.rollback()
             raise
 
-    for claim in claims:
+    for terminalized in sweep.terminalized:
+        emit_feedback_route_worker_event(
+            event=FeedbackRouteWorkerEvent.FAILED,
+            route_id=terminalized.route_id,
+            route_kind=terminalized.route_kind,
+            transition=(
+                f"{terminalized.previous_state.value}_to_"
+                f"{FeedbackRouteState.FAILED.value}"
+            ),
+            attempt_count=terminalized.attempt_count,
+            terminal_reason=terminalized.terminal_reason,
+        )
+    for claim in sweep.claims:
+        recovered = claim.claimed_from_state is FeedbackRouteState.RUNNING
+        emit_feedback_route_worker_event(
+            event=(
+                FeedbackRouteWorkerEvent.LEASE_RECOVERED
+                if recovered
+                else FeedbackRouteWorkerEvent.CLAIMED
+            ),
+            route_id=claim.route_id,
+            route_kind=claim.route_kind,
+            transition=("running_to_running" if recovered else "queued_to_running"),
+            attempt_count=claim.attempt_count,
+        )
+    for claim in sweep.claims:
         await _execute_feedback_route_claim(
             session_factory,
             claim,
             now=now,
         )
-    return len(claims)
+    return len(sweep.claims)
 
 
-async def sweep_feedback_routes_cron(ctx: dict):
+async def sweep_feedback_routes_cron(ctx: dict[str, object]) -> None:
     """Drain a small durable feedback-route batch on the worker schedule."""
     _ = ctx
     try:

@@ -137,18 +137,20 @@ class FeedbackRoutePostgresTests(unittest.TestCase):
                 sessions() as first_claim_session,
                 sessions() as concurrent_session,
             ):
-                first_claims = await claim_feedback_routes(
+                first_sweep = await claim_feedback_routes(
                     first_claim_session,
                     now=now,
                     limit=1,
                 )
+                first_claims = first_sweep.claims
                 self.assertEqual(len(first_claims), 1)
                 self.assertEqual(first_claims[0].route_id, completed_route_id)
-                skipped_claims = await claim_feedback_routes(
+                skipped_sweep = await claim_feedback_routes(
                     concurrent_session,
                     now=now,
                     limit=1,
                 )
+                skipped_claims = skipped_sweep.claims
                 self.assertEqual(skipped_claims, ())
                 await first_claim_session.commit()
                 completed_claim = first_claims[0]
@@ -215,10 +217,11 @@ class FeedbackRoutePostgresTests(unittest.TestCase):
                 blocked_route_id = blocked_route.id
                 await session.commit()
             async with sessions() as session:
-                blocked_claims = await claim_feedback_routes(
+                blocked_sweep = await claim_feedback_routes(
                     session,
                     now=now + timedelta(minutes=11),
                 )
+                blocked_claims = blocked_sweep.claims
                 self.assertEqual(len(blocked_claims), 1)
                 self.assertEqual(blocked_claims[0].route_id, blocked_route_id)
                 await session.commit()
@@ -245,7 +248,8 @@ class FeedbackRoutePostgresTests(unittest.TestCase):
 
             retry_start = now + timedelta(minutes=12)
             async with sessions() as session:
-                retry_claims = await claim_feedback_routes(session, now=retry_start)
+                retry_sweep = await claim_feedback_routes(session, now=retry_start)
+                retry_claims = retry_sweep.claims
                 self.assertEqual(len(retry_claims), 1)
                 retry_claim = retry_claims[0]
                 self.assertEqual(retry_claim.route_id, retry_route_id)
@@ -265,25 +269,28 @@ class FeedbackRoutePostgresTests(unittest.TestCase):
                 )
                 await session.commit()
             async with sessions() as session:
-                early_claims = await claim_feedback_routes(
+                early_sweep = await claim_feedback_routes(
                     session,
                     now=retry_start + timedelta(seconds=30),
                 )
+                early_claims = early_sweep.claims
                 self.assertEqual(early_claims, ())
                 await session.rollback()
             async with sessions() as session:
-                second_claims = await claim_feedback_routes(
+                second_sweep = await claim_feedback_routes(
                     session,
                     now=retry_start + timedelta(seconds=31),
                 )
+                second_claims = second_sweep.claims
                 self.assertEqual(len(second_claims), 1)
                 self.assertEqual(second_claims[0].attempt_count, 2)
                 await session.commit()
             async with sessions() as session:
-                recovered_claims = await claim_feedback_routes(
+                recovered_sweep = await claim_feedback_routes(
                     session,
                     now=retry_start + timedelta(seconds=91),
                 )
+                recovered_claims = recovered_sweep.claims
                 self.assertEqual(len(recovered_claims), 1)
                 recovered_claim: FeedbackRouteClaim = recovered_claims[0]
                 self.assertEqual(recovered_claim.route_id, retry_route_id)

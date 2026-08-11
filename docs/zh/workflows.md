@@ -147,6 +147,7 @@ drift / ticket / source 信号不止是观察项，而是可被直接发出的�
 - 来源失明（source_blindness）→ `repair_source` / `restrict_propagation` / `route_to_human_review`
 - 审阅队列重排 → `restack` / `reroute` / `escalate`
 - 消费反馈 route（CYG-118/119）：`low_rating` 物化为 review pressure（`ticket_pressure`、unknown freshness），`stale_answer` 物化为疑似 freshness/drift review（`drift`、stale freshness）；route 执行只物化 durable governed review truth，绝不自动修改内容或发布
+- CYG-120 运维观察：`GovernanceFeedbackRoute` 仍是唯一 queue truth；权限内 SQL summary/drilldown 与结构化 worker outcome event 可区分 backlog、due age、lease expiry、retry、blocked/failed 与 outcome/review trace，但这些运行证据不等于 reviewer action、发布、传播或业务 KPI
 
 ## 5. 生命周期原则
 1. **New knowledge defaults to draft**

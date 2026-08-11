@@ -149,7 +149,7 @@ Expected object and evidence refs are required subsets; forbidden object refs mu
 - Fixtures build domain objects and evidence directly. They do not import `sample_*`, use substitute fallback fixtures, read the database, or call live networks/providers. Expected fallback/restricted/escalation dispositions are observable outcomes, not fixture-source fallbacks.
 - Session memory is not retrieval or policy truth.
 - Judge models are outside this gate.
-- The report is deterministic regression evidence only. CYG-119 now provides durable route-outcome truth, so worker-outcome instrumentation may be added outside this gate; the CYG-117 report itself does not exercise or prove feedback-route worker execution, online business KPI instrumentation, or business-impact evidence.
+- The report is deterministic regression evidence only. CYG-120 now implements scoped feedback-route operations reads and structured worker-outcome events outside this gate; the CYG-117 report itself still does not exercise or prove feedback-route worker execution, online business KPI instrumentation, or business-impact evidence.
 
 ## 8. Business-layer metrics outside this gate
 The following remain recommended business measures for a separately instrumented online layer:
@@ -161,7 +161,7 @@ The following remain recommended business measures for a separately instrumented
 - ticket-cluster to draft conversion rate
 - review-to-publish cycle time
 
-CYG-117 neither exercises feedback routing nor measures these KPIs. Durable feedback-route outcome truth now exists (CYG-119), enabling future worker-outcome instrumentation in a separately instrumented layer; a passing domain report must still not be presented as evidence of route execution or business impact.
+CYG-117 neither exercises feedback routing nor measures these KPIs. CYG-120 operations reads and structured events can evidence route backlog, leases, retries, terminal outcomes, and linked review truth; they still cannot turn a passing domain report or route completion into business-impact evidence.
 
 ## 9. Failure-to-eval loop
 Every real failure should produce one of these outcomes:
@@ -188,13 +188,13 @@ Without that, evaluator outputs become hard to trust.
 ## 11. Recommended next evaluation layers
 1. grow deterministic cases from observed failures without weakening the fixed gate contract
 2. add broader drafting fixtures where observable contracts exist
-3. instrument online support KPIs and feedback-route worker outcomes now that CYG-119 provides durable route-outcome truth, keeping them outside the CYG-117 gate
+3. use CYG-120 scoped route operations and worker-outcome events as separate online operational evidence, then instrument support KPIs independently; never collapse the two layers
 4. consider a judge-assisted layer only for quality dimensions deterministic checks cannot establish
 
 ## 12. Current conclusion
 The CYG-117 gate makes deterministic governance correctness and domain-specific offline fixtures merge-blocking. It evaluates the Cygnus domain control plane through existing governed retrieval and publish-policy paths; it does not turn Cygnus into another agent loop or move truth into Nanobot session memory.
 
-Generic agent benchmarks, judge-model quality scores, durable feedback routing, feedback-route worker execution, and online business impact remain outside this gate and are not evidenced by its report; route outcomes are now durable under CYG-119, so worker-outcome instrumentation may be added outside the gate.
+Generic agent benchmarks, judge-model quality scores, durable feedback routing, feedback-route worker execution, and online business impact remain outside the CYG-117 gate and are not evidenced by its report. CYG-120's operations reads and worker events sit outside that gate and prove lifecycle truth only, not business impact.
 
 ## 13. References
 - AI Engineering from Scratch — Eval-Driven Agent Development  

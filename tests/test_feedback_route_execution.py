@@ -17,7 +17,11 @@ from cygnus.governance.feedback_execution import (
     execute_feedback_route,
     record_feedback_route_failure,
 )
-from cygnus.governance.feedback_routing import project_feedback_route
+from cygnus.governance.feedback_routing import (
+    FeedbackRouteKind,
+    FeedbackRouteState,
+    project_feedback_route,
+)
 from cygnus.review import PressureSignalType
 from cygnus.runtime.database.models import (
     AuditLog,
@@ -278,8 +282,10 @@ def _audit_rows(session: _RouteSession) -> list[AuditLog]:
 def _claim(route: object) -> FeedbackRouteClaim:
     return FeedbackRouteClaim(
         route_id=getattr(route, "id"),
+        route_kind=FeedbackRouteKind(getattr(route, "route_kind")),
         lease_token=getattr(route, "lease_token"),
         attempt_count=getattr(route, "attempt_count"),
+        claimed_from_state=FeedbackRouteState.QUEUED,
     )
 
 
@@ -323,9 +329,10 @@ class FeedbackRouteClaimTests(unittest.IsolatedAsyncioTestCase):
         route = _route(feedback_signal_id=feedback.id)
         session = _RouteSession(routes=(route,), feedback_signals=(feedback,))
 
-        claims = await claim_feedback_routes(
+        sweep = await claim_feedback_routes(
             cast(AsyncSession, cast(object, session)), now=_NOW
         )
+        claims = sweep.claims
 
         self.assertEqual(len(claims), 1)
         claim = claims[0]
@@ -350,9 +357,10 @@ class FeedbackRouteClaimTests(unittest.IsolatedAsyncioTestCase):
         )
         session = _RouteSession(routes=(route,), feedback_signals=(feedback,))
 
-        claims = await claim_feedback_routes(
+        sweep = await claim_feedback_routes(
             cast(AsyncSession, cast(object, session)), now=_NOW
         )
+        claims = sweep.claims
 
         self.assertEqual(claims, ())
         self.assertEqual(route.lifecycle_state, "queued")
@@ -373,9 +381,10 @@ class FeedbackRouteClaimTests(unittest.IsolatedAsyncioTestCase):
         )
         session = _RouteSession(routes=(route,), feedback_signals=(feedback,))
 
-        claims = await claim_feedback_routes(
+        sweep = await claim_feedback_routes(
             cast(AsyncSession, cast(object, session)), now=_NOW
         )
+        claims = sweep.claims
 
         self.assertEqual(len(claims), 1)
         claim = claims[0]
@@ -404,11 +413,17 @@ class FeedbackRouteClaimTests(unittest.IsolatedAsyncioTestCase):
             actor=SimpleNamespace(id=actor_id),
         )
 
-        claims = await claim_feedback_routes(
+        sweep = await claim_feedback_routes(
             cast(AsyncSession, cast(object, session)), now=_NOW
         )
+        claims = sweep.claims
 
         self.assertEqual(claims, ())
+        self.assertEqual(len(sweep.terminalized), 1)
+        terminalized = sweep.terminalized[0]
+        self.assertEqual(terminalized.route_id, route.id)
+        self.assertIs(terminalized.previous_state, FeedbackRouteState.RUNNING)
+        self.assertEqual(terminalized.terminal_reason, "retry_exhausted")
         self.assertEqual(route.lifecycle_state, "failed")
         self.assertEqual(route.terminal_reason, "retry_exhausted")
         self.assertTrue(route.last_error)
@@ -572,8 +587,10 @@ class FeedbackRouteExecutionTests(unittest.IsolatedAsyncioTestCase):
                 cast(AsyncSession, cast(object, session)),
                 FeedbackRouteClaim(
                     route_id=route.id,
+                    route_kind=FeedbackRouteKind.REVIEW,
                     lease_token="stale-worker-token",
                     attempt_count=1,
+                    claimed_from_state=FeedbackRouteState.QUEUED,
                 ),
                 now=_NOW,
             )
@@ -716,8 +733,10 @@ class FeedbackRouteExecutionTests(unittest.IsolatedAsyncioTestCase):
                 session = _RouteSession(routes=(route,), feedback_signals=(feedback,))
                 claim = FeedbackRouteClaim(
                     route_id=route.id,
+                    route_kind=FeedbackRouteKind.REVIEW,
                     lease_token=claim_token,
                     attempt_count=1,
+                    claimed_from_state=FeedbackRouteState.QUEUED,
                 )
                 before = dict(vars(route))
 

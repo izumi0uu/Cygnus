@@ -72,8 +72,29 @@ class FeedbackRouteClaim:
     """A fencing lease returned from one durable route claim sweep."""
 
     route_id: uuid.UUID
+    route_kind: FeedbackRouteKind
     lease_token: str
     attempt_count: int
+    claimed_from_state: FeedbackRouteState
+
+
+@dataclass(frozen=True, slots=True)
+class FeedbackRouteTerminalization:
+    """A route terminalized during claim recovery before execution."""
+
+    route_id: uuid.UUID
+    route_kind: FeedbackRouteKind
+    previous_state: FeedbackRouteState
+    attempt_count: int
+    terminal_reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class FeedbackRouteClaimSweep:
+    """Claimed leases and terminal recovery outcomes from one sweep."""
+
+    claims: tuple[FeedbackRouteClaim, ...]
+    terminalized: tuple[FeedbackRouteTerminalization, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,12 +150,13 @@ async def claim_feedback_routes(
     *,
     now: datetime | None = None,
     limit: int = 25,
-) -> tuple[FeedbackRouteClaim, ...]:
-    """Lease due queued routes and recover expired running leases.
+) -> FeedbackRouteClaimSweep:
+    """Lease due routes and expose every durable recovery outcome.
 
     Rows are claimed under ``FOR UPDATE SKIP LOCKED``. The expiration sweep also
     terminalizes any route whose third lease expired, rather than leaving it in a
-    permanently unclaimable running state.
+    permanently unclaimable running state. The caller emits events only after the
+    transaction commits.
     """
 
     current_time = _now(now)
@@ -170,6 +192,7 @@ async def claim_feedback_routes(
     routes = tuple((await session.execute(statement)).scalars().all())
 
     claims: list[FeedbackRouteClaim] = []
+    terminalized: list[FeedbackRouteTerminalization] = []
     changed = False
     for route in routes:
         state = _route_state(route)
@@ -178,6 +201,12 @@ async def claim_feedback_routes(
             FeedbackRouteState.RUNNING,
         }:
             continue
+        try:
+            route_kind = FeedbackRouteKind(route.route_kind)
+        except ValueError as exc:
+            raise RuntimeError(
+                f"feedback route {route.id} has an invalid route kind"
+            ) from exc
 
         attempts = route.attempt_count
         if attempts >= MAX_FEEDBACK_ROUTE_ATTEMPTS:
@@ -199,6 +228,15 @@ async def claim_feedback_routes(
                 outcome="failed",
                 terminal_reason=_RETRY_EXHAUSTED,
             )
+            terminalized.append(
+                FeedbackRouteTerminalization(
+                    route_id=route.id,
+                    route_kind=route_kind,
+                    previous_state=state,
+                    attempt_count=route.attempt_count,
+                    terminal_reason=_RETRY_EXHAUSTED,
+                )
+            )
             changed = True
             continue
 
@@ -217,15 +255,20 @@ async def claim_feedback_routes(
         claims.append(
             FeedbackRouteClaim(
                 route_id=route.id,
+                route_kind=route_kind,
                 lease_token=lease_token,
                 attempt_count=route.attempt_count,
+                claimed_from_state=state,
             )
         )
         changed = True
 
     if changed:
         await session.flush()
-    return tuple(claims)
+    return FeedbackRouteClaimSweep(
+        claims=tuple(claims),
+        terminalized=tuple(terminalized),
+    )
 
 
 async def execute_feedback_route(
@@ -637,7 +680,9 @@ async def _append_terminal_audit(
 
 __all__ = [
     "FeedbackRouteClaim",
+    "FeedbackRouteClaimSweep",
     "FeedbackRouteLeaseLost",
+    "FeedbackRouteTerminalization",
     "claim_feedback_routes",
     "execute_feedback_route",
     "record_feedback_route_failure",

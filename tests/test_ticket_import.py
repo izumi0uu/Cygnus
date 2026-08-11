@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 import uuid
@@ -15,6 +16,8 @@ from cygnus.governance.signals import (
 from cygnus.governance.ticket_import import (
     MAX_IMPORT_DIAGNOSTICS,
     TicketExportFormat,
+    TicketImportSourceNotFound,
+    TicketImportSourceNotReady,
     TicketImportValidationError,
     build_ticket_import_plan,
     import_resolved_ticket_export,
@@ -27,6 +30,7 @@ from cygnus.runtime.database.models import GovernanceSignal
 _FIXTURE_DIR = Path(__file__).parent / "fixtures"
 _SOURCE_REF = "sanitized-helpdesk-export/2026-w32"
 _ACTOR_ID = uuid.uuid4()
+_SOURCE_ID = uuid.uuid4()
 _NOW = datetime(2026, 8, 8, 12, 0, tzinfo=timezone.utc)
 
 
@@ -153,6 +157,7 @@ class TicketImportContractTests(unittest.TestCase):
                         invalid,
                         export_format=TicketExportFormat.JSONL,
                         source_ref=_SOURCE_REF,
+                        source_id=_SOURCE_ID,
                         minimum_cluster_size=3,
                         created_by_id=_ACTOR_ID,
                     )
@@ -184,6 +189,8 @@ class TicketImportGovernanceHandoffTests(unittest.TestCase):
         fake_create = AsyncMock(
             side_effect=lambda _session, item, **_: _signal_from_input(item)
         )
+        session = AsyncMock()
+        session.get.return_value = SimpleNamespace(status="ready")
 
         async def exercise() -> None:
             with patch(
@@ -191,10 +198,11 @@ class TicketImportGovernanceHandoffTests(unittest.TestCase):
                 fake_create,
             ):
                 result = await import_resolved_ticket_export(
-                    AsyncMock(),
+                    session,
                     _fixture("resolved_ticket_export.csv"),
                     export_format=TicketExportFormat.CSV,
                     source_ref=_SOURCE_REF,
+                    source_id=_SOURCE_ID,
                     minimum_cluster_size=3,
                     created_by_id=_ACTOR_ID,
                 )
@@ -205,9 +213,12 @@ class TicketImportGovernanceHandoffTests(unittest.TestCase):
             create_call = fake_create.await_args
             assert create_call is not None
             signal_input = create_call.args[1]
+            self.assertEqual(signal_input.source_id, _SOURCE_ID)
             self.assertEqual(signal_input.signal_type.value, "ticket_cluster")
             self.assertEqual(len(signal_input.evidence_refs), 3)
             self.assertIn("feature=session-resume", signal_input.summary)
+            self.assertEqual(result.source_id, _SOURCE_ID)
+            self.assertEqual(result.to_dict()["source_id"], str(_SOURCE_ID))
             self.assertEqual(result.to_dict()["publication_state"], "not_published")
             self.assertEqual(
                 result.to_dict()["next_step"], "review_qualifying_candidates"
@@ -218,15 +229,44 @@ class TicketImportGovernanceHandoffTests(unittest.TestCase):
                 AsyncMock(),
             ) as no_create:
                 below_threshold = await import_resolved_ticket_export(
-                    AsyncMock(),
+                    session,
                     _fixture("resolved_ticket_export.csv"),
                     export_format=TicketExportFormat.CSV,
                     source_ref=_SOURCE_REF,
+                    source_id=_SOURCE_ID,
                     minimum_cluster_size=4,
                     created_by_id=_ACTOR_ID,
                 )
             self.assertEqual(len(below_threshold.governance_signals), 0)
             no_create.assert_not_awaited()
+
+        asyncio.run(exercise())
+
+    def test_import_requires_an_existing_ready_source_before_writes(self) -> None:
+        async def exercise() -> None:
+            cases = (
+                (None, TicketImportSourceNotFound),
+                (SimpleNamespace(status="processing"), TicketImportSourceNotReady),
+            )
+            for source, expected_error in cases:
+                with self.subTest(source=source):
+                    session = AsyncMock()
+                    session.get.return_value = source
+                    with patch(
+                        "cygnus.governance.ticket_import.create_governance_signal",
+                        AsyncMock(),
+                    ) as create_signal:
+                        with self.assertRaises(expected_error):
+                            _ = await import_resolved_ticket_export(
+                                session,
+                                _fixture("resolved_ticket_export.csv"),
+                                export_format=TicketExportFormat.CSV,
+                                source_ref=_SOURCE_REF,
+                                source_id=_SOURCE_ID,
+                                minimum_cluster_size=3,
+                                created_by_id=_ACTOR_ID,
+                            )
+                        create_signal.assert_not_awaited()
 
         asyncio.run(exercise())
 
@@ -240,7 +280,9 @@ class TicketImportGovernanceHandoffTests(unittest.TestCase):
             source_ref=_SOURCE_REF,
             export_format=TicketExportFormat.CSV,
         )
-        signal_input = plan.qualifying_candidates[0].to_signal_input()
+        signal_input = plan.qualifying_candidates[0].to_signal_input(
+            source_id=_SOURCE_ID
+        )
         signal = _signal_from_input(signal_input)
 
         record = governance_signal_to_pressure_record(signal)

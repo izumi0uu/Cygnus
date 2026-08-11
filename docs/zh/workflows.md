@@ -138,6 +138,8 @@ CYG-122 把 Loop A 的输入边界固化为一个有界 pilot：管理员通过 
 
 CYG-123 在该导入边界之后增加显式的 reviewer-controlled draft 命令：已认证管理员可针对符合条件且仍为 `active` 的 `ticket_pressure` signal，通过 `POST /api/governance-signals/{signal_ref}/commands/promote-draft` 提交 `command_id`、`expected_assignment_version` 与非空 `reason`。同一事务会锁定 signal、验证 assignment 版本与结构化 ticket evidence，创建 `WikiPageDraft(status=draft)` 和 append-only governance event，并记录可重放的 promotion receipt；完全相同的 `command_id` 返回同一结果，负载漂移返回 conflict。成功只证明 draft 已持久化；不会提交审阅、审批或发布。
 
+CYG-125 补齐该闭环的 durable evidence 接缝：ticket import 除不可变 `source_ref` 外还必须接收一个明确存在且为 `ready` 的 `source_id`，并把它写入所有达阈值 signal。Reviewer-controlled promotion 将该 ID 原样带入 draft metadata，approval 再物化到 `WikiPage.source_ids`；同一绑定 exact replay，复用同一导出真相却更换 Source 则 conflict。这样既有 approval-backed durable publish gate 可被正常抵达，而无需放松证据或 audience-binding 策略；import 仍不会自动创建 Source、提交、审批或发布。
+
 ### Loop B：Freshness Recovery
 release/incident change -> drift alert -> revision draft -> review -> republish
 

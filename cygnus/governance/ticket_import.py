@@ -6,8 +6,9 @@ Contract ``resolved-ticket-export/v1`` accepts UTF-8 CSV or JSONL. Required fiel
 ``product_line``, ``feature``, ``plan``, ``region``, ``language``,
 ``product_version``, and ``object_type``.
 
-The caller owns de-identification. The importer performs no network access, uses no
-LLM, and never approves or publishes knowledge. It validates the whole payload before
+The caller owns de-identification and supplies an existing ready ``Source`` as the
+durable evidence owner. The importer performs no network access, uses no LLM, and never
+approves or publishes knowledge. It validates the whole payload and Source before
 writing, then materializes qualifying candidates through the existing durable
 GovernanceSignal owner in the caller's transaction.
 """
@@ -38,7 +39,7 @@ from cygnus.governance.signals import (
     governance_signal_to_dict,
 )
 from cygnus.review.intake import PressureSignalType
-from cygnus.runtime.database.models import GovernanceSignal
+from cygnus.runtime.database.models import GovernanceSignal, Source
 
 
 TICKET_IMPORT_CONTRACT_VERSION = "resolved-ticket-export/v1"
@@ -114,6 +115,16 @@ class TicketImportValidationError(ValueError):
             "diagnostics": [item.to_dict() for item in self.diagnostics],
             "diagnostics_truncated": self.total_errors > len(self.diagnostics),
         }
+
+
+@final
+class TicketImportSourceNotFound(LookupError):
+    """The requested durable Source does not exist."""
+
+
+@final
+class TicketImportSourceNotReady(ValueError):
+    """The requested durable Source cannot ground publication yet."""
 
 
 @final
@@ -215,7 +226,7 @@ class TicketClusterCandidate:
     def qualifies(self) -> bool:
         return self.member_count >= self.minimum_cluster_size
 
-    def to_signal_input(self) -> GovernanceSignalInput:
+    def to_signal_input(self, *, source_id: uuid.UUID) -> GovernanceSignalInput:
         if not self.qualifies:
             raise ValueError(
                 "non-qualifying ticket clusters cannot create governance signals"
@@ -227,6 +238,7 @@ class TicketClusterCandidate:
             object_ref=self.cluster_ref,
             title=self.title,
             object_type=self.object_type,
+            source_id=source_id,
             audience_filter=self.audience_filter,
             affected_surfaces=("copilot", "review_queue"),
             trigger_signals=(
@@ -301,12 +313,14 @@ class TicketImportPlan:
 @dataclass(frozen=True, slots=True, kw_only=True)
 class TicketImportResult:
     plan: TicketImportPlan
+    source_id: uuid.UUID
     governance_signals: tuple[GovernanceSignal, ...]
 
     def to_dict(self) -> dict[str, object]:
         payload = self.plan.to_dict()
         payload.update(
             {
+                "source_id": str(self.source_id),
                 "persisted_signal_count": len(self.governance_signals),
                 "persisted_signal_refs": [
                     signal.signal_ref for signal in self.governance_signals
@@ -447,12 +461,27 @@ def build_ticket_import_plan(
     )
 
 
+async def _require_ready_ticket_source(
+    session: AsyncSession,
+    source_id: uuid.UUID,
+) -> Source:
+    source = await session.get(Source, source_id)
+    if source is None:
+        raise TicketImportSourceNotFound(f"source_id={source_id} was not found")
+    if source.status != "ready":
+        raise TicketImportSourceNotReady(
+            f"source_id={source_id} is not ready (status={source.status})"
+        )
+    return source
+
+
 async def import_resolved_ticket_export(
     session: AsyncSession,
     content: bytes,
     *,
     export_format: TicketExportFormat,
     source_ref: str,
+    source_id: uuid.UUID,
     minimum_cluster_size: int,
     created_by_id: uuid.UUID,
 ) -> TicketImportResult:
@@ -465,16 +494,21 @@ async def import_resolved_ticket_export(
         export_format=export_format,
         minimum_cluster_size=minimum_cluster_size,
     )
+    _ = await _require_ready_ticket_source(session, source_id)
     persisted: list[GovernanceSignal] = []
     for candidate in plan.qualifying_candidates:
         persisted.append(
             await create_governance_signal(
                 session,
-                candidate.to_signal_input(),
+                candidate.to_signal_input(source_id=source_id),
                 created_by_id=created_by_id,
             )
         )
-    return TicketImportResult(plan=plan, governance_signals=tuple(persisted))
+    return TicketImportResult(
+        plan=plan,
+        governance_signals=tuple(persisted),
+        source_id=source_id,
+    )
 
 
 def _csv_rows(
@@ -535,7 +569,7 @@ def _jsonl_rows(
         if not raw_line.strip():
             continue
         try:
-            payload: object = json.loads(raw_line)
+            payload = cast(object, json.loads(raw_line))
         except json.JSONDecodeError as exc:
             diagnostics.add(
                 line=line_number,

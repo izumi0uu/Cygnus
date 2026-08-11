@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import uuid
 from typing import Annotated
 
 from fastapi import (
@@ -17,6 +19,8 @@ from cygnus.governance.signals import GovernanceSignalConflict
 from cygnus.governance.ticket_import import (
     MAX_IMPORT_BYTES,
     TicketExportFormat,
+    TicketImportSourceNotFound,
+    TicketImportSourceNotReady,
     TicketImportValidationError,
     import_resolved_ticket_export,
 )
@@ -39,6 +43,7 @@ router = APIRouter()
 async def write_resolved_ticket_import(
     file: Annotated[UploadFile, File()],
     source_ref: Annotated[str, Form(min_length=1, max_length=300)],
+    source_id: Annotated[uuid.UUID, Form()],
     export_format: Annotated[TicketExportFormat, Form()],
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[Employee, Depends(require_admin)],
@@ -46,10 +51,11 @@ async def write_resolved_ticket_import(
 ) -> dict[str, object]:
     """Validate the full export, then create review-bound governance signals atomically.
 
-    ``source_ref`` identifies an immutable, already-sanitized export snapshot. Replaying
-    the same snapshot is idempotent; reusing the reference for different cluster facts
-    returns a conflict. Non-qualifying candidates are returned but never persisted as
-    review work. No path in this endpoint approves or publishes knowledge.
+    ``source_ref`` identifies an immutable, already-sanitized export snapshot;
+    ``source_id`` binds its qualifying signals to an existing ready evidence owner.
+    Replaying the same snapshot and Source is idempotent; changing either truth returns
+    a conflict. Non-qualifying candidates are returned but never persisted as review
+    work. No path in this endpoint creates a Source, approves, or publishes knowledge.
     """
 
     content = await file.read(MAX_IMPORT_BYTES + 1)
@@ -59,6 +65,7 @@ async def write_resolved_ticket_import(
             content,
             export_format=export_format,
             source_ref=source_ref,
+            source_id=source_id,
             minimum_cluster_size=minimum_cluster_size,
             created_by_id=current_user.id,
         )
@@ -66,6 +73,16 @@ async def write_resolved_ticket_import(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=exc.to_dict(),
+        ) from exc
+    except TicketImportSourceNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except TicketImportSourceNotReady as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
         ) from exc
     except GovernanceSignalConflict as exc:
         raise HTTPException(

@@ -138,6 +138,8 @@ CYG-122 freezes Loop A's input boundary as a bounded pilot: an administrator sub
 
 CYG-123 adds an explicit reviewer-controlled draft command after that import boundary: an authenticated administrator may target a qualifying, still-`active` `ticket_pressure` signal through `POST /api/governance-signals/{signal_ref}/commands/promote-draft` with a `command_id`, `expected_assignment_version`, and non-empty `reason`. One transaction locks the signal, validates the assignment version and structured ticket evidence, creates a `WikiPageDraft(status=draft)` plus an append-only governance event, and records a replayable promotion receipt; the exact same `command_id` returns the same result, while payload drift conflicts. Success proves only that the draft was persisted; it does not submit for review, approve, or publish.
 
+CYG-125 closes this loop's durable-evidence seam: ticket import now requires an explicit existing `source_id` in `ready` state in addition to immutable `source_ref`, and persists it on every qualifying signal. Reviewer-controlled promotion carries that ID unchanged into draft metadata, and approval materializes it into `WikiPage.source_ids`; the same binding replays exactly, while changing the Source under the same export truth conflicts. The existing approval-backed durable publish gate is therefore reachable without relaxing evidence or audience-binding policy, and import still never creates a Source, submits, approves, or publishes automatically.
+
 ### Loop B: Freshness Recovery
 Release/incident change -> drift alert -> revision draft -> review -> republish
 

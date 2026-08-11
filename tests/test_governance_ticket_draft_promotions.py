@@ -67,7 +67,7 @@ class _Result:
         return self._scalar
 
 
-def _signal() -> GovernanceSignal:
+def _signal(*, source_id: uuid.UUID | None = None) -> GovernanceSignal:
     signal = GovernanceSignal(
         id=uuid.uuid4(),
         signal_ref="ticket:billing-verification:w32",
@@ -76,7 +76,7 @@ def _signal() -> GovernanceSignal:
         title="Billing verification cluster",
         object_type="troubleshooting_flow",
         page_id=None,
-        source_id=None,
+        source_id=source_id,
         audience_binding_ref=None,
         audience_filter={
             "visibility": "internal",
@@ -182,7 +182,8 @@ class TicketDraftPromotionServiceTests(unittest.TestCase):
     def test_qualifying_ticket_cluster_creates_unsubmitted_draft_and_resolves_signal(
         self,
     ) -> None:
-        signal = _signal()
+        source_id = uuid.uuid4()
+        signal = _signal(source_id=source_id)
         assignment = _assignment(signal)
         draft = _draft()
         command = TicketDraftPromotionCommand(
@@ -233,6 +234,7 @@ class TicketDraftPromotionServiceTests(unittest.TestCase):
         self.assertFalse(create_kwargs["submit_for_review"])
         self.assertEqual(source_metadata["ticket_cluster_ref"], signal.object_ref)
         self.assertEqual(source_metadata["evidence_refs"], signal.evidence_refs)
+        self.assertEqual(source_metadata["source_ids"], [str(source_id)])
         resolve_signal.assert_awaited_once_with(
             ANY,
             signal.signal_ref,

@@ -12,6 +12,10 @@ from httpx import Response
 
 from cygnus.governance.signals import GovernanceSignalConflict
 from cygnus.governance.ticket_pilot import TicketPilotFunnelQuery
+from cygnus.governance.ticket_import import (
+    TicketImportSourceNotFound,
+    TicketImportSourceNotReady,
+)
 from cygnus.runtime.database import get_db
 from cygnus.runtime.main import app
 from cygnus.runtime.routers.governance import ticket_imports as ticket_imports_router
@@ -27,6 +31,7 @@ class TicketImportApiTests(unittest.TestCase):
         self.startup_patches: list[Any] = []
         self.client = TestClient(app)
         self.admin_id = uuid.UUID(int=0)
+        self.source_id = uuid.UUID(int=0)
         self.admin = SimpleNamespace(id=self.admin_id, role="admin")
 
     def setUp(self) -> None:
@@ -47,6 +52,7 @@ class TicketImportApiTests(unittest.TestCase):
         for patcher in self.startup_patches:
             patcher.start()
         self.admin_id = uuid.uuid4()
+        self.source_id = uuid.uuid4()
         self.admin = SimpleNamespace(id=self.admin_id, role="admin")
         app.dependency_overrides[get_db] = lambda: AsyncMock()
 
@@ -71,6 +77,7 @@ class TicketImportApiTests(unittest.TestCase):
             },
             data={
                 "source_ref": "sanitized-helpdesk-export/2026-w32",
+                "source_id": str(self.source_id),
                 "export_format": "csv",
                 **data,
             },
@@ -90,7 +97,11 @@ class TicketImportApiTests(unittest.TestCase):
 
     def test_import_returns_plan_and_persists_only_qualifying_signals(self) -> None:
         self.enable_admin()
-        result = {"record_count": 4, "persisted_signal_count": 1}
+        result = {
+            "source_id": str(self.source_id),
+            "record_count": 4,
+            "persisted_signal_count": 1,
+        }
         with patch.object(
             ticket_imports_router,
             "import_resolved_ticket_export",
@@ -110,10 +121,56 @@ class TicketImportApiTests(unittest.TestCase):
             import_call.kwargs["source_ref"],
             "sanitized-helpdesk-export/2026-w32",
         )
+        self.assertEqual(import_call.kwargs["source_id"], self.source_id)
         self.assertEqual(import_call.kwargs["minimum_cluster_size"], 3)
         self.assertEqual(import_call.kwargs["created_by_id"], self.admin_id)
         self.assertEqual(import_call.kwargs["export_format"].value, "csv")
         self.assertEqual(import_call.args[1], _FIXTURE.read_bytes())
+
+    def test_import_requires_source_id(self) -> None:
+        self.enable_admin()
+        response = self.client.post(
+            "/api/governance/ticket-imports",
+            files={
+                "file": (
+                    "resolved-tickets.csv",
+                    _FIXTURE.read_bytes(),
+                    "text/csv",
+                )
+            },
+            data={
+                "source_ref": "sanitized-helpdesk-export/2026-w32",
+                "export_format": "csv",
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+
+    def test_import_maps_source_state_errors_without_writing(self) -> None:
+        self.enable_admin()
+        cases = (
+            (
+                TicketImportSourceNotFound("source was not found"),
+                404,
+                "source was not found",
+            ),
+            (
+                TicketImportSourceNotReady("source is not ready"),
+                409,
+                "source is not ready",
+            ),
+        )
+        for service_error, expected_status, expected_detail in cases:
+            with self.subTest(service_error=service_error):
+                with patch.object(
+                    ticket_imports_router,
+                    "import_resolved_ticket_export",
+                    AsyncMock(side_effect=service_error),
+                ):
+                    response = self._request(_FIXTURE.read_bytes())
+
+                self.assertEqual(response.status_code, expected_status)
+                self.assertEqual(response.json()["detail"], expected_detail)
 
     def test_invalid_export_returns_bounded_contract_diagnostics(self) -> None:
         self.enable_admin()

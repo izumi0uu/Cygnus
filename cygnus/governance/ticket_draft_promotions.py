@@ -209,7 +209,7 @@ async def promote_ticket_cluster_to_draft(
             f"expected_assignment_version={command.expected_assignment_version} does not match current version={assignment.version}"
         )
 
-    audience_filter = _validate_eligible_ticket_cluster(signal)
+    audience_filter = validate_eligible_ticket_cluster(signal)
     evidence_refs = [dict(item) for item in signal.evidence_refs or []]
     source_signal_version = signal.version
     created_at = datetime.now(timezone.utc)
@@ -274,7 +274,7 @@ async def promote_ticket_cluster_to_draft(
     )
 
 
-def _validate_eligible_ticket_cluster(signal: GovernanceSignal) -> AudienceFilter:
+def validate_eligible_ticket_cluster(signal: GovernanceSignal) -> AudienceFilter:
     if signal.signal_type != PressureSignalType.TICKET_CLUSTER.value:
         raise ValueError("only ticket_cluster signals can create ticket drafts")
     if signal.page_id is not None:

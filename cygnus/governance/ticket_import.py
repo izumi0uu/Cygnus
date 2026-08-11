@@ -398,7 +398,7 @@ def build_ticket_import_plan(
     export_format: TicketExportFormat,
     minimum_cluster_size: int = 3,
 ) -> TicketImportPlan:
-    normalized_source_ref = _validate_source_ref(source_ref)
+    normalized_source_ref = validate_ticket_source_ref(source_ref)
     if isinstance(minimum_cluster_size, bool):
         raise ValueError("minimum_cluster_size must be an integer")
     if not 2 <= minimum_cluster_size <= 100:
@@ -880,7 +880,7 @@ def _representative_excerpt(records: list[ResolvedTicketRecord]) -> str:
     return _truncate("\n".join(excerpts), 4000)
 
 
-def _validate_source_ref(source_ref: str) -> str:
+def validate_ticket_source_ref(source_ref: str) -> str:
     normalized = source_ref.strip()
     if not normalized:
         raise ValueError("source_ref must not be blank")

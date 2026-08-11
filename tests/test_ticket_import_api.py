@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any
+from typing import Any, cast
 
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from httpx import Response
 
 from cygnus.governance.signals import GovernanceSignalConflict
+from cygnus.governance.ticket_pilot import TicketPilotFunnelQuery
 from cygnus.runtime.database import get_db
 from cygnus.runtime.main import app
 from cygnus.runtime.routers.governance import ticket_imports as ticket_imports_router
@@ -75,6 +76,14 @@ class TicketImportApiTests(unittest.TestCase):
             },
         )
 
+    def _pilot_request(
+        self, source_ref: str = "sanitized-helpdesk-export/2026-w32"
+    ) -> Response:
+        return self.client.get(
+            "/api/governance/ticket-pilot",
+            params={"source_ref": source_ref},
+        )
+
     def test_import_is_admin_gated(self) -> None:
         response = self._request(_FIXTURE.read_bytes())
         self.assertEqual(response.status_code, 401)
@@ -132,6 +141,46 @@ class TicketImportApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertIn("different ticket snapshot", response.json()["detail"])
 
+    def test_pilot_report_is_admin_gated(self) -> None:
+        response = self._pilot_request()
+        self.assertEqual(response.status_code, 401)
+
+    def test_pilot_report_passes_exact_source_scope(self) -> None:
+        self.enable_admin()
+        result: dict[str, object] = {
+            "source_ref": "sanitized-helpdesk-export/2026-w32",
+            "items": [],
+            "persisted": True,
+            "rehearsal": False,
+        }
+        with patch.object(
+            ticket_imports_router,
+            "get_ticket_pilot_funnel",
+            AsyncMock(return_value=SimpleNamespace(to_dict=lambda: result)),
+        ) as get_funnel:
+            response = self._pilot_request()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), result)
+        get_funnel.assert_awaited_once()
+        funnel_call = get_funnel.await_args
+        assert funnel_call is not None
+        query = cast(TicketPilotFunnelQuery, funnel_call.kwargs["query"])
+        self.assertIsInstance(query, TicketPilotFunnelQuery)
+        self.assertEqual(query.source_ref, "sanitized-helpdesk-export/2026-w32")
+
+    def test_pilot_report_rejects_blank_source_scope_before_read(self) -> None:
+        self.enable_admin()
+        with patch.object(
+            ticket_imports_router,
+            "get_ticket_pilot_funnel",
+            AsyncMock(),
+        ) as get_funnel:
+            response = self._pilot_request("   ")
+
+        self.assertEqual(response.status_code, 422)
+        get_funnel.assert_not_awaited()
+
 
 if __name__ == "__main__":
-    unittest.main()
+    _ = unittest.main()

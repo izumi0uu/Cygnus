@@ -1,7 +1,16 @@
 from __future__ import annotations
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.governance.signals import GovernanceSignalConflict
@@ -11,10 +20,13 @@ from cygnus.governance.ticket_import import (
     TicketImportValidationError,
     import_resolved_ticket_export,
 )
+from cygnus.governance.ticket_pilot import (
+    TicketPilotFunnelQuery,
+    get_ticket_pilot_funnel,
+)
 from cygnus.runtime.database import get_db
 from cygnus.runtime.database.models import Employee
 from cygnus.runtime.services.auth_service import require_admin
-
 
 router = APIRouter()
 
@@ -60,6 +72,27 @@ async def write_resolved_ticket_import(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
         ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    return result.to_dict()
+
+
+@router.get(
+    "/api/governance/ticket-pilot",
+    summary="Read source-scoped ticket-to-knowledge pilot truth",
+)
+async def ticket_pilot_funnel(
+    source_ref: Annotated[str, Query(min_length=1, max_length=300)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _current_user: Annotated[Employee, Depends(require_admin)],
+) -> dict[str, object]:
+    """Read durable funnel truth without changing any governance state."""
+    try:
+        query = TicketPilotFunnelQuery(source_ref=source_ref)
+        result = await get_ticket_pilot_funnel(db, query=query)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

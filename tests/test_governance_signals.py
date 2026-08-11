@@ -14,6 +14,7 @@ from sqlalchemy.dialects import postgresql
 from cygnus.domain import AudienceFilter, KnowledgeObjectType, Visibility
 from cygnus.evidence import EvidenceSourceType, FreshnessState
 from cygnus.governance.signals import (
+    GovernanceEvidenceRef,
     GovernanceSignalConflict,
     GovernanceSignalInput,
     compile_review_signal_bundles,
@@ -296,6 +297,51 @@ class GovernanceSignalServiceTests(unittest.TestCase):
         self.assertIs(replay, existing)
         session.add.assert_not_called()
         session.flush.assert_not_awaited()
+
+    def test_evidence_refs_participate_in_idempotent_replay_contract(self) -> None:
+        evidence = GovernanceEvidenceRef(
+            evidence_id="ev-ticket:pilot:1001",
+            source_ref="pilot/2026-w32#ticket=T-1001",
+            excerpt="Sanitized resolution excerpt.",
+            observed_at=_NOW,
+        )
+        signal_input = replace(_signal_input(), evidence_refs=(evidence,))
+        existing = _signal()
+        existing.evidence_refs = [evidence.to_dict()]
+        session = AsyncMock()
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = existing
+        session.execute.return_value = result
+
+        with patch(
+            "cygnus.governance.signals.lock_governance_command",
+            AsyncMock(return_value=None),
+        ):
+            replay = asyncio.run(
+                create_governance_signal(
+                    session,
+                    signal_input,
+                    created_by_id=uuid.uuid4(),
+                )
+            )
+            with self.assertRaises(GovernanceSignalConflict):
+                asyncio.run(
+                    create_governance_signal(
+                        session,
+                        replace(
+                            signal_input,
+                            evidence_refs=(
+                                replace(
+                                    evidence, source_ref="pilot/2026-w32#ticket=T-1002"
+                                ),
+                            ),
+                        ),
+                        created_by_id=uuid.uuid4(),
+                    )
+                )
+
+        self.assertIs(replay, existing)
+        session.add.assert_not_called()
 
     def test_create_rejects_signal_ref_reuse_for_different_content(self) -> None:
         session = AsyncMock()

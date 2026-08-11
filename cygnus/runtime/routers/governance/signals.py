@@ -12,6 +12,7 @@ from cygnus.domain.objects import KnowledgeObjectType
 from cygnus.evidence.records import EvidenceSourceType, FreshnessState
 from cygnus.governance.signals import (
     GovernanceSignalConflict,
+    GovernanceEvidenceRef,
     GovernanceSignalInput,
     GovernanceSignalStatus,
     create_governance_signal,
@@ -52,6 +53,21 @@ class GovernanceAudienceFilterRequest(BaseModel):
         )
 
 
+class GovernanceEvidenceRefRequest(BaseModel):
+    evidence_id: str = Field(min_length=1, max_length=320)
+    source_ref: str = Field(min_length=1, max_length=1000)
+    excerpt: str | None = Field(default=None, min_length=1, max_length=4000)
+    observed_at: datetime | None = None
+
+    def to_domain(self) -> GovernanceEvidenceRef:
+        return GovernanceEvidenceRef(
+            evidence_id=self.evidence_id,
+            source_ref=self.source_ref,
+            excerpt=self.excerpt,
+            observed_at=self.observed_at,
+        )
+
+
 class GovernanceSignalCreateRequest(BaseModel):
     signal_ref: str
     signal_type: PressureSignalType
@@ -70,6 +86,10 @@ class GovernanceSignalCreateRequest(BaseModel):
     reason: str
     evidence_excerpt: str
     observed_at: datetime | None = None
+    evidence_refs: list[GovernanceEvidenceRefRequest] = Field(
+        default_factory=list,
+        max_length=100,
+    )
 
     @model_validator(mode="after")
     def require_audience(self) -> GovernanceSignalCreateRequest:
@@ -108,6 +128,7 @@ class GovernanceSignalCreateRequest(BaseModel):
             reason=self.reason,
             evidence_excerpt=self.evidence_excerpt,
             observed_at=self.observed_at,
+            evidence_refs=tuple(item.to_domain() for item in self.evidence_refs),
         )
 
 

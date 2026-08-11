@@ -47,6 +47,7 @@ from cygnus.governance.drift_signals import (
 )
 from cygnus.governance.signals import (
     GovernanceSignalConflict,
+    GovernanceEvidenceRef,
     GovernanceSignalInput,
     GovernanceSignalStatus,
     compile_review_signal_bundles,
@@ -115,6 +116,7 @@ __all__ = [
     "DRIFT_SIGNAL_TYPES",
     "DriftSignalProviderResult",
     "GovernanceSignalConflict",
+    "GovernanceEvidenceRef",
     "GovernanceSignalInput",
     "FeedbackCommandConflict",
     "FeedbackSignalWrite",

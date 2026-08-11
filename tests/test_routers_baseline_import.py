@@ -23,6 +23,7 @@ ROUTER_BASELINE_FILES = [
     "cygnus/runtime/routers/governance/publish.py",
     "cygnus/runtime/routers/governance/recovery.py",
     "cygnus/runtime/routers/governance/signals.py",
+    "cygnus/runtime/routers/governance/ticket_imports.py",
     "cygnus/runtime/routers/governance/session_bridge.py",
     "cygnus/runtime/routers/governance/review.py",
     "cygnus/runtime/routers/knowledge_types.py",
@@ -60,6 +61,7 @@ MAIN_ASSEMBLED_ROUTER_MODULES = {
     "cygnus.runtime.routers.governance.review": ["router"],
     "cygnus.runtime.routers.governance.session_bridge": ["router"],
     "cygnus.runtime.routers.governance.signals": ["router"],
+    "cygnus.runtime.routers.governance.ticket_imports": ["router"],
     "cygnus.runtime.routers.knowledge_types": ["router"],
     "cygnus.runtime.routers.notes": ["router"],
     "cygnus.runtime.routers.notifications": ["router"],
@@ -87,6 +89,9 @@ REQUIRED_ROUTER_SURFACE_TOKENS = {
     ],
     "cygnus/runtime/routers/governance/session_bridge.py": ["/api/session-bridge"],
     "cygnus/runtime/routers/governance/signals.py": ["/api/governance-signals"],
+    "cygnus/runtime/routers/governance/ticket_imports.py": [
+        "/api/governance/ticket-imports"
+    ],
     "cygnus/runtime/routers/sources.py": [
         "/sources",
         "/sources/upload",

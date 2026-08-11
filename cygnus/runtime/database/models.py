@@ -1252,6 +1252,12 @@ class GovernanceSignal(Base):
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     evidence_excerpt: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_refs: Mapped[list[dict[str, object]]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'::jsonb"),
+    )
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="active", server_default="active"
     )

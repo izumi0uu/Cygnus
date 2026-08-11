@@ -163,6 +163,32 @@ class GovernanceSignalsApiTests(unittest.TestCase):
             listed.json()["provider_coverage"]["covered_signals"],
         )
 
+    def test_write_accepts_structured_evidence_refs(self) -> None:
+        self.enable_admin()
+        evidence_ref = {
+            "evidence_id": "ev-ticket:pilot:1001",
+            "source_ref": "pilot/2026-w32#ticket=T-1001",
+            "excerpt": "Sanitized resolution excerpt.",
+            "observed_at": _NOW.isoformat(),
+        }
+        signal = _signal()
+        signal.evidence_refs = [evidence_ref]
+        with patch.object(
+            signals_router,
+            "create_governance_signal",
+            AsyncMock(return_value=signal),
+        ) as create_signal:
+            response = self.client.post(
+                "/api/governance-signals",
+                json={**_CREATE_PAYLOAD, "evidence_refs": [evidence_ref]},
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["evidence_refs"], [evidence_ref])
+        create_call = create_signal.await_args
+        assert create_call is not None
+        signal_input = create_call.args[1]
+        self.assertEqual(signal_input.evidence_refs[0].source_ref, evidence_ref["source_ref"])
     def test_write_rejects_worker_owned_feedback_types_before_service_write(
         self,
     ) -> None:

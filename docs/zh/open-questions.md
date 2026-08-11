@@ -26,6 +26,8 @@
 - reviewer 接受率
 - 从 cluster 到 published object 的时延
 
+当前状态（CYG-122）：已用 production-shaped 合成 fixture 建立 CSV/JSONL 到 durable review-bound ticket pressure 的可执行 pilot 边界；尚未使用真实已匿名化导出，也未观察 reviewer 接受率、cluster-to-draft 可用率或发布时延，因此 H2 仍未验证。
+
 ### H3. Audience-aware publishing 是比“回答正确率”更强的产品壁垒
 待验证原因：
 - 支持场景的错误往往来自 entitlement / region / version 差异

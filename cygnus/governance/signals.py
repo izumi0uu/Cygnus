@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.domain.audience import AudienceFilter, Visibility
 from cygnus.domain.objects import KnowledgeObjectType
-from cygnus.evidence.records import EvidenceSourceType, FreshnessState
+from cygnus.evidence.records import EvidenceSourceType, FreshnessState, SupportEvidence
 from cygnus.governance.ledger import lock_governance_command
 from cygnus.governance.review_assignments import initialize_review_assignment
 from cygnus.review.intake import (
@@ -54,6 +54,51 @@ _DEFAULT_EVIDENCE_TYPE = {
 }
 
 
+_MAX_EVIDENCE_REFS = 100
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class GovernanceEvidenceRef:
+    """Structured, bounded evidence identity attached to a durable signal."""
+
+    evidence_id: str
+    source_ref: str
+    excerpt: str | None = None
+    observed_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        evidence_id = self.evidence_id.strip()
+        source_ref = self.source_ref.strip()
+        if not evidence_id:
+            raise ValueError("evidence_id must not be blank")
+        if len(evidence_id) > 320:
+            raise ValueError("evidence_id must not exceed 320 characters")
+        if not source_ref:
+            raise ValueError("source_ref must not be blank")
+        if len(source_ref) > 1000:
+            raise ValueError("source_ref must not exceed 1000 characters")
+        excerpt = self.excerpt.strip() if self.excerpt is not None else None
+        if excerpt == "":
+            raise ValueError("excerpt must not be blank when provided")
+        if excerpt is not None and len(excerpt) > 4000:
+            raise ValueError("excerpt must not exceed 4000 characters")
+        if self.observed_at is not None and self.observed_at.tzinfo is None:
+            raise ValueError("evidence observed_at must include a timezone")
+        object.__setattr__(self, "evidence_id", evidence_id)
+        object.__setattr__(self, "source_ref", source_ref)
+        object.__setattr__(self, "excerpt", excerpt)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "evidence_id": self.evidence_id,
+            "source_ref": self.source_ref,
+            "excerpt": self.excerpt,
+            "observed_at": (
+                self.observed_at.isoformat() if self.observed_at is not None else None
+            ),
+        }
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class GovernanceSignalInput:
     signal_ref: str
@@ -73,6 +118,7 @@ class GovernanceSignalInput:
     trigger_signals: tuple[str, ...] = field(default_factory=tuple)
     evidence_source_type: EvidenceSourceType | None = None
     observed_at: datetime | None = None
+    evidence_refs: tuple[GovernanceEvidenceRef, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         for label, raw_value in (
@@ -122,6 +168,15 @@ class GovernanceSignalInput:
         object.__setattr__(self, "evidence_source_type", evidence_type)
         if self.observed_at is not None and self.observed_at.tzinfo is None:
             raise ValueError("observed_at must include a timezone")
+        evidence_refs = tuple(self.evidence_refs)
+        if len(evidence_refs) > _MAX_EVIDENCE_REFS:
+            raise ValueError(
+                f"evidence_refs must not contain more than {_MAX_EVIDENCE_REFS} items"
+            )
+        evidence_ids = tuple(item.evidence_id for item in evidence_refs)
+        if len(set(evidence_ids)) != len(evidence_ids):
+            raise ValueError("evidence_refs must have unique evidence_id values")
+        object.__setattr__(self, "evidence_refs", evidence_refs)
 
 
 async def create_governance_signal(
@@ -170,6 +225,7 @@ async def create_governance_signal(
         summary=signal_input.summary.strip(),
         reason=signal_input.reason.strip(),
         evidence_excerpt=signal_input.evidence_excerpt.strip(),
+        evidence_refs=[item.to_dict() for item in signal_input.evidence_refs],
         status=GovernanceSignalStatus.ACTIVE.value,
         created_by_id=created_by_id,
     )
@@ -304,6 +360,7 @@ def governance_signal_to_pressure_record(
             f"signal_ref={signal.signal_ref} requires its audience binding to be resolved before compilation"
         )
     signal_type = PressureSignalType(signal.signal_type)
+    evidence_records = _support_evidence_from_signal(signal, resolved_audience)
     source_ref = (
         f"source:{signal.source_id}"
         if signal.source_id is not None
@@ -324,6 +381,7 @@ def governance_signal_to_pressure_record(
         queue_owner=queue_owner,
         reason=signal.reason,
         evidence_excerpt=signal.evidence_excerpt,
+        evidence_records=evidence_records,
         proposal_id=signal.object_ref,
         proposal_action=(
             PlanAction.UPDATE if signal.page_id is not None else PlanAction.CREATE
@@ -350,6 +408,7 @@ def governance_signal_to_dict(signal: GovernanceSignal) -> dict[str, object]:
         "summary": signal.summary,
         "reason": signal.reason,
         "evidence_excerpt": signal.evidence_excerpt,
+        "evidence_refs": list(signal.evidence_refs or []),
         "status": signal.status,
         "observed_at": signal.observed_at.isoformat(),
         "resolved_at": (
@@ -423,6 +482,8 @@ def _matches_input(
         and signal.summary == signal_input.summary.strip()
         and signal.reason == signal_input.reason.strip()
         and signal.evidence_excerpt == signal_input.evidence_excerpt.strip()
+        and tuple(signal.evidence_refs or ())
+        == tuple(item.to_dict() for item in signal_input.evidence_refs)
     )
     return identity_matches and (
         signal_input.observed_at is None
@@ -443,6 +504,66 @@ def _normalize_strings(
         if value not in normalized:
             normalized.append(value)
     return tuple(normalized)
+
+
+def _support_evidence_from_signal(
+    signal: GovernanceSignal,
+    audience_filter: AudienceFilter,
+) -> tuple[SupportEvidence, ...]:
+    evidence_refs = _evidence_refs_from_payload(signal.evidence_refs or [])
+    source_type = EvidenceSourceType(signal.evidence_source_type)
+    freshness = FreshnessState(signal.freshness)
+    return tuple(
+        SupportEvidence(
+            evidence_id=item.evidence_id,
+            source_type=source_type,
+            source_ref=item.source_ref,
+            title=signal.title,
+            content=item.excerpt or signal.evidence_excerpt,
+            audience_filter=audience_filter,
+            product_lines=audience_filter.product_lines,
+            plans=audience_filter.plans,
+            regions=audience_filter.regions,
+            languages=audience_filter.languages,
+            product_versions=audience_filter.product_versions,
+            freshness_state=freshness,
+            updated_at=(item.observed_at or signal.observed_at).isoformat(),
+        )
+        for item in evidence_refs
+    )
+
+
+def _evidence_refs_from_payload(
+    payloads: Iterable[dict[str, object]],
+) -> tuple[GovernanceEvidenceRef, ...]:
+    evidence_refs: list[GovernanceEvidenceRef] = []
+    for index, payload in enumerate(payloads):
+        evidence_id = payload.get("evidence_id")
+        source_ref = payload.get("source_ref")
+        excerpt = payload.get("excerpt")
+        observed_at = payload.get("observed_at")
+        if not isinstance(evidence_id, str):
+            raise ValueError(f"evidence_refs[{index}].evidence_id must be a string")
+        if not isinstance(source_ref, str):
+            raise ValueError(f"evidence_refs[{index}].source_ref must be a string")
+        if excerpt is not None and not isinstance(excerpt, str):
+            raise ValueError(f"evidence_refs[{index}].excerpt must be a string")
+        parsed_observed_at: datetime | None = None
+        if observed_at is not None:
+            if not isinstance(observed_at, str):
+                raise ValueError(
+                    f"evidence_refs[{index}].observed_at must be an ISO timestamp"
+                )
+            parsed_observed_at = datetime.fromisoformat(observed_at)
+        evidence_refs.append(
+            GovernanceEvidenceRef(
+                evidence_id=evidence_id,
+                source_ref=source_ref,
+                excerpt=excerpt,
+                observed_at=parsed_observed_at,
+            )
+        )
+    return tuple(evidence_refs)
 
 
 def _audience_filter_payload(

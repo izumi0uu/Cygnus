@@ -93,6 +93,7 @@ class PressureIntakeRecord:
     queue_owner: str | None = None
     reason: str | None = None
     evidence_excerpt: str | None = None
+    evidence_records: tuple[SupportEvidence, ...] = field(default_factory=tuple)
     proposal_id: str | None = None
     proposal_action: PlanAction | None = None
 
@@ -136,6 +137,11 @@ class PressureIntakeRecord:
             raise ValueError("reason must not be blank when provided")
         if self.evidence_excerpt is not None and not self.evidence_excerpt.strip():
             raise ValueError("evidence_excerpt must not be blank when provided")
+        evidence_records = tuple(self.evidence_records)
+        evidence_ids = tuple(item.evidence_id for item in evidence_records)
+        if len(set(evidence_ids)) != len(evidence_ids):
+            raise ValueError("evidence_records must have unique evidence_id values")
+        object.__setattr__(self, "evidence_records", evidence_records)
         if self.proposal_id is not None and not self.proposal_id.strip():
             raise ValueError("proposal_id must not be blank when provided")
 
@@ -179,8 +185,8 @@ class PressureIntakeSurfaces:
 
 
 def compile_pressure_intake(record: PressureIntakeRecord) -> PressureIntakeBundle:
-    proposal = _proposal_for_record(record)
-    evidence = (_evidence_for_record(record),)
+    evidence = record.evidence_records or (_evidence_for_record(record),)
+    proposal = _proposal_for_record(record, evidence=evidence)
     signal = _signal_for_record(record, proposal=proposal)
     return PressureIntakeBundle(
         proposal=proposal,
@@ -392,7 +398,9 @@ def sample_pressure_intake_records() -> tuple[PressureIntakeRecord, ...]:
     )
 
 
-def _proposal_for_record(record: PressureIntakeRecord) -> CompilationProposal:
+def _proposal_for_record(
+    record: PressureIntakeRecord, *, evidence: tuple[SupportEvidence, ...]
+) -> CompilationProposal:
     proposal_id = record.proposal_id or record.signal_ref
     audience_note = _audience_note(record.audience_filter, record)
     action = record.proposal_action or (
@@ -404,7 +412,7 @@ def _proposal_for_record(record: PressureIntakeRecord) -> CompilationProposal:
         action=action,
         title=record.title,
         summary=record.summary,
-        evidence_ids=(f"ev:{record.signal_type.value}:{record.signal_ref}",),
+        evidence_ids=tuple(item.evidence_id for item in evidence),
         urgency=_urgency_for_signal(record.signal_type, record.trigger_signals),
         evidence_sufficiency=_evidence_sufficiency_for_signal(
             record.signal_type,

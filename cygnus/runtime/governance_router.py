@@ -12,6 +12,7 @@ from cygnus.runtime.routers.governance.publish import router as publish_router
 from cygnus.runtime.routers.governance.recovery import router as recovery_router
 from cygnus.runtime.routers.governance.review import router as review_router
 from cygnus.runtime.routers.governance.session_bridge import router as session_bridge_router  # fmt: skip
+from cygnus.runtime.routers.governance.ticket_imports import router as ticket_imports_router  # fmt: skip
 from cygnus.runtime.routers.governance.signals import router as signals_router
 
 router = APIRouter(tags=["governance"])
@@ -25,4 +26,5 @@ router.include_router(signals_router, tags=["governance"])
 router.include_router(publish_router, tags=["governance"])
 router.include_router(recovery_router, tags=["governance"])
 router.include_router(session_bridge_router, tags=["governance"])
+router.include_router(ticket_imports_router, tags=["governance"])
 router.include_router(knowledge_graph_router, tags=["governance"])

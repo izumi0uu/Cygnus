@@ -21,6 +21,7 @@ from cygnus.retrieval import slugify
 from cygnus.review.contributions import (
     DraftVersionConflict,
     InvalidTransition,
+    build_initial_draft_content,
     create_wiki_draft,
     submit_wiki_draft,
     update_wiki_draft,
@@ -118,7 +119,9 @@ class GovernedDraftReviewTools:
                 label="input_summary",
                 max_length=50_000,
             )
-            content_md = _initial_content(normalized_title, normalized_summary)
+            content_md = build_initial_draft_content(
+                normalized_title, normalized_summary
+            )
             normalized_audience = _normalize_audience_context(audience_context)
             normalized_source_refs = _normalize_source_refs(source_refs or [])
             normalized_evidence_refs = _normalize_evidence_refs(evidence_refs or [])
@@ -802,15 +805,6 @@ def _draft_warnings(draft: WikiPageDraft) -> list[str]:
     elif draft.ai_check_status == "failed":
         warnings.append("ai_pre_review_failed")
     return warnings
-
-
-def _initial_content(title: str, input_summary: str) -> str:
-    content = f"# {title}\n\n{input_summary}"
-    if len(content) > 50_000:
-        raise ValueError(
-            "title and input_summary together exceed the 50,000 character draft limit"
-        )
-    return content
 
 
 def _parse_uuid(value: object, *, label: str) -> uuid.UUID:

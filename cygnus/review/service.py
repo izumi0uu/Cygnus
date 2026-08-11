@@ -20,6 +20,7 @@ from cygnus.review.queries import build_review_command_brief
 from cygnus.substrate.compilation_plan import (
     CompilationProposal,
     EvidenceSufficiency,
+    PlanAction,
     UrgencyLevel,
 )
 
@@ -303,6 +304,19 @@ def _merge_recommended_actions(
         for action in signal.recommended_actions
         if action not in {"assign_owner", "escalate", "release_owner"}
     ]
+    if (
+        signal.risk_type is ReviewRiskType.TICKET_PRESSURE
+        and "ticket_cluster" in signal.trigger_signals
+        and any(item.startswith("ticket_import:") for item in signal.trigger_signals)
+        and proposal.action is PlanAction.CREATE
+        and proposal.evidence_sufficiency is EvidenceSufficiency.SUFFICIENT
+        and len(evidence) >= 2
+        and all(
+            record.source_type is EvidenceSourceType.RESOLVED_TICKET
+            for record in evidence
+        )
+    ):
+        actions.append("create_draft")
     if owner_state is OwnerState.UNASSIGNED:
         actions.append("assign_owner")
     elif owner_state is OwnerState.ASSIGNED:

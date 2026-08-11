@@ -27,7 +27,7 @@ drawing numbers, `SEC-*` section codes, tolerance chips. i18n is **zh-first, en 
 | Page | Route | Blueprint | bp-refs | Notes |
 |------|-------|-----------|---------|-------|
 | Overview | `/console` (index) | ✅ | 45 | DWG-01, title block, annotation table, SEC-A dimension lines |
-| ReviewQueue | `/console/queue` | ✅ | 31 | Risk inbox + detail drawer (PlotterPanel reveal); CmdButton → PublishPreviewModal |
+| ReviewQueue | `/console/queue` | ✅ | 31 | Risk inbox + detail drawer; ticket-pressure command dialogs; CmdButton → PublishPreviewModal |
 | KnowledgeObjects | `/console/objects` | ✅ | 40 | Force graph + **traceability drawer** (projection-aware) |
 | AudiencePublish | `/console/audience` | ✅ | 29 | Audience × risk, action presets |
 | Propagation | `/console/propagation` | ✅ | 29 | Propagation ledger + status lanes (SEC-F) |
@@ -67,6 +67,19 @@ The UI enforces the distinction in three places:
 - `POST /api/publish/apply` requires **admin**; reads require an authenticated user.
 - `applyPublishAction(objectRef, actionKey, durableCommand)` in `api.ts` is the only SPA
   publish write caller.
+
+### 3.1 Ticket-cluster draft promotion
+
+For a qualifying durable `ticket_pressure` item, `ReviewQueue` renders the server-returned
+`create_draft` action in the detail drawer. The action opens a required-reason dialog and
+sends `POST /api/governance-signals/{signal_ref}/commands/promote-draft` with a generated
+`command_id` and the current assignment version as `expected_assignment_version`.
+
+- The endpoint is **admin-only**; the SPA does not infer eligibility or lifecycle state.
+- The response's `promotion`, `draft`, `review_state`, and `publication_state` fields are
+  authoritative. The success receipt must say persisted, not submitted, and not published.
+- The command never requests review or publishes. Exact replay is safe; stale assignment
+  versions, ineligible signals, and reused command IDs with changed payloads are conflicts.
 
 ## 4. Traceability + latest publish result
 

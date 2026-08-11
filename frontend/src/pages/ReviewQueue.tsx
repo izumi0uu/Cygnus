@@ -35,7 +35,7 @@ export default function ReviewQueue() {
   const [searchParams, setSearchParams] = useSearchParams()
 
   const load = (background = false) => {
-    // Background re-reads (after a durable assignment command) must not flip
+    // Background re-reads (after a durable queue command) must not flip
     // the page into the skeleton or tear down the open drawer/modal; on
     // failure the stale surface stays and the durable receipt still carries
     // the authoritative server response.
@@ -166,7 +166,9 @@ export default function ReviewQueue() {
               )}
             </span>
             <span>
-              <button className="bp-cmd" onClick={(e) => { e.stopPropagation(); openRisk(it.risk_id) }}>{v.command(it.primary_command)} →</button>
+              <button className="bp-cmd" onClick={(e) => { e.stopPropagation(); openRisk(it.risk_id) }}>
+                {it.primary_command === 'create_draft' ? t('commands.createDraft') : v.command(it.primary_command)} →
+              </button>
             </span>
           </div>
         ))}
@@ -199,7 +201,7 @@ function Drawer({
   item: PriorityItem
   bundle: ReviewIntakeBundle | null
   onClose: () => void
-  /** Re-read the queue after a durable assignment mutation (background). */
+  /** Re-read the queue after a durable assignment or ticket-draft mutation. */
   onChanged: () => void
 }) {
   const { t } = useTranslation()
@@ -343,6 +345,12 @@ function Drawer({
                   onExecuted: handleExecuted,
                   onRefresh: onChanged,
                 }}
+                draftPromotion={c === 'create_draft' ? {
+                  signalRef: item.signal_ref,
+                  objectRef: item.object_ref,
+                  assignmentVersion: item.assignment_version,
+                  onRefresh: onChanged,
+                } : undefined}
               />
             ))}
           </div>

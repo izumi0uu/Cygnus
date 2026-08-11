@@ -100,6 +100,12 @@ from cygnus.governance.feedback_operations import (
     get_feedback_route_operation,
     list_feedback_route_operations,
 )
+from cygnus.governance.ticket_draft_promotions import (
+    TicketDraftPromotionCommand,
+    TicketDraftPromotionConflict,
+    TicketDraftPromotionResult,
+    promote_ticket_cluster_to_draft,
+)
 
 __all__ = [
     "AudienceBindingConflict",
@@ -137,6 +143,9 @@ __all__ = [
     "FeedbackRouteOperationsQuery",
     "FeedbackRouteOperationsSummary",
     "FeedbackRouteWorkerEvent",
+    "TicketDraftPromotionCommand",
+    "TicketDraftPromotionConflict",
+    "TicketDraftPromotionResult",
     "GovernanceSignalStatus",
     "GovernanceLedgerConflict",
     "append_draft_event",
@@ -186,4 +195,5 @@ __all__ = [
     "list_governance_signals",
     "load_drift_signal_provider",
     "resolve_governance_signal",
+    "promote_ticket_cluster_to_draft",
 ]

@@ -90,6 +90,16 @@ class DraftVersionConflict(Exception):
         )
 
 
+def build_initial_draft_content(title: str, summary: str) -> str:
+    """Build the bounded initial body shared by governed create-draft paths."""
+    content = f"# {title}\n\n{summary}"
+    if len(content) > 50_000:
+        raise ValueError(
+            "title and summary together exceed the 50,000 character draft limit"
+        )
+    return content
+
+
 async def create_wiki_draft(
     session: AsyncSession,
     page_id: Optional[uuid.UUID],

@@ -136,6 +136,8 @@
 
 CYG-122 把 Loop A 的输入边界固化为一个有界 pilot：管理员通过 `POST /api/governance/ticket-imports` 提交已脱敏的 `resolved-ticket-export/v1` CSV/JSONL snapshot；`source_ref` 是不可变导出身份，整包验证通过后才按 `issue_signature + audience/product/version/language + object_type` 确定性分组。未达到可配置阈值的 cluster 只在响应中作为候选可观察；达到阈值的 cluster 才复用既有 `GovernanceSignal` 与 review-assignment 真相，保存结构化 ticket evidence refs。Exact replay 返回同一 signal，复用 `source_ref` 却改变事实返回 conflict；导入绝不自动创建 draft、approve 或 publish。
 
+CYG-123 在该导入边界之后增加显式的 reviewer-controlled draft 命令：已认证管理员可针对符合条件且仍为 `active` 的 `ticket_pressure` signal，通过 `POST /api/governance-signals/{signal_ref}/commands/promote-draft` 提交 `command_id`、`expected_assignment_version` 与非空 `reason`。同一事务会锁定 signal、验证 assignment 版本与结构化 ticket evidence，创建 `WikiPageDraft(status=draft)` 和 append-only governance event，并记录可重放的 promotion receipt；完全相同的 `command_id` 返回同一结果，负载漂移返回 conflict。成功只证明 draft 已持久化；不会提交审阅、审批或发布。
+
 ### Loop B：Freshness Recovery
 release/incident change -> drift alert -> revision draft -> review -> republish
 

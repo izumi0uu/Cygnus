@@ -1664,6 +1664,56 @@ class GovernanceReviewAssignmentEvent(Base):
     )
 
 
+class GovernanceTicketDraftPromotion(Base):
+    """One idempotent binding from a governed ticket cluster to its draft."""
+
+    __tablename__ = "governance_ticket_draft_promotions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    signal_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("governance_signals.id", ondelete="RESTRICT"),
+        nullable=False,
+        unique=True,
+    )
+    draft_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("wiki_page_drafts.id", ondelete="RESTRICT"),
+        nullable=False,
+        unique=True,
+    )
+    command_id: Mapped[str] = mapped_column(String(220), nullable=False, unique=True)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_signal_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    expected_assignment_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    actor_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("employees.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "source_signal_version >= 1 AND expected_assignment_version >= 1",
+            name="ck_governance_ticket_draft_promotions_versions",
+        ),
+        CheckConstraint(
+            "char_length(reason) BETWEEN 1 AND 2000",
+            name="ck_governance_ticket_draft_promotions_reason",
+        ),
+        Index(
+            "ix_governance_ticket_draft_promotions_created",
+            "created_at",
+        ),
+    )
+
+
 class GovernanceAudienceBinding(Base):
     """Explicit variant routing truth for one governed Wiki knowledge object."""
 

@@ -26,7 +26,7 @@ Validation signals:
 - reviewer acceptance rate
 - time from cluster to published object
 
-Current status (CYG-122): a production-shaped synthetic fixture now proves the executable CSV/JSONL-to-durable-review-pressure pilot boundary. No real anonymized export, reviewer acceptance, cluster-to-draft usefulness, or publication latency has been observed, so H2 remains unvalidated.
+Current status (CYG-122/123): production-shaped synthetic fixtures now prove the CSV/JSONL-to-durable-review-pressure import boundary, and an authenticated Review Queue smoke proves that an eligible durable signal can be promoted by an explicit command into a persisted, unsubmitted, unpublished draft. No real anonymized export, reviewer acceptance, cluster-to-draft usefulness, or publication latency has been observed, so H2 remains unvalidated.
 
 ### H3. Audience-aware publishing is a stronger moat than raw answer correctness alone
 Why it matters:

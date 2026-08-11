@@ -136,6 +136,8 @@ Repeated tickets -> cluster -> draft object -> review -> publish
 
 CYG-122 freezes Loop A's input boundary as a bounded pilot: an administrator submits an already-sanitized `resolved-ticket-export/v1` CSV/JSONL snapshot through `POST /api/governance/ticket-imports`; `source_ref` is the immutable export identity, and the whole payload must validate before deterministic grouping by `issue_signature + audience/product/version/language + object_type`. Clusters below the configurable threshold remain observable response candidates only; qualifying clusters reuse the existing `GovernanceSignal` and review-assignment truth with structured ticket evidence refs. Exact replay returns the same signal, while changed facts under the same `source_ref` conflict; import never auto-creates a draft, approves, or publishes.
 
+CYG-123 adds an explicit reviewer-controlled draft command after that import boundary: an authenticated administrator may target a qualifying, still-`active` `ticket_pressure` signal through `POST /api/governance-signals/{signal_ref}/commands/promote-draft` with a `command_id`, `expected_assignment_version`, and non-empty `reason`. One transaction locks the signal, validates the assignment version and structured ticket evidence, creates a `WikiPageDraft(status=draft)` plus an append-only governance event, and records a replayable promotion receipt; the exact same `command_id` returns the same result, while payload drift conflicts. Success proves only that the draft was persisted; it does not submit for review, approve, or publish.
+
 ### Loop B: Freshness Recovery
 Release/incident change -> drift alert -> revision draft -> review -> republish
 

@@ -20,6 +20,13 @@ from cygnus.governance.signals import (
     list_governance_signals,
     resolve_governance_signal,
 )
+from cygnus.governance.ticket_draft_promotions import (
+    TICKET_DRAFT_PROMOTION_REASON_MAX_LENGTH,
+    TICKET_DRAFT_PROMOTION_REF_MAX_LENGTH,
+    TicketDraftPromotionCommand,
+    TicketDraftPromotionConflict,
+    promote_ticket_cluster_to_draft,
+)
 from cygnus.review.intake import (
     PressureSignalType,
     is_feedback_derived_signal_type,
@@ -132,6 +139,25 @@ class GovernanceSignalCreateRequest(BaseModel):
         )
 
 
+class TicketDraftPromotionRequest(BaseModel):
+    command_id: str = Field(
+        min_length=1,
+        max_length=TICKET_DRAFT_PROMOTION_REF_MAX_LENGTH,
+    )
+    expected_assignment_version: int = Field(ge=1)
+    reason: str = Field(
+        min_length=1,
+        max_length=TICKET_DRAFT_PROMOTION_REASON_MAX_LENGTH,
+    )
+
+    def to_domain(self) -> TicketDraftPromotionCommand:
+        return TicketDraftPromotionCommand(
+            command_id=self.command_id,
+            expected_assignment_version=self.expected_assignment_version,
+            reason=self.reason,
+        )
+
+
 @router.post("/api/governance-signals", status_code=status.HTTP_201_CREATED)
 async def write_governance_signal(
     body: GovernanceSignalCreateRequest,
@@ -210,3 +236,35 @@ async def resolve_signal(
             detail="Governance signal not found",
         )
     return governance_signal_to_dict(signal)
+
+
+@router.post("/api/governance-signals/{signal_ref}/commands/promote-draft")
+async def promote_signal_to_draft(
+    signal_ref: str,
+    body: TicketDraftPromotionRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: Employee = Depends(require_admin),
+) -> dict[str, object]:
+    try:
+        result = await promote_ticket_cluster_to_draft(
+            db,
+            signal_ref=signal_ref,
+            command=body.to_domain(),
+            actor_id=current_user.id,
+        )
+    except TicketDraftPromotionConflict as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Governance signal not found",
+        )
+    return result.to_dict()

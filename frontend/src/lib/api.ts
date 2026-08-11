@@ -421,6 +421,63 @@ export async function executeReviewAssignment(
   )
 }
 
+
+// Ticket-cluster draft promotion — reviewer-controlled materialization
+// of one qualifying governance signal into a durable, unsubmitted draft
+// (POST /api/governance-signals/{signal_ref}/commands/promote-draft).
+// The command is replay-safe and version-bound to the assignment truth read
+// by ReviewQueue. A persisted receipt does not imply review or publication.
+// ============================================================
+
+export const TICKET_DRAFT_PROMOTION_REF_MAX_LENGTH = 220
+export const TICKET_DRAFT_PROMOTION_REASON_MAX_LENGTH = 2_000
+
+export interface TicketDraftPromotionRequest {
+  command_id: string
+  reason: string
+  expected_assignment_version: number
+}
+
+export interface GovernanceTicketDraftPromotion {
+  id: string
+  signal_ref: string
+  command_id: string
+  draft_id: string
+  actor_id: string
+  expected_assignment_version: number
+  trace_ref: string
+  persisted: true
+  created_at: string
+}
+
+export interface PromotedTicketDraft {
+  draft_id: string
+  draft_version: number
+  draft_kind: 'create'
+  draft_status: 'draft'
+  object_type: string
+  title: string
+}
+
+export interface TicketDraftPromotionResult {
+  promotion: GovernanceTicketDraftPromotion
+  draft: PromotedTicketDraft
+  replayed: boolean
+  review_state: 'not_submitted'
+  publication_state: 'not_published'
+  next_step: 'update_draft_or_request_review'
+}
+
+export async function promoteTicketClusterToDraft(
+  signalRef: string,
+  command: TicketDraftPromotionRequest,
+): Promise<TicketDraftPromotionResult> {
+  return authApi<TicketDraftPromotionResult>(
+    `/api/governance-signals/${encodeURIComponent(signalRef)}/commands/promote-draft`,
+    { method: 'POST', body: command },
+  )
+}
+
 // ============================================================
 // Publish preview — blast radius before any outward command
 // ============================================================

@@ -64,15 +64,19 @@ class Args(argparse.Namespace):
         super().__init__()
         self.output_dir: Path = Path()
 
+        self.policy_only: bool = False
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     _ = parser.add_argument("--output-dir", type=Path, required=True)
+    _ = parser.add_argument("--policy-only", action="store_true")
     args = parser.parse_args(namespace=Args())
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     output_dir.chmod(0o700)
-    for source_name, output_name, filename, require_json in _INPUTS:
+    inputs = _INPUTS[2:] if args.policy_only else _INPUTS
+    for source_name, output_name, filename, require_json in inputs:
         data = _decode(source_name)
         if require_json:
             try:

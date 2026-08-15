@@ -587,12 +587,39 @@ jobs:
       CYGNUS_DEPLOY_STATE_FILE: ${{ vars.CYGNUS_DEPLOY_STATE_FILE }}
       CYGNUS_ACTIVE_CHECKOUT_LINK: ${{ vars.CYGNUS_ACTIVE_CHECKOUT_LINK }}
       CYGNUS_OPERATOR_WORK_DIR: ${{ vars.CYGNUS_OPERATOR_WORK_DIR }}
+      CYGNUS_ALERT_THRESHOLDS_B64: ${{ vars.CYGNUS_ALERT_THRESHOLDS_B64 }}
+      CYGNUS_CAPACITY_THRESHOLDS_B64: ${{ vars.CYGNUS_CAPACITY_THRESHOLDS_B64 }}
+      CYGNUS_CAPACITY_TARGETS_B64: ${{ vars.CYGNUS_CAPACITY_TARGETS_B64 }}
     steps:
       - name: Checkout exact promoted release source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
+      - name: Install approved production policy files
+        shell: bash
+        run: |
+          set -euo pipefail
+          policy_dir="$RUNNER_TEMP/cygnus-production-policy"
+          python3 scripts/prod/materialize-certification-inputs.py \
+            --policy-only --output-dir "$policy_dir" >/dev/null
+          source scripts/prod/lib.sh
+          load_env_file "$CYGNUS_PRODUCTION_ENV_FILE"
+          install_policy() {
+            local variable_name="$1"
+            local source_path="$2"
+            local destination="${!variable_name}"
+            [[ "$destination" =~ ^/var/lib/cygnus/config/[A-Za-z0-9._-]+\.json$ ]] || {
+              echo "$variable_name must name a bounded production policy path" >&2
+              exit 1
+            }
+            install -d -m 0750 "$(dirname "$destination")"
+            install -m 0600 "$source_path" "$destination"
+          }
+          install_policy CYGNUS_ALERT_THRESHOLDS_FILE "$policy_dir/alert-thresholds.json"
+          install_policy CYGNUS_CAPACITY_THRESHOLDS_FILE "$policy_dir/capacity-thresholds.json"
+          install_policy CYGNUS_CAPACITY_TARGETS_FILE "$policy_dir/capacity-targets.json"
+          validate_capacity_inputs
       - name: Download promoted release metadata
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:

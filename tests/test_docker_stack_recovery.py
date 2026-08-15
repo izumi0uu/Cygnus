@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import json
+import os
 from pathlib import Path
 import re
 import tempfile
@@ -970,6 +972,47 @@ class DockerStackRecoveryTests(unittest.TestCase):
         self.assertIn('CMD ["nginx", "-g", "daemon off;"]', frontend_text)
         self.assertNotIn("daemon off; pid /tmp/nginx.pid;", frontend_text)
         self.assertIn('io.cygnus.image.immutable="true"', frontend_text)
+
+    def test_policy_only_materializer_needs_no_production_secret(self) -> None:
+        payloads = {
+            "CYGNUS_ALERT_THRESHOLDS_B64": {"approval": "alert"},
+            "CYGNUS_CAPACITY_THRESHOLDS_B64": {"approval": "capacity"},
+            "CYGNUS_CAPACITY_TARGETS_B64": {"routes": {}},
+        }
+        environment = os.environ.copy()
+        environment.update(
+            {
+                name: base64.b64encode(json.dumps(payload).encode()).decode()
+                for name, payload in payloads.items()
+            }
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "policy"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "scripts/prod/materialize-certification-inputs.py",
+                    "--policy-only",
+                    "--output-dir",
+                    str(output),
+                ],
+                capture_output=True,
+                text=True,
+                env=environment,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse((output / "production.env").exists())
+            self.assertFalse((output / "production-inputs.json").exists())
+            for name in (
+                "alert-thresholds.json",
+                "capacity-thresholds.json",
+                "capacity-targets.json",
+            ):
+                path = output / name
+                self.assertTrue(path.is_file())
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
     def test_docker_local_override_file_is_gitignored(self) -> None:
         text = Path(".gitignore").read_text(encoding="utf-8")

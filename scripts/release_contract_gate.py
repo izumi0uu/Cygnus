@@ -87,6 +87,7 @@ def validate_repository(root: Path = REPO_ROOT) -> GateResult:
         "scripts/prod/certification-stack.sh",
         "scripts/prod/security-certification.py",
         "scripts/run_live_production_certification.sh",
+        "scripts/prod/materialize-certification-inputs.py",
         "scripts/prod/write-release-env.py",
         "scripts/prod/rotate-secrets.sh",
         "scripts/prod/incident.sh",
@@ -735,6 +736,12 @@ def validate_repository(root: Path = REPO_ROOT) -> GateResult:
         "CYGNUS_OPERATOR_WORK_DIR",
         "name: promoted-release",
         'scripts/prod/deploy.sh --release "$RELEASE_VERSION"',
+        "Install approved production policy files",
+        "--policy-only --output-dir",
+        "install_policy CYGNUS_ALERT_THRESHOLDS_FILE",
+        "install_policy CYGNUS_CAPACITY_THRESHOLDS_FILE",
+        "install_policy CYGNUS_CAPACITY_TARGETS_FILE",
+        "validate_capacity_inputs",
     )
     missing_workflow = [
         fragment for fragment in required_workflow_fragments if fragment not in workflow
@@ -784,6 +791,34 @@ def validate_repository(root: Path = REPO_ROOT) -> GateResult:
     failures.extend(
         f"repo guard workflow missing required step/fragment: {fragment}"
         for fragment in missing_repo_guard
+    )
+    certification_policy_overrides = (
+        (
+            "CERTIFICATION_CAPACITY_THRESHOLDS_FILE",
+            "CYGNUS_CAPACITY_THRESHOLDS_FILE",
+        ),
+        ("CERTIFICATION_CAPACITY_TARGETS_FILE", "CYGNUS_CAPACITY_TARGETS_FILE"),
+        ("CERTIFICATION_ALERT_THRESHOLDS_FILE", "CYGNUS_ALERT_THRESHOLDS_FILE"),
+    )
+    certification_env_load = certification_stack.index("load_prod_env")
+    missing_certification_policy_overrides = [
+        runtime_name
+        for override_name, runtime_name in certification_policy_overrides
+        if (
+            f'{override_name}="${{{runtime_name}:-}}"' not in certification_stack
+            or f'export {runtime_name}="${override_name}"' not in certification_stack
+            or certification_stack.index(f'{override_name}="${{{runtime_name}:-}}"')
+            > certification_env_load
+            or certification_stack.index(f'export {runtime_name}="${override_name}"')
+            < certification_env_load
+        )
+    ]
+    checks["certification_materialized_policy_overrides"] = {
+        "missing_or_misordered": missing_certification_policy_overrides
+    }
+    failures.extend(
+        f"certification stack does not preserve materialized policy path: {name}"
+        for name in missing_certification_policy_overrides
     )
     live_certification_script = _read(
         root, "scripts/run_live_production_certification.sh"

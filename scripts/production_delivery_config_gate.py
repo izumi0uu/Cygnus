@@ -14,7 +14,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import NotRequired, TypedDict
+from typing import TypedDict
 from urllib.parse import urlsplit
 
 CHANNEL_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -28,7 +28,7 @@ class DeliveryGateResult(TypedDict):
     ok: bool
     failures: list[str]
     targets: list[dict[str, str]]
-    allowed_hosts: NotRequired[list[str]]
+    allowed_hosts: list[str]
 
 
 def validate(targets_json: str, allowed_hosts_raw: str) -> DeliveryGateResult:
@@ -40,12 +40,14 @@ def validate(targets_json: str, allowed_hosts_raw: str) -> DeliveryGateResult:
             "ok": False,
             "failures": [f"DELIVERY_TARGETS_JSON is not valid JSON: {exc}"],
             "targets": [],
+            "allowed_hosts": [],
         }
     if not isinstance(targets, dict) or not targets:
         return {
             "ok": False,
             "failures": ["DELIVERY_TARGETS_JSON must be a non-empty object"],
             "targets": [],
+            "allowed_hosts": [],
         }
     allowed_hosts = {
         host.strip().lower().rstrip(".")

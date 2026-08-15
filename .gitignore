@@ -2,6 +2,13 @@
 AGENTS.md
 CLAUDE.md
 .codex/
+!.codex/
+.codex/*
+!.codex/skills/
+.codex/skills/*
+!.codex/skills/cygnus-jira-execution/
+.codex/skills/cygnus-jira-execution/*
+!.codex/skills/cygnus-jira-execution/SKILL.md
 .claude/
 .cursor/
 .trellis/

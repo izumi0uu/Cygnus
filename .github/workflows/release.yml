@@ -349,7 +349,6 @@ jobs:
       CYGNUS_BROWSER_E2E_RUNNER: ${{ github.workspace }}/frontend/scripts/run-browser-certification.mjs
       CYGNUS_SECURITY_FAILURE_INJECTION_RUNNER: ${{ github.workspace }}/scripts/prod/run-security-certification.sh
       CYGNUS_PERSISTED_DOMAIN_EVAL_RUNNER: ${{ github.workspace }}/scripts/prod/run-persisted-domain-eval.sh
-      CYGNUS_OPERATOR_WORK_DIR: ${{ runner.temp }}/cygnus-operator
       CYGNUS_CERTIFICATION_ARTIFACT_DIR: ${{ github.workspace }}/production/evidence
       CYGNUS_EXPECTED_GIT_SHA: ${{ github.sha }}
       CYGNUS_EXPECTED_BACKEND_IMAGE: ${{ needs.build-staging-images.outputs.backend_ref }}
@@ -385,6 +384,7 @@ jobs:
           set -euo pipefail
           python3 scripts/prod/materialize-certification-inputs.py \
             --output-dir "$RUNNER_TEMP/cygnus-certification-inputs" >> "$GITHUB_ENV"
+          echo "CYGNUS_OPERATOR_WORK_DIR=$RUNNER_TEMP/cygnus-operator" >> "$GITHUB_ENV"
       - name: Bind approved production policy to candidate release
         run: |
           set -euo pipefail

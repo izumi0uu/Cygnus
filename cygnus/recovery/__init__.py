@@ -1,3 +1,10 @@
+"""Governance control-plane recovery modules for Cygnus.
+
+Ownership:
+- downstream reality check, governance overview, recovery window, and recovery proof surfaces live here
+- this package owns governance recovery semantics, not runtime app-shell wiring
+"""
+
 from cygnus.recovery.fixtures import (
     sample_all_recovery_residual_risks,
     sample_recovery_alignment_planes,
@@ -9,6 +16,14 @@ from cygnus.recovery.fixtures import (
     sample_reality_check_command_ref,
     sample_reality_check_feedback,
 )
+from cygnus.recovery.durable import (
+    DurableRecoveryNotFound,
+    DurableRecoveryUnavailable,
+    get_durable_downstream_reality_check,
+    get_durable_governance_overview,
+    get_durable_recovery_proof,
+    get_durable_recovery_window,
+)
 from cygnus.recovery.providers import (
     build_downstream_reality_check,
     build_governance_overview,
@@ -19,6 +34,7 @@ from cygnus.recovery.query import (
     GovernanceOverviewQuery,
     RecoveryWindowQuery,
     get_downstream_reality_check_surface,
+    get_default_governance_overview_surface,
     get_governance_overview_surface,
     get_recovery_window_surface,
 )
@@ -36,6 +52,14 @@ from cygnus.recovery.reality_check import (
     MismatchByAudience,
     RealityCheckStrip,
     build_downstream_reality_check_surface,
+)
+from cygnus.recovery.proof import (
+    RecoveryBehaviorType,
+    RecoveryProofSurface,
+    RecoveryProofWindow,
+    RecoverySignal,
+    RecoverySignalStatus,
+    get_pressure_intake_recovery_proof_surface,
 )
 from cygnus.recovery.window import (
     AlignmentPlaneChange,
@@ -56,6 +80,8 @@ __all__ = [
     "BeforeAfterAlignmentView",
     "ClosureJudge",
     "DownstreamFeedbackSignal",
+    "DurableRecoveryNotFound",
+    "DurableRecoveryUnavailable",
     "DownstreamRealityCheckQuery",
     "DownstreamRealityCheckSurface",
     "FeedbackSignalType",
@@ -68,7 +94,12 @@ __all__ = [
     "build_governance_overview_surface",
     "build_recovery_window",
     "build_recovery_window_surface",
+    "get_durable_downstream_reality_check",
+    "get_durable_governance_overview",
+    "get_durable_recovery_proof",
+    "get_durable_recovery_window",
     "get_downstream_reality_check_surface",
+    "get_default_governance_overview_surface",
     "get_governance_overview_surface",
     "get_recovery_window_surface",
     "GovernanceOverviewQuery",
@@ -82,6 +113,11 @@ __all__ = [
     "RecoveryWindowQuery",
     "RecoveryWindowSurface",
     "ResidualRisk",
+    "RecoveryBehaviorType",
+    "RecoveryProofSurface",
+    "RecoveryProofWindow",
+    "RecoverySignal",
+    "RecoverySignalStatus",
     "sample_all_recovery_residual_risks",
     "TruthPlaneState",
     "sample_recovery_alignment_planes",
@@ -92,4 +128,5 @@ __all__ = [
     "sample_restrict_command_ref",
     "sample_reality_check_command_ref",
     "sample_reality_check_feedback",
+    "get_pressure_intake_recovery_proof_surface",
 ]

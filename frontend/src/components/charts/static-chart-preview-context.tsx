@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable react-refresh/only-export-components -- This context module intentionally exports its provider and consumer hook together. */
 
 import { createContext, type ReactNode, useContext } from "react";
 

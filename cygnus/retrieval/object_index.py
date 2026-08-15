@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable, Mapping
 
 from cygnus.domain.audience import AudienceContext
 from cygnus.domain.lifecycle import LifecycleState
@@ -13,7 +13,14 @@ from cygnus.domain.objects import (
     TroubleshootingFlow,
 )
 from cygnus.evidence.records import SupportEvidence
-from cygnus.retrieval.contracts import KnowledgeObjectHit, keyword_score, slugify, tokenize
+from cygnus.retrieval.contracts import (
+    KnowledgeObjectHit,
+    PersistedDeliveryRecord,
+    PersistedObjectTruth,
+    keyword_score,
+    slugify,
+    tokenize,
+)
 from cygnus.retrieval.source_trace import SourceTraceResolver
 
 
@@ -22,9 +29,18 @@ class KnowledgeObjectIndex:
         self,
         objects: Iterable[KnowledgeObject],
         evidence: Iterable[SupportEvidence],
+        *,
+        persisted_truth_by_object: Mapping[str, PersistedObjectTruth] | None = None,
+        delivery_records_by_object: Mapping[str, tuple[PersistedDeliveryRecord, ...]]
+        | None = None,
     ) -> None:
         self._objects = tuple(objects)
-        self._trace_resolver = SourceTraceResolver(self._objects, evidence)
+        self._trace_resolver = SourceTraceResolver(
+            self._objects,
+            evidence,
+            persisted_truth_by_object=persisted_truth_by_object,
+            delivery_records_by_object=delivery_records_by_object,
+        )
 
     def search(
         self,
@@ -32,8 +48,10 @@ class KnowledgeObjectIndex:
         query: str,
         audience_context: AudienceContext | None = None,
         object_types: Iterable[str] | None = None,
+        channel: str | None = None,
         limit: int = 10,
         include_unpublished: bool = False,
+        match_audience: bool = True,
     ) -> tuple[KnowledgeObjectHit, ...]:
         query_tokens = tokenize(query)
         allowed_types = {item.strip() for item in object_types or () if item.strip()}
@@ -42,18 +60,30 @@ class KnowledgeObjectIndex:
         for object_ in self._objects:
             if allowed_types and object_.object_type.value not in allowed_types:
                 continue
-            if not include_unpublished and object_.lifecycle_state is not LifecycleState.PUBLISHED:
+            if (
+                not include_unpublished
+                and object_.lifecycle_state is not LifecycleState.PUBLISHED
+            ):
                 continue
 
-            audience_match = _resolve_audience_match(object_, audience_context)
-            if audience_match is None:
-                continue
+            if match_audience:
+                audience_match = _resolve_audience_match(object_, audience_context)
+                if audience_match is None:
+                    continue
+            else:
+                # Explicit probe mode: does any published object match the
+                # query at all (audience-blind)? Used only to distinguish
+                # audience_restricted from no-governed-match diagnostics.
+                audience_match = "probe"
 
             score = keyword_score(query_tokens, *_searchable_fields(object_))
             if score <= 0:
                 continue
-
-            trace = self._trace_resolver.build_trace_for_object(object_)
+            trace = self._trace_resolver.build_trace_for_object(
+                object_,
+                audience_context=audience_context,
+                channel=channel,
+            )
             ranked.append(
                 (
                     score,
@@ -74,24 +104,26 @@ class KnowledgeObjectIndex:
         ranked.sort(key=lambda item: (-item[0], item[1].title))
         return tuple(hit for _, hit in ranked[:limit])
 
-    def read(self, id_or_slug: str) -> KnowledgeObject | None:
-        return self._trace_resolver.find_object(id_or_slug)
+    def read(self, object_id: str) -> KnowledgeObject | None:
+        """Resolve only an exact immutable object ID."""
+        return self._trace_resolver.find_object(object_id)
 
     @property
     def trace_resolver(self) -> SourceTraceResolver:
         return self._trace_resolver
 
 
-
 def _resolve_audience_match(
     object_: KnowledgeObject,
     audience_context: AudienceContext | None,
 ) -> str | None:
+    # Strict audience enforcement: a missing context is a denial, never a
+    # fallback. The read surface must always carry an explicit audience.
     if audience_context is None:
-        return "partial"
+        return None
 
     if not object_.supported_audiences:
-        return "partial"
+        return None
 
     matched_global = False
     for audience_filter in object_.supported_audiences:
@@ -107,7 +139,6 @@ def _resolve_audience_match(
     return None
 
 
-
 def _searchable_fields(object_: KnowledgeObject) -> tuple[str, ...]:
     fields = [object_.title, object_.summary, " ".join(object_.tags)]
 
@@ -118,7 +149,9 @@ def _searchable_fields(object_: KnowledgeObject) -> tuple[str, ...]:
                 object_.canonical_answer,
                 " ".join(object_.constraints),
                 " ".join(variant.content for variant in object_.audience_variants),
-                " ".join((variant.label or "") for variant in object_.audience_variants),
+                " ".join(
+                    (variant.label or "") for variant in object_.audience_variants
+                ),
             ]
         )
     elif isinstance(object_, TroubleshootingFlow):
@@ -162,7 +195,6 @@ def _searchable_fields(object_: KnowledgeObject) -> tuple[str, ...]:
         )
 
     return tuple(fields)
-
 
 
 def _snippet_for(object_: KnowledgeObject) -> str:

@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-08-15",
+  "required_platforms": [
+    "linux/amd64",
+    "linux/arm64"
+  ],
+  "verification_policy": {
+    "command": "docker buildx imagetools inspect <reference>",
+    "requirements": [
+      "the registry manifest digest must equal the pinned digest",
+      "the manifest must advertise linux/amd64 and linux/arm64",
+      "a registry timeout, authentication error, or missing platform blocks release"
+    ],
+    "update_process": "Select a reviewed immutable upstream tag, resolve it with the command above, record the returned index digest and platforms here, update every matching Dockerfile/Compose/workflow reference, then rerun image_reference_gate.py, dependency gates, scans, and smoke gates before release."
+  },
+  "images": [
+    {
+      "name": "uv",
+      "purpose": "locked Python dependency resolver",
+      "tag": "ghcr.io/astral-sh/uv:0.9.11",
+      "reference": "ghcr.io/astral-sh/uv:0.9.11@sha256:5aa820129de0a600924f166aec9cb51613b15b68f1dcd2a02f31a500d2ede568",
+      "manifest_digest": "sha256:5aa820129de0a600924f166aec9cb51613b15b68f1dcd2a02f31a500d2ede568",
+      "registry": "ghcr.io",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": ["linux/amd64", "linux/arm64"],
+      "metadata_source": "docker buildx imagetools inspect ghcr.io/astral-sh/uv:0.9.11",
+      "verified_at": "2026-08-15",
+      "status": "verified"
+    },
+    {
+      "name": "python",
+      "purpose": "backend dependency-build and runtime base",
+      "tag": "python:3.12.14-slim-bookworm",
+      "reference": "python:3.12.14-slim-bookworm@sha256:a116514e19457bcb7af7efe9c3dd0b9b71e85b317694e7882a1c52aa15a78134",
+      "manifest_digest": "sha256:a116514e19457bcb7af7efe9c3dd0b9b71e85b317694e7882a1c52aa15a78134",
+      "registry": "docker.io",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": ["linux/amd64", "linux/arm64"],
+      "metadata_source": "Docker Hub v2 tag metadata for library/python:3.12.14-slim-bookworm",
+      "verified_at": "2026-08-15",
+      "status": "verified"
+    },
+    {
+      "name": "node",
+      "purpose": "frontend dependency-build base",
+      "tag": "node:22.15.1-bookworm-slim",
+      "reference": "node:22.15.1-bookworm-slim@sha256:ec318fe0dc46b56bcc1ca42a202738aeb4f3e347a7b4dd9f9f1df12ea7aa385a",
+      "manifest_digest": "sha256:ec318fe0dc46b56bcc1ca42a202738aeb4f3e347a7b4dd9f9f1df12ea7aa385a",
+      "registry": "docker.io",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": ["linux/amd64", "linux/arm64"],
+      "metadata_source": "Docker Hub v2 tag metadata for library/node:22.15.1-bookworm-slim",
+      "verified_at": "2026-08-15",
+      "status": "verified"
+    },
+    {
+      "name": "nginx",
+      "purpose": "frontend production reverse-proxy runtime base",
+      "tag": "nginx:1.27.5-alpine",
+      "reference": "nginx:1.27.5-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10",
+      "manifest_digest": "sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10",
+      "registry": "docker.io",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": ["linux/amd64", "linux/arm64"],
+      "metadata_source": "Docker Hub v2 tag metadata for library/nginx:1.27.5-alpine",
+      "verified_at": "2026-08-15",
+      "status": "verified"
+    },
+    {
+      "name": "pgvector",
+      "purpose": "PostgreSQL production and local development service",
+      "tag": "pgvector/pgvector:0.8.6-pg16-trixie",
+      "reference": "pgvector/pgvector:0.8.6-pg16-trixie@sha256:c8483555ce48101872f888c1df8a895ff689d6c7c7a5f7ac266475f9dfe89e0b",
+      "manifest_digest": "sha256:c8483555ce48101872f888c1df8a895ff689d6c7c7a5f7ac266475f9dfe89e0b",
+      "registry": "docker.io",
+      "media_type": "application/vnd.docker.distribution.manifest.list.v2+json",
+      "platforms": ["linux/amd64", "linux/arm64"],
+      "metadata_source": "Docker Hub v2 tag metadata for pgvector/pgvector:0.8.6-pg16-trixie",
+      "verified_at": "2026-08-15",
+      "status": "verified"
+    },
+    {
+      "name": "redis",
+      "purpose": "Redis production and local development service",
+      "tag": "redis:7.4-alpine3.21",
+      "reference": "redis:7.4-alpine3.21@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2",
+      "manifest_digest": "sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2",
+      "registry": "docker.io",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": ["linux/amd64", "linux/arm64"],
+      "metadata_source": "Docker Hub v2 tag metadata for library/redis:7.4-alpine3.21",
+      "verified_at": "2026-08-15",
+      "status": "verified"
+    },
+    {
+      "name": "minio",
+      "purpose": "MinIO production and local development service",
+      "tag": "minio/minio:RELEASE.2025-09-07T16-13-09Z",
+      "reference": "minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e",
+      "manifest_digest": "sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e",
+      "registry": "docker.io",
+      "media_type": "application/vnd.docker.distribution.manifest.list.v2+json",
+      "platforms": ["linux/amd64", "linux/arm64"],
+      "metadata_source": "Docker Hub v2 tag metadata for minio/minio:RELEASE.2025-09-07T16-13-09Z",
+      "verified_at": "2026-08-15",
+      "status": "verified"
+    },
+    {
+      "name": "trivy",
+      "purpose": "release image vulnerability scanner",
+      "tag": "aquasec/trivy:0.58.0",
+      "reference": "aquasec/trivy:0.58.0@sha256:b88012e2a0a309d6a8a00463d4e63e5e513377fb74eccbc8f9b0f8f81940ebeb",
+      "manifest_digest": "sha256:b88012e2a0a309d6a8a00463d4e63e5e513377fb74eccbc8f9b0f8f81940ebeb",
+      "registry": "docker.io",
+      "media_type": "application/vnd.docker.distribution.manifest.list.v2+json",
+      "platforms": ["linux/amd64", "linux/arm64"],
+      "metadata_source": "Docker Hub v2 tag metadata for aquasec/trivy:0.58.0",
+      "verified_at": "2026-08-15",
+      "status": "verified"
+    }
+  ]
+}

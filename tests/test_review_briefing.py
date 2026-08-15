@@ -34,6 +34,7 @@ class ReviewBriefingTests(unittest.TestCase):
         )
         item = risk_item_from_proposal(
             proposal,
+            signal_ref="cp-brief-1",
             risk_id="risk-1",
             risk_type=ReviewRiskType.DRIFT,
             affected_audiences=(AudienceFilter(visibility=Visibility.EXTERNAL),),
@@ -51,4 +52,3 @@ class ReviewBriefingTests(unittest.TestCase):
     def test_why_now_requires_summary(self) -> None:
         with self.assertRaises(ValueError):
             WhyNowFrame(summary=" ")
-

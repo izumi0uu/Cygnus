@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from typing import cast
 
 from cygnus.review import (
     build_review_command_surface,
@@ -21,18 +22,25 @@ class ReviewProviderTests(unittest.TestCase):
         ).to_dict()
 
         self.assertEqual(payload["surface_id"], "review-home")
-        self.assertEqual(payload["headline"], "Today’s highest-leverage governance risks")
+        self.assertEqual(
+            payload["headline"], "Today’s highest-leverage governance risks"
+        )
         self.assertIn("situation_frame", payload)
         self.assertIn("priority_stack", payload)
-        self.assertEqual(payload["priority_stack"][0]["risk_type"], "source_blindness")
-        self.assertIn("affected_audiences", payload["priority_stack"][0])
-        self.assertIn("affected_surfaces", payload["priority_stack"][0])
-        self.assertIn("owner_state", payload["priority_stack"][0])
-        self.assertIn("primary_command", payload["priority_stack"][0])
+        priority_stack = cast(list[dict[str, object]], payload["priority_stack"])
+        self.assertEqual(priority_stack[0]["risk_type"], "source_blindness")
+        self.assertIn("affected_audiences", priority_stack[0])
+        self.assertIn("affected_surfaces", priority_stack[0])
+        self.assertIn("owner_state", priority_stack[0])
+        self.assertIn("primary_command", priority_stack[0])
         self.assertIn("available_commands", payload)
 
-    def test_build_review_command_surface_from_brief_preserves_existing_brief(self) -> None:
-        items = tuple(build_review_risk_item(bundle) for bundle in sample_review_bundles())
+    def test_build_review_command_surface_from_brief_preserves_existing_brief(
+        self,
+    ) -> None:
+        items = tuple(
+            build_review_risk_item(bundle) for bundle in sample_review_bundles()
+        )
         brief = build_review_command_brief(
             brief_id="brief-1",
             headline="Today’s highest-leverage governance risks",
@@ -45,5 +53,10 @@ class ReviewProviderTests(unittest.TestCase):
         )
 
         payload = surface.to_dict()
-        self.assertEqual(payload["command_brief"]["brief_id"], "brief-1")
-        self.assertEqual(payload["situation_frame"]["briefing_note"], "Morning command brief before opening any draft detail.")
+        command_brief = cast(dict[str, object], payload["command_brief"])
+        self.assertEqual(command_brief["brief_id"], "brief-1")
+        situation_frame = cast(dict[str, object], payload["situation_frame"])
+        self.assertEqual(
+            situation_frame["briefing_note"],
+            "Morning command brief before opening any draft detail.",
+        )

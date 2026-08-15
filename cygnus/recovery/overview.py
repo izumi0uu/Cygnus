@@ -4,7 +4,11 @@ from dataclasses import dataclass
 from typing import Iterable
 
 from cygnus.recovery.reality_check import GovernanceCommandRef, _normalize_strings
-from cygnus.recovery.window import RecoveryAssessment, RecoveryWindowSurface, ResidualRisk
+from cygnus.recovery.window import (
+    RecoveryAssessment,
+    RecoveryWindowSurface,
+    ResidualRisk,
+)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -124,7 +128,9 @@ class GovernanceOverviewSurface:
             raise ValueError("summary must not be blank")
         object.__setattr__(self, "open_loops", tuple(self.open_loops))
         object.__setattr__(self, "open_loop_ranks", tuple(self.open_loop_ranks))
-        object.__setattr__(self, "highest_leverage_command", self.highest_leverage_command.strip())
+        object.__setattr__(
+            self, "highest_leverage_command", self.highest_leverage_command.strip()
+        )
         object.__setattr__(
             self,
             "next_command_ribbon",
@@ -176,10 +182,13 @@ def build_governance_overview_surface(
         raise ValueError("command_refs must not be empty")
 
     window_map = {window.command_ref.command_id: window for window in windows}
-    missing_windows = [ref.command_id for ref in refs if ref.command_id not in window_map]
+    missing_windows = [
+        ref.command_id for ref in refs if ref.command_id not in window_map
+    ]
     if missing_windows:
         raise ValueError(
-            "recovery_windows are missing command ids: " + ", ".join(sorted(missing_windows))
+            "recovery_windows are missing command ids: "
+            + ", ".join(sorted(missing_windows))
         )
 
     risk_map = _group_risks_by_command(risks)
@@ -259,7 +268,9 @@ def build_governance_overview_surface(
     sorted_loop_rows = tuple(row for row, _ in sorted_rows)
     sorted_ranks = tuple(rank_rows)
     highest_leverage = sorted_loop_rows[0].command_id
-    pending_loop_count = sum(1 for row in sorted_loop_rows if row.pending_propagation_count > 0)
+    pending_loop_count = sum(
+        1 for row in sorted_loop_rows if row.pending_propagation_count > 0
+    )
     unacceptable_loop_count = sum(
         1 for row in sorted_loop_rows if row.unacceptable_residual_count > 0
     )
@@ -360,7 +371,9 @@ def _recovery_proof_summary(window: RecoveryWindowSurface) -> str:
     )
 
 
-def _next_command_ribbon(open_loops: tuple[OpenLoopComparisonRow, ...]) -> tuple[str, ...]:
+def _next_command_ribbon(
+    open_loops: tuple[OpenLoopComparisonRow, ...],
+) -> tuple[str, ...]:
     seen: set[str] = set()
     ribbon: list[str] = []
     for row in open_loops:

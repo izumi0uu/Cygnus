@@ -1,4 +1,54 @@
-from cygnus.review.briefing import OwnerState, ReviewCommandBrief, ReviewRiskItem, ReviewRiskType, WhyNowFrame, risk_item_from_proposal
+"""Governance control-plane review modules for Cygnus.
+
+Ownership:
+- review queue, pressure intake, drilldown, and source-blindness governance live here
+- contribution lifecycle and automated draft pre-review annotations live under ``cygnus.review``
+- contribution lifecycle, wiki branch lifecycle, and automated draft pre-review annotations live under ``cygnus.review``
+- source compilation-plan review lifecycle also lives under ``cygnus.review``
+- this package owns governance semantics, not runtime app-shell wiring
+"""
+
+from cygnus.review.branches import (
+    BranchMergeConflict,
+    close_wiki_branch,
+    merge_wiki_branch,
+    rebase_wiki_branch_draft,
+    submit_wiki_branch,
+)
+from cygnus.review.briefing import (
+    OwnerState,
+    ReviewCommandBrief,
+    ReviewRiskItem,
+    ReviewRiskType,
+    WhyNowFrame,
+    risk_item_from_proposal,
+)
+from cygnus.review.contributions import (
+    ContributionAdapter,
+    CreateDraftSlugConflict,
+    DraftConflictError,
+    DraftVersionConflict,
+    InvalidTransition,
+    SkillContributionAdapter,
+    WikiDraftAdapter,
+    approve_skill_contribution,
+    approve_wiki_draft,
+    create_wiki_draft,
+    notify_approved,
+    notify_rejected,
+    notify_submitted,
+    reject_skill_contribution,
+    reject_wiki_draft,
+    request_changes,
+    resubmit_skill_contribution,
+    resubmit_wiki_draft,
+    skill_contribution_adapter,
+    submit_skill_contribution,
+    submit_wiki_draft,
+    update_wiki_draft,
+    wiki_draft_adapter,
+    withdraw,
+)
 from cygnus.review.detail import ReviewItemQuery, get_review_item_detail
 from cygnus.review.drift import (
     DriftContext,
@@ -10,8 +60,16 @@ from cygnus.review.drift import (
     build_drift_governance_surface,
     get_drift_governance_surface,
 )
-from cygnus.review.drilldown import ReviewQueueDrilldownQuery, ReviewQueueDrilldownSurface, get_review_queue_drilldown
-from cygnus.review.fixtures import sample_review_bundles, sample_review_command_brief, sample_review_command_surface
+from cygnus.review.drilldown import (
+    ReviewQueueDrilldownQuery,
+    ReviewQueueDrilldownSurface,
+    get_review_queue_drilldown,
+)
+from cygnus.review.fixtures import (
+    sample_review_bundles,
+    sample_review_command_brief,
+    sample_review_command_surface,
+)
 from cygnus.review.home import ReviewHomeQuery, get_review_home_surface
 from cygnus.review.intake import (
     PressureIntakeBundle,
@@ -24,9 +82,16 @@ from cygnus.review.intake import (
     compile_pressure_proposal_bundles,
     get_pressure_intake_review_brief_surface,
     get_pressure_intake_review_queue_drilldown,
+    is_feedback_derived_signal_type,
     sample_pressure_intake_records,
 )
-from cygnus.review.item import AudienceImpact, EvidenceStrength, ReviewItemDetailSurface, RiskFrame, build_review_item_detail_surface
+from cygnus.review.item import (
+    AudienceImpact,
+    EvidenceStrength,
+    ReviewItemDetailSurface,
+    RiskFrame,
+    build_review_item_detail_surface,
+)
 from cygnus.review.pressure import (
     PressureCommand,
     PressureCommandType,
@@ -49,24 +114,82 @@ from cygnus.review.queue import (
     build_review_queue_surface,
     get_review_queue_surface,
 )
+from cygnus.review.source_plans import (
+    SourcePlanInvalidTransition,
+    approve_source_compilation_plan,
+    auto_approve_source_compilation_plan,
+    fail_source_plan_regeneration,
+    reject_source_compilation_plan,
+    request_source_plan_regeneration,
+    restore_source_plan_pending_review,
+)
 from cygnus.review.source_blindness import (
     SourceBlindnessCommand,
+    SourceAudienceImpact,
     SourceBlindnessCommandType,
     SourceBlindnessContext,
     SourceBlindnessResult,
     SourceBlindnessSurface,
+    SourceFailureObservation,
+    SourceImpactState,
+    SourcePropagationImpact,
     SourceRepairDirective,
     apply_source_blindness_commands,
     build_source_blindness_surface,
+    build_source_failure_observations,
     get_source_blindness_surface,
 )
-from cygnus.review.providers import build_review_command_surface, build_review_command_surface_from_bundles
+from cygnus.review.providers import (
+    build_review_command_surface,
+    build_review_command_surface_from_bundles,
+)
 from cygnus.review.queries import build_review_command_brief, summarize_review_items
-from cygnus.review.service import ProposalBundle, ReviewSignal, assemble_review_command_brief, build_review_risk_item, rank_review_item
-from cygnus.review.surface import PriorityStackCard, ReviewCommandSurface, SituationFrame
+from cygnus.review.service import (
+    ProposalBundle,
+    ReviewSignal,
+    assemble_review_command_brief,
+    build_review_risk_item,
+    rank_review_item,
+)
+from cygnus.review.surface import (
+    ObservationState,
+    PriorityStackCard,
+    ReviewCommandSurface,
+    SituationFrame,
+    SurfaceObservation,
+)
 
 __all__ = [
+    "BranchMergeConflict",
+    "ContributionAdapter",
+    "CreateDraftSlugConflict",
+    "DraftConflictError",
+    "DraftVersionConflict",
+    "InvalidTransition",
+    "SkillContributionAdapter",
+    "WikiDraftAdapter",
+    "approve_skill_contribution",
+    "approve_wiki_draft",
+    "close_wiki_branch",
+    "create_wiki_draft",
     "AudienceImpact",
+    "merge_wiki_branch",
+    "rebase_wiki_branch_draft",
+    "submit_skill_contribution",
+    "submit_wiki_draft",
+    "submit_wiki_branch",
+    "update_wiki_draft",
+    "withdraw",
+    "wiki_draft_adapter",
+    "skill_contribution_adapter",
+    "resubmit_wiki_draft",
+    "resubmit_skill_contribution",
+    "reject_skill_contribution",
+    "reject_wiki_draft",
+    "request_changes",
+    "notify_submitted",
+    "notify_rejected",
+    "notify_approved",
     "DriftContext",
     "DriftGovernanceCommand",
     "DriftGovernanceCommandType",
@@ -74,6 +197,7 @@ __all__ = [
     "DriftGovernanceSurface",
     "EvidenceStrength",
     "OwnerState",
+    "ObservationState",
     "PressureCommand",
     "PressureCommandType",
     "PressureIntakeBundle",
@@ -100,11 +224,17 @@ __all__ = [
     "ReviewRiskItem",
     "ReviewRiskType",
     "SituationFrame",
+    "SourcePlanInvalidTransition",
     "SourceBlindnessCommand",
+    "SourceAudienceImpact",
     "SourceBlindnessCommandType",
     "SourceBlindnessContext",
     "SourceBlindnessResult",
     "SourceBlindnessSurface",
+    "SourceFailureObservation",
+    "SourceImpactState",
+    "SourcePropagationImpact",
+    "SurfaceObservation",
     "SourceRepairDirective",
     "WhyNowFrame",
     "build_review_command_brief",
@@ -112,6 +242,7 @@ __all__ = [
     "build_review_item_detail_surface",
     "build_review_pressure_surface",
     "build_source_blindness_surface",
+    "build_source_failure_observations",
     "get_drift_governance_surface",
     "get_review_item_detail",
     "apply_drift_governance_commands",
@@ -119,6 +250,9 @@ __all__ = [
     "apply_pressure_commands",
     "get_source_blindness_surface",
     "apply_source_blindness_commands",
+    "approve_source_compilation_plan",
+    "auto_approve_source_compilation_plan",
+    "fail_source_plan_regeneration",
     "apply_queue_commands",
     "build_review_queue_surface",
     "get_review_queue_surface",
@@ -130,6 +264,7 @@ __all__ = [
     "compile_pressure_intake_bundle",
     "compile_pressure_proposal_bundles",
     "get_pressure_intake_review_brief_surface",
+    "is_feedback_derived_signal_type",
     "get_pressure_intake_review_queue_drilldown",
     "sample_pressure_intake_records",
     "ProposalBundle",
@@ -143,6 +278,9 @@ __all__ = [
     "sample_review_bundles",
     "sample_review_command_brief",
     "sample_review_command_surface",
+    "reject_source_compilation_plan",
+    "request_source_plan_regeneration",
+    "restore_source_plan_pending_review",
     "summarize_review_items",
     "UpstreamCommandTrace",
 ]

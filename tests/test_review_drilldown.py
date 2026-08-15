@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from typing import cast
 
 from cygnus.review import (
     OwnerState,
@@ -12,15 +13,19 @@ from cygnus.review import (
 
 
 class ReviewDrilldownTests(unittest.TestCase):
-    def test_get_review_queue_drilldown_keeps_queue_context_and_selected_detail(self) -> None:
+    def test_get_review_queue_drilldown_keeps_queue_context_and_selected_detail(
+        self,
+    ) -> None:
         payload = get_review_queue_drilldown(
             ReviewQueueDrilldownQuery(selected_object_ref="cp-source-1")
         ).to_dict()
 
         self.assertEqual(payload["surface_id"], "review-queue-drilldown")
         self.assertEqual(payload["selected_position"], 0)
-        self.assertEqual(payload["selected_card"]["object_ref"], "cp-source-1")
-        self.assertEqual(payload["selected_detail"]["item_ref"], "cp-source-1")
+        selected_card = cast(dict[str, object], payload["selected_card"])
+        self.assertEqual(selected_card["object_ref"], "cp-source-1")
+        selected_detail = cast(dict[str, object], payload["selected_detail"])
+        self.assertEqual(selected_detail["item_ref"], "cp-source-1")
         self.assertIsNone(payload["previous_object_ref"])
         self.assertIsNotNone(payload["next_object_ref"])
         self.assertIn("queue_surface", payload)
@@ -34,12 +39,18 @@ class ReviewDrilldownTests(unittest.TestCase):
         ).to_dict()
 
         self.assertEqual(payload["total_items"], 2)
-        self.assertEqual(payload["selected_detail"]["risk_frame"]["risk_type"], "ticket_pressure")
+        selected_detail = cast(dict[str, object], payload["selected_detail"])
+        risk_frame = cast(dict[str, object], selected_detail["risk_frame"])
+        self.assertEqual(risk_frame["risk_type"], "ticket_pressure")
+        queue_surface = cast(dict[str, object], payload["queue_surface"])
+        priority_stack = cast(list[dict[str, object]], queue_surface["priority_stack"])
         self.assertTrue(
-            all(card["owner_state"] == "unassigned" for card in payload["queue_surface"]["priority_stack"])
+            all(card["owner_state"] == "unassigned" for card in priority_stack)
         )
 
-    def test_get_review_queue_drilldown_raises_when_selected_item_is_not_in_queue(self) -> None:
+    def test_get_review_queue_drilldown_raises_when_selected_item_is_not_in_queue(
+        self,
+    ) -> None:
         with self.assertRaises(ValueError):
             get_review_queue_drilldown(
                 ReviewQueueDrilldownQuery(
@@ -51,8 +62,16 @@ class ReviewDrilldownTests(unittest.TestCase):
 
 class PressureIntakeDrilldownTests(unittest.TestCase):
     def test_pressure_intake_drilldown_returns_governance_first_context(self) -> None:
-        payload = get_pressure_intake_review_queue_drilldown("incident-sync-eu-billing").to_dict()
+        payload = get_pressure_intake_review_queue_drilldown(
+            "incident-sync-eu-billing"
+        ).to_dict()
 
-        self.assertEqual(payload["selected_card"]["object_ref"], "incident-sync-eu-billing")
-        self.assertEqual(payload["selected_detail"]["risk_frame"]["risk_type"], "source_blindness")
-        self.assertIn("help_center", payload["selected_detail"]["audience_impact"]["impacted_surfaces"])
+        selected_card = cast(dict[str, object], payload["selected_card"])
+        self.assertEqual(selected_card["object_ref"], "incident-sync-eu-billing")
+        selected_detail = cast(dict[str, object], payload["selected_detail"])
+        risk_frame = cast(dict[str, object], selected_detail["risk_frame"])
+        self.assertEqual(risk_frame["risk_type"], "source_blindness")
+        audience_impact = cast(dict[str, object], selected_detail["audience_impact"])
+        self.assertIn(
+            "help_center", cast(list[str], audience_impact["impacted_surfaces"])
+        )

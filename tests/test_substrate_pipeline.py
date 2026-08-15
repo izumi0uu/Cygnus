@@ -1,9 +1,18 @@
 from __future__ import annotations
 
 import unittest
+from typing import Any
 
 from cygnus.substrate.pipeline_checkpoint import PipelineCheckpoint
 from cygnus.substrate.pipeline_phases import PipelinePhase
+from cygnus.substrate.source_outline import (
+    PAGE_JOIN_SEPARATOR,
+    assemble_full_text,
+    build_outline,
+    parse_page_range,
+    slice_pages_by_range,
+)
+from cygnus.substrate.source_images import ImageInfo, extract_images
 
 
 class PipelinePhaseTests(unittest.TestCase):
@@ -68,3 +77,37 @@ class PipelineCheckpointTests(unittest.TestCase):
         self.assertTrue(checkpoint.is_complete)
         self.assertIsNone(checkpoint.resume_phase)
         self.assertEqual(checkpoint.completed_phases, tuple(PipelinePhase))
+
+
+class SourceOutlinePrimitiveTests(unittest.TestCase):
+    def test_outline_primitives_round_trip_page_slices(self) -> None:
+        pages: list[dict[str, Any]] = [
+            {"page_number": 1, "content": "# Intro\nHello world"},
+            {"page_number": 2, "content": "## Details\nMore detail"},
+        ]
+
+        full_text, offsets = assemble_full_text(pages)
+        outline = build_outline(pages)
+        selected = slice_pages_by_range(full_text, offsets, parse_page_range("1-2"))
+
+        self.assertEqual(
+            offsets, [0, len(pages[0]["content"]) + len(PAGE_JOIN_SEPARATOR)]
+        )
+        self.assertEqual([item["page"] for item in selected], [1, 2])
+        self.assertEqual(outline[0]["title"], "Intro")
+        self.assertEqual(outline[0]["children"][0]["title"], "Details")
+
+
+class SourceImagePrimitiveTests(unittest.TestCase):
+    def test_image_primitives_are_importable_from_substrate(self) -> None:
+        self.assertTrue(callable(extract_images))
+        image = ImageInfo(
+            minio_key="sources/demo/images/1.png",
+            page_number=1,
+            image_index=0,
+            content_type="image/png",
+            size_bytes=128,
+        )
+
+        self.assertEqual(image.minio_key, "sources/demo/images/1.png")
+        self.assertEqual(image.page_number, 1)

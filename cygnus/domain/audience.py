@@ -126,3 +126,26 @@ class AudienceFilter:
             "product_versions": list(self.product_versions),
             "is_global": self.is_global,
         }
+
+
+def matching_audience_filters(
+    context: AudienceContext,
+    audiences: Iterable[AudienceFilter],
+) -> tuple[AudienceFilter, ...]:
+    """Strict requested-vs-allowed intersection for one read.
+
+    Returns exactly the allowed audience filters that match the requested
+    context. There is no union and no fallback: a context that matches no
+    allowed filter gets an empty result, and a missing context matches nothing.
+    """
+    if context is None:
+        return ()
+    return tuple(audience for audience in audiences if audience.matches(context))
+
+
+def audience_context_allowed(
+    context: AudienceContext,
+    audiences: Iterable[AudienceFilter],
+) -> bool:
+    """True only when the requested context is inside an allowed audience."""
+    return bool(matching_audience_filters(context, audiences))

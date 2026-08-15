@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router-dom'
-import { fetchGovernanceOverview, type GovernanceOverviewSurface } from '@/lib/api'
+import { TriangleAlert } from 'lucide-react'
+import { fetchGovernanceOverview, type GovernanceOverviewSurface, type GovernanceOpenLoopRank } from '@/lib/api'
+import { ApiError } from '@/lib/authApi'
 import { Button } from '@/components/ui/button'
 import { PageSkeleton } from '@/components/Skeleton'
+import { DimensionLines, type DimensionLinesConfig } from '@/components/DimensionLines'
 
 const RECOVERY_TOL: Record<string, string> = {
   false_recovery: 'bp-tol-urgent',
@@ -18,20 +21,54 @@ const RECOVERY_COLOR: Record<string, string> = {
   closed: 'var(--ok)',
 }
 
+/**
+ * Dimension-lines config for SEC-A. Its ranks are sorted by leverage descending,
+ * so the reading is "distance to adjacent neighbors" (sorted-adjacent).
+ * leverage_score is a 0-100 float; tolerance floor 0.05 / cap 0.1 sits below
+ * its 1-decimal display resolution. Lane on the right edge inside the rows'
+ * 16px px-4 gutter — the rows' far-right element (the status diamond / bp-cmd)
+ * clears the centered label.
+ */
+const SEC_A_DIM_CONFIG: DimensionLinesConfig<GovernanceOpenLoopRank> = {
+  getValue: (r) => r.leverage_score,
+  strategy: 'sorted-adjacent',
+  tolerance: { floor: 0.05, cap: 0.1 },
+  formatLabel: (delta, tol) => `Δ${delta.toFixed(1)} ±${tol.toFixed(2)}`,
+  geometry: { side: 'right', inset: 9, extReach: 13, stride: 10 },
+}
+
 export default function Overview() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const [data, setData] = useState<GovernanceOverviewSurface | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [recoveryUnavailable, setRecoveryUnavailable] = useState(false)
+  // Index of the hovered/focused SEC-A rank row, for DimensionLines. Null when
+  // idle. Set by mouseenter/focus, cleared by mouseleave/blur.
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null)
+  const secARef = useRef<HTMLDivElement>(null)
 
   const load = () => {
     setLoading(true)
     setError(null)
-    fetchGovernanceOverview().then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false))
+    setRecoveryUnavailable(false)
+    fetchGovernanceOverview()
+      .then(setData)
+      .catch((e: unknown) => {
+        if (e instanceof ApiError && e.status === 404) setRecoveryUnavailable(true)
+        else setError(String(e))
+      })
+      .finally(() => setLoading(false))
   }
   useEffect(() => {
-    fetchGovernanceOverview().then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false))
+    fetchGovernanceOverview()
+      .then(setData)
+      .catch((e: unknown) => {
+        if (e instanceof ApiError && e.status === 404) setRecoveryUnavailable(true)
+        else setError(String(e))
+      })
+      .finally(() => setLoading(false))
   }, [])
 
   const d = useMemo(() => {
@@ -55,10 +92,32 @@ export default function Overview() {
   if (error)
     return (
       <div className="bp-panel p-4">
-        <div className="font-mono text-sm" style={{ color: 'var(--urgent)' }}>⚠ {t('state.error')}</div>
+        <div className="flex items-center gap-1.5 font-mono text-sm" style={{ color: 'var(--urgent)' }}><TriangleAlert size={15} aria-hidden="true" /> {t('state.error')}</div>
         <Button variant="ghost" className="mt-3" onClick={load}>{t('state.retry')}</Button>
       </div>
     )
+  if (recoveryUnavailable)
+    return (
+      <div className="min-h-full p-6 pb-10 pt-5">
+        <div className="mb-5 flex items-end gap-4">
+          <div>
+            <div className="bp-label mb-1">DWG-001 · GOVERNANCE OVERVIEW</div>
+            <h1 className="font-mono text-[22px] font-bold leading-none tracking-tight">{t('nav.overview')}</h1>
+          </div>
+          <span className="bp-stamp ml-auto">REV · UNAVAILABLE</span>
+        </div>
+        <section role="status" className="bp-panel overflow-hidden">
+          <div className="bp-dim flex items-center gap-2 px-4 py-2.5">
+            <span className="bp-label">SEC-A · {t('overview.openLoops')}</span>
+            <span className="bp-tol bp-tol-flat">{t('observation.state.unavailable')}</span>
+          </div>
+          <p className="px-4 py-5 font-mono text-[12px] leading-relaxed text-muted-foreground">
+            {t('state.recoveryUnavailable')}
+          </p>
+        </section>
+      </div>
+    )
+
   if (!data || !d) return null
 
   return (
@@ -107,12 +166,15 @@ export default function Overview() {
 
       {/* Two-column: open loops annotation table + command horizon */}
       <div className="grid gap-5 lg:grid-cols-2">
-        {/* Left: Open loops as annotation table */}
-        <div className="bp-panel">
+        {/* Left: Open loops as annotation table. ref + DimensionLines turn hover
+            into a caliper: dimension lines measure the leverage gap (Δ LEV ±
+            tol) between the hovered loop and its neighbors. See §12 Idea 2. */}
+        <div className="bp-panel" ref={secARef}>
           <div className="flex items-baseline justify-between border-b border-[color-mix(in_srgb,var(--primary)_25%,transparent)] px-4 py-2.5">
             <span className="bp-label">SEC-A · {t('overview.openLoops')} ({t('overview.byLeverage')})</span>
             <Link to="/console/queue" className="bp-label hover:opacity-100" style={{ opacity: 0.7 }}>{t('overview.viewQueue')}</Link>
           </div>
+          <DimensionLines items={d.ranks} hoverIndex={hoverIndex} containerRef={secARef} config={SEC_A_DIM_CONFIG} />
           <div>
             {d.ranks.map((r, i) => {
               const loop = data.open_loops.find((l) => l.command_id === r.command_id)
@@ -120,8 +182,13 @@ export default function Overview() {
               return (
                 <div
                   key={r.command_id}
+                  data-rank-index={i}
                   role="button"
                   tabIndex={0}
+                  onMouseEnter={() => setHoverIndex(i)}
+                  onMouseLeave={() => setHoverIndex((cur) => (cur === i ? null : cur))}
+                  onFocus={() => setHoverIndex(i)}
+                  onBlur={() => setHoverIndex((cur) => (cur === i ? null : cur))}
                   onClick={() => navigate(`/console/recovery/${r.command_id}`)}
                   onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(`/console/recovery/${r.command_id}`) } }}
                   className="bp-anno"

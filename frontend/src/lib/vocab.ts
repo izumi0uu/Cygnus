@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AffectedAudience } from '@/lib/api'
 
@@ -12,12 +13,18 @@ const RISK_TYPE: Record<string, Pair> = {
   ticket_pressure: { zh: '工单压力', en: 'Ticket pressure' },
   policy_conflict: { zh: '策略冲突', en: 'Policy conflict' },
   owner_gap: { zh: '责任缺口', en: 'Owner gap' },
+  review_assignment: { zh: '审阅分配', en: 'Review assignment' },
+  review_feedback: { zh: '审阅反馈', en: 'Review feedback' },
+  review_approved: { zh: '审阅通过', en: 'Review approved' },
+  review_withdrawn: { zh: '审阅撤回', en: 'Review withdrawn' },
+  governance_notification: { zh: '治理通知', en: 'Governance notification' },
 }
 
 const COMMAND: Record<string, Pair> = {
   open_review: { zh: '开始审阅', en: 'Open review' },
   restrict_publish: { zh: '限制发布', en: 'Restrict publish' },
   assign_owner: { zh: '指派责任人', en: 'Assign owner' },
+  release_owner: { zh: '解除责任', en: 'Release owner' },
   request_more_evidence: { zh: '补充证据', en: 'Request evidence' },
   refresh_sources: { zh: '刷新来源', en: 'Refresh sources' },
   mark_urgent: { zh: '标记紧急', en: 'Mark urgent' },
@@ -71,6 +78,36 @@ const OBJECT_TYPE: Record<string, Pair> = {
   policy_rule: { zh: '策略规则', en: 'Policy rule' },
   escalation_route: { zh: '升级路径', en: 'Escalation route' },
   audience_variant: { zh: '受众变体', en: 'Audience variant' },
+}
+
+const LIFECYCLE: Record<string, Pair> = {
+  draft: { zh: '草稿', en: 'Draft' },
+  in_review: { zh: '审阅中', en: 'In review' },
+  approved: { zh: '已批准', en: 'Approved' },
+  published: { zh: '已发布', en: 'Published' },
+  superseded: { zh: '已替代', en: 'Superseded' },
+  archived: { zh: '已归档', en: 'Archived' },
+}
+
+const ASSIGNMENT_STATE: Record<string, Pair> = {
+  unassigned: { zh: '未分配', en: 'Unassigned' },
+  assigned: { zh: '已指派', en: 'Assigned' },
+  escalated: { zh: '已升级', en: 'Escalated' },
+}
+
+const FRESHNESS: Record<string, Pair> = {
+  fresh: { zh: '新鲜', en: 'Fresh' },
+  stale: { zh: '已过期', en: 'Stale' },
+  unknown: { zh: '未知', en: 'Unknown' },
+}
+
+const EVIDENCE_SOURCE_TYPE: Record<string, Pair> = {
+  help_center: { zh: '帮助中心', en: 'Help Center' },
+  internal_sop: { zh: '内部 SOP', en: 'Internal SOP' },
+  resolved_ticket: { zh: '已解决工单', en: 'Resolved ticket' },
+  release_note: { zh: '发布说明', en: 'Release note' },
+  incident_update: { zh: '事故更新', en: 'Incident update' },
+  chat_transcript: { zh: '聊天记录', en: 'Chat transcript' },
 }
 
 const VISIBILITY: Record<string, Pair> = {
@@ -149,40 +186,48 @@ function pick(dict: Record<string, Pair>, key: string, zh: boolean): string {
 
 export function useVocab() {
   const { i18n } = useTranslation()
-  const zh = i18n.language.startsWith('zh')
-  const audienceSegment = (a: AffectedAudience): string => {
-    const parts: string[] = [pick(VISIBILITY, a.visibility, zh)]
-    a.product_lines.forEach((x) => parts.push(pick(PRODUCT_LINE, x, zh)))
-    a.plans.forEach((x) => parts.push(pick(PLAN, x, zh)))
-    a.regions.forEach((x) => parts.push(pick(REGION, x, zh)))
-    a.languages.forEach((x) => parts.push(humanize(x)))
-    if (a.is_global) parts.push(pick(REGION, 'global', zh))
-    return parts.join(' · ')
-  }
-  const audienceFacets = (a: AffectedAudience): string[] => {
-    const out: string[] = []
-    a.product_lines.forEach((x) => out.push(pick(PRODUCT_LINE, x, zh)))
-    a.plans.forEach((x) => out.push(pick(PLAN, x, zh)))
-    a.regions.forEach((x) => out.push(pick(REGION, x, zh)))
-    a.languages.forEach((x) => out.push(humanize(x)))
-    if (a.is_global) out.push(pick(REGION, 'global', zh))
-    return out
-  }
-  return {
-    riskType: (k: string) => pick(RISK_TYPE, k, zh),
-    command: (k: string) => pick(COMMAND, k, zh),
-    surface: (k: string) => pick(SURFACE, k, zh),
-    objectType: (k: string) => pick(OBJECT_TYPE, k, zh),
-    visibility: (k: string) => pick(VISIBILITY, k, zh),
-    blastEffect: (k: string) => pick(BLAST_EFFECT, k, zh),
-    propStatus: (k: string) => pick(PROP_STATUS, k, zh),
-    recoveryAssessment: (k: string) => pick(RECOVERY_ASSESSMENT, k, zh),
-    recoveryDecision: (k: string) => pick(RECOVERY_DECISION, k, zh),
-    feedbackSignal: (k: string) => pick(FEEDBACK_SIGNAL, k, zh),
-    truthPlane: (k: string) => pick(TRUTH_PLANE, k, zh),
-    severity: (k: string) => pick(SEVERITY, k, zh),
-    metricStatus: (k: string) => pick(METRIC_STATUS, k, zh),
-    audienceSegment,
-    audienceFacets,
-  }
+  const language = i18n.resolvedLanguage ?? i18n.language
+
+  return useMemo(() => {
+    const zh = language.startsWith('zh')
+    const audienceSegment = (a: AffectedAudience): string => {
+      const parts: string[] = [pick(VISIBILITY, a.visibility, zh)]
+      a.product_lines.forEach((x) => parts.push(pick(PRODUCT_LINE, x, zh)))
+      a.plans.forEach((x) => parts.push(pick(PLAN, x, zh)))
+      a.regions.forEach((x) => parts.push(pick(REGION, x, zh)))
+      a.languages.forEach((x) => parts.push(humanize(x)))
+      if (a.is_global) parts.push(pick(REGION, 'global', zh))
+      return parts.join(' · ')
+    }
+    const audienceFacets = (a: AffectedAudience): string[] => {
+      const out: string[] = []
+      a.product_lines.forEach((x) => out.push(pick(PRODUCT_LINE, x, zh)))
+      a.plans.forEach((x) => out.push(pick(PLAN, x, zh)))
+      a.regions.forEach((x) => out.push(pick(REGION, x, zh)))
+      a.languages.forEach((x) => out.push(humanize(x)))
+      if (a.is_global) out.push(pick(REGION, 'global', zh))
+      return out
+    }
+    return {
+      riskType: (k: string) => pick(RISK_TYPE, k, zh),
+      command: (k: string) => pick(COMMAND, k, zh),
+      surface: (k: string) => pick(SURFACE, k, zh),
+      objectType: (k: string) => pick(OBJECT_TYPE, k, zh),
+      lifecycle: (k: string) => pick(LIFECYCLE, k, zh),
+      assignmentState: (k: string) => pick(ASSIGNMENT_STATE, k, zh),
+      freshness: (k: string) => pick(FRESHNESS, k, zh),
+      evidenceSourceType: (k: string) => pick(EVIDENCE_SOURCE_TYPE, k, zh),
+      visibility: (k: string) => pick(VISIBILITY, k, zh),
+      blastEffect: (k: string) => pick(BLAST_EFFECT, k, zh),
+      propStatus: (k: string) => pick(PROP_STATUS, k, zh),
+      recoveryAssessment: (k: string) => pick(RECOVERY_ASSESSMENT, k, zh),
+      recoveryDecision: (k: string) => pick(RECOVERY_DECISION, k, zh),
+      feedbackSignal: (k: string) => pick(FEEDBACK_SIGNAL, k, zh),
+      truthPlane: (k: string) => pick(TRUTH_PLANE, k, zh),
+      severity: (k: string) => pick(SEVERITY, k, zh),
+      metricStatus: (k: string) => pick(METRIC_STATUS, k, zh),
+      audienceSegment,
+      audienceFacets,
+    }
+  }, [language])
 }

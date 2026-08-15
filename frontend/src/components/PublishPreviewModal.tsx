@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
@@ -26,6 +26,33 @@ const EFFECT_DOT: Record<string, string> = {
   conflict: 'var(--urgent)',
 }
 
+type PreviewSnapshot = {
+  requestId: number
+  objectRef: string
+  actionKey: string | undefined
+  data: PublishPreviewSurface
+}
+
+type PublishApplyOutcome =
+  | {
+      kind: 'success'
+      requestId: number
+      previewRequestId: number
+      objectRef: string
+      actionKey: string
+      commandId: string
+      result: PublishApplyResult
+    }
+  | {
+      kind: 'error'
+      requestId: number
+      previewRequestId: number
+      objectRef: string
+      actionKey: string
+      commandId: string
+      error: string
+    }
+
 export default function PublishPreviewModal({
   objectRef,
   initialActionKey,
@@ -39,59 +66,159 @@ export default function PublishPreviewModal({
   const v = useVocab()
   const navigate = useNavigate()
   const ref = useRef<HTMLDivElement>(null)
-  useFocusTrap(ref, true, onClose)
-  const [data, setData] = useState<PublishPreviewSurface | null>(null)
+  const [preview, setPreview] = useState<PreviewSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [actionKey, setActionKey] = useState<string | undefined>(initialActionKey)
-  const [applyResult, setApplyResult] = useState<PublishApplyResult | null>(null)
+  const [applyOutcome, setApplyOutcome] = useState<PublishApplyOutcome | null>(null)
   const [applying, setApplying] = useState(false)
-  const [applyError, setApplyError] = useState<string | null>(null)
-
-  const runApply = () => {
-    const key = actionKey ?? data?.selected_action
-    if (!key) return
-    setApplying(true)
-    setApplyError(null)
-    applyPublishAction(objectRef, key)
-      .then((r) => {
-        setApplyResult(r)
-      })
-      .catch((e) => setApplyError(String(e)))
-      .finally(() => setApplying(false))
-  }
+  const pendingRef = useRef(false)
+  const onCloseRef = useRef(onClose)
+  const previewRequestIdRef = useRef(0)
+  const applyRequestIdRef = useRef(0)
+  const activeApplyRequestIdRef = useRef<number | null>(null)
+  const mountedRef = useRef(true)
 
   useEffect(() => {
-    fetchPublishPreview(objectRef, actionKey)
-      .then(setData)
-      .catch((e) => setError(String(e)))
-      .finally(() => setLoading(false))
-  }, [objectRef, actionKey])
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    onCloseRef.current = onClose
   }, [onClose])
 
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      activeApplyRequestIdRef.current = null
+    }
+  }, [])
+
+  const tryClose = useCallback(() => {
+    if (!pendingRef.current) onCloseRef.current()
+  }, [])
+  useFocusTrap(ref, true, tryClose)
+
+  // The parent drawer also owns a document-level focus trap. Capture Escape
+  // before it can close a modal whose durable write is still in flight.
+  useEffect(() => {
+    const interceptEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      tryClose()
+    }
+    document.addEventListener('keydown', interceptEscape, true)
+    return () => document.removeEventListener('keydown', interceptEscape, true)
+  }, [tryClose])
+
+  useEffect(() => {
+    const requestId = ++previewRequestIdRef.current
+    let active = true
+    queueMicrotask(() => {
+      if (!active) return
+      setLoading(true)
+      setError(null)
+      setPreview(null)
+      setApplyOutcome(null)
+      fetchPublishPreview(objectRef, actionKey)
+        .then((data) => {
+          if (!active) return
+          if (actionKey && data.selected_action !== actionKey) {
+            setError('The server returned a preview for a different publish action.')
+            return
+          }
+          setPreview({ requestId, objectRef, actionKey, data })
+        })
+        .catch((nextError) => {
+          if (active) setError(String(nextError))
+        })
+        .finally(() => {
+          if (active) setLoading(false)
+        })
+    })
+    return () => {
+      active = false
+    }
+  }, [actionKey, objectRef])
+
+  const previewMatchesCurrentAction =
+    preview !== null && preview.objectRef === objectRef && preview.actionKey === actionKey
+  const data = previewMatchesCurrentAction ? preview.data : null
+  const selectedKey = actionKey ?? data?.selected_action ?? null
+  const durableCommand =
+    data?.durable_command && selectedKey && data.durable_command.action_key === selectedKey
+      ? data.durable_command
+      : null
+  const outcomeMatchesCurrentPreview =
+    applyOutcome !== null &&
+    previewMatchesCurrentAction &&
+    preview !== null &&
+    applyOutcome.previewRequestId === preview.requestId &&
+    applyOutcome.objectRef === objectRef &&
+    applyOutcome.actionKey === selectedKey &&
+    durableCommand?.action_key === applyOutcome.actionKey &&
+    durableCommand.command_id === applyOutcome.commandId
+  const applyResult =
+    outcomeMatchesCurrentPreview && applyOutcome.kind === 'success' ? applyOutcome.result : null
+  const applyError =
+    outcomeMatchesCurrentPreview && applyOutcome.kind === 'error' ? applyOutcome.error : null
+
+  const runApply = () => {
+    if (pendingRef.current || !durableCommand || !preview) return
+    const requestId = ++applyRequestIdRef.current
+    const request = {
+      requestId,
+      previewRequestId: preview.requestId,
+      objectRef,
+      actionKey: durableCommand.action_key,
+      commandId: durableCommand.command_id,
+    }
+    activeApplyRequestIdRef.current = requestId
+    pendingRef.current = true
+    setApplying(true)
+    setApplyOutcome(null)
+    applyPublishAction(objectRef, request.actionKey, durableCommand)
+      .then((result) => {
+        if (!mountedRef.current || activeApplyRequestIdRef.current !== requestId) return
+        if (result.selected_action !== request.actionKey || result.command_id !== request.commandId) {
+          setApplyOutcome({
+            kind: 'error',
+            ...request,
+            error: 'The server returned a receipt for a different publish action.',
+          })
+          return
+        }
+        setApplyOutcome({ kind: 'success', ...request, result })
+      })
+      .catch((nextError) => {
+        if (!mountedRef.current || activeApplyRequestIdRef.current !== requestId) return
+        setApplyOutcome({ kind: 'error', ...request, error: String(nextError) })
+      })
+      .finally(() => {
+        if (!mountedRef.current || activeApplyRequestIdRef.current !== requestId) return
+        activeApplyRequestIdRef.current = null
+        pendingRef.current = false
+        setApplying(false)
+      })
+  }
+
   const selectPreset = (key: string) => {
-    if (key === actionKey) return
+    if (pendingRef.current || key === selectedKey) return
     setActionKey(key)
-    setApplyResult(null)
-    setApplyError(null)
-    setLoading(true)
-    setError(null)
   }
 
   const gotoPropagation = () => {
-    onClose()
-    const params = new URLSearchParams({ object_ref: objectRef })
-    if (actionKey) params.set('action_key', actionKey)
+    if (pendingRef.current) return
+    onCloseRef.current()
+    const params = new URLSearchParams()
+    if (applyResult?.persisted && applyResult.publication_record_id) {
+      params.set('publication_id', applyResult.publication_record_id)
+    } else {
+      params.set('object_ref', objectRef)
+    }
     navigate(`/console/propagation?${params.toString()}`)
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[120] flex items-start justify-center overflow-y-auto bg-foreground/30 pt-[8vh] pb-10" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-[120] flex items-start justify-center overflow-y-auto bg-foreground/30 pt-[8vh] pb-10" onMouseDown={tryClose}>
       <div
         ref={ref}
         role="dialog"
@@ -99,18 +226,18 @@ export default function PublishPreviewModal({
         aria-label={t('publish.blastRadius')}
         tabIndex={-1}
         className="w-full max-w-[720px] overflow-hidden rounded-xl border border-border bg-card shadow-soft outline-none"
-        onMouseDown={(e) => e.stopPropagation()}
+        onMouseDown={(event) => event.stopPropagation()}
       >
-        {/* header */}
         <div className="flex items-center gap-2.5 border-b border-border px-5 py-3.5">
           <span className="chip chip-high">{t('publish.blastRadius')}</span>
           {data && (
             <span className="font-mono text-[11px] text-faint">{data.selected_preview?.object_id} · {v.objectType(data.selected_preview?.object_type ?? '')}</span>
           )}
           <button
-            className="ml-auto flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground hover:bg-muted"
+            className="ml-auto flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
             aria-label={t('detail.close')}
-            onClick={onClose}
+            onClick={tryClose}
+            disabled={applying}
           >
             <X size={15} />
           </button>
@@ -129,7 +256,8 @@ export default function PublishPreviewModal({
         {data && !loading && !error && (
           <PublishBody
             data={data}
-            canApply={!!(actionKey ?? data.selected_action)}
+            selectedAction={selectedKey}
+            canApply={!!durableCommand}
             applying={applying}
             applyResult={applyResult}
             applyError={applyError}
@@ -146,6 +274,7 @@ export default function PublishPreviewModal({
 
 function PublishBody({
   data,
+  selectedAction,
   canApply,
   applying,
   applyResult,
@@ -155,6 +284,7 @@ function PublishBody({
   onGotoPropagation,
 }: {
   data: PublishPreviewSurface
+  selectedAction: string | null
   canApply: boolean
   applying: boolean
   applyResult: PublishApplyResult | null
@@ -187,12 +317,14 @@ function PublishBody({
         <div className="mb-2.5 font-mono text-[10px] uppercase tracking-widest text-faint">{t('publish.presets')}</div>
         <div className="flex flex-col gap-2">
           {data.action_presets.map((preset) => {
-            const isActive = data.selected_action === preset.command_key
+            const isActive = selectedAction === preset.command_key
             return (
               <button
                 key={preset.command_key}
+                type="button"
                 onClick={() => onSelectPreset(preset.command_key)}
-                className="rounded-lg border px-3.5 py-2.5 text-left transition-colors"
+                disabled={applying}
+                className="rounded-lg border px-3.5 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                 style={{
                   borderColor: isActive ? 'var(--primary)' : 'var(--border)',
                   background: isActive ? 'var(--accent)' : 'transparent',
@@ -283,47 +415,65 @@ function PublishBody({
         </div>
       )}
 
-      {/* execution result — the real write-path output */}
-      {(applyResult || applyError) && (
-        <div className="border-b border-border px-5 py-4">
-          <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-faint">{t('publish.applyResult')}</div>
-          {applyError && (
-            <div className="rounded-lg px-3 py-2 text-[12px]" style={{ color: 'var(--urgent)', background: 'color-mix(in srgb, var(--urgent) 8%, transparent)' }}>
-              {t('publish.applyError')}: {applyError}
-            </div>
-          )}
-          {applyResult && (
-            <div className="space-y-2">
-              <div className="flex flex-wrap gap-2">
-                <PathCounter n={applyResult.opened_bindings.length} label={t('publish.openedPaths')} color="var(--high)" />
-                <PathCounter n={applyResult.removed_bindings.length} label={t('publish.removedPaths')} color="var(--medium)" />
-                <PathCounter n={applyResult.held_bindings.length} label={t('publish.heldPaths')} color="var(--urgent)" />
+      <div aria-live="polite" aria-atomic="true">
+        {(applyResult || applyError) && (
+          <div className="border-b border-border px-5 py-4">
+            <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-faint">{t('publish.applyResult')}</div>
+            {applyError && (
+              <div className="rounded-lg px-3 py-2 text-[12px]" style={{ color: 'var(--urgent)', background: 'color-mix(in srgb, var(--urgent) 8%, transparent)' }}>
+                {t('publish.applyError')}: {applyError}
               </div>
-              {applyResult.action_log.length > 0 && (
-                <ul className="space-y-1">
-                  {applyResult.action_log.map((log, i) => (
-                    <li key={i} className="font-mono text-[10.5px] leading-relaxed text-muted-foreground">· {log}</li>
-                  ))}
-                </ul>
-              )}
-              {!applyResult.persisted && (
-                <p className="font-mono text-[10px] leading-relaxed text-faint">{t('publish.notPersisted')}</p>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+            )}
+            {applyResult && (
+              <div className="space-y-2">
+                <div className="flex flex-wrap gap-2">
+                  <PathCounter n={applyResult.opened_bindings.length} label={t('publish.openedPaths')} color="var(--high)" />
+                  <PathCounter n={applyResult.removed_bindings.length} label={t('publish.removedPaths')} color="var(--medium)" />
+                  <PathCounter n={applyResult.held_bindings.length} label={t('publish.heldPaths')} color="var(--urgent)" />
+                </div>
+                {applyResult.action_log.length > 0 && (
+                  <ul className="space-y-1">
+                    {applyResult.action_log.map((log, i) => (
+                      <li key={i} className="font-mono text-[10.5px] leading-relaxed text-muted-foreground">· {log}</li>
+                    ))}
+                  </ul>
+                )}
+                {applyResult.persisted ? (
+                  <p className="font-mono text-[10px] leading-relaxed" style={{ color: 'var(--ok)' }}>
+                    {t('publish.persisted')}
+                    {applyResult.command_id ? ` · ${applyResult.command_id}` : ''}
+                    {applyResult.replayed ? ` · ${t('publish.replayed')}` : ''}
+                  </p>
+                ) : (
+                  <p className="font-mono text-[10px] leading-relaxed text-faint">{t('publish.notPersisted')}</p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* footer: apply (write path) + propagation link */}
       <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-3.5">
+        {!canApply && (
+          <span className="mr-auto font-mono text-[10px] leading-relaxed text-faint">
+            {t('publish.durableOnly')}
+          </span>
+        )}
         <button
+          type="button"
           onClick={onApply}
           disabled={!canApply || applying}
           className="cmd inline-flex items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {applying ? t('publish.applying') : t('publish.apply')}
         </button>
-        <button onClick={onGotoPropagation} className="cmd">
+        <button
+          type="button"
+          onClick={onGotoPropagation}
+          disabled={applying}
+          className="cmd disabled:cursor-not-allowed disabled:opacity-50"
+        >
           {t('publish.viewPropagation')}
         </button>
       </div>

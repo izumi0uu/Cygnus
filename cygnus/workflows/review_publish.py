@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Iterable
 
 from cygnus.substrate.compilation_plan import CompilationProposal
 from cygnus.substrate.pipeline_checkpoint import PipelineCheckpoint
@@ -25,25 +26,37 @@ class ReviewPublishWorkflow:
 
     @property
     def current_phase(self) -> PipelinePhase:
-        return self.phase_checkpoint.current_phase
+        phase_checkpoint = self.phase_checkpoint
+        assert phase_checkpoint is not None
+        return phase_checkpoint.current_phase
 
     @property
     def completed_phases(self) -> tuple[PipelinePhase, ...]:
-        return self.phase_checkpoint.completed_phases
+        phase_checkpoint = self.phase_checkpoint
+        assert phase_checkpoint is not None
+        return phase_checkpoint.completed_phases
 
     @property
     def resume_phase(self) -> PipelinePhase | None:
-        return self.phase_checkpoint.resume_phase
+        phase_checkpoint = self.phase_checkpoint
+        assert phase_checkpoint is not None
+        return phase_checkpoint.resume_phase
 
     @property
     def is_complete(self) -> bool:
-        return self.phase_checkpoint.is_complete
+        phase_checkpoint = self.phase_checkpoint
+        assert phase_checkpoint is not None
+        return phase_checkpoint.is_complete
 
     def advance(self, target: PipelinePhase) -> None:
-        self.phase_checkpoint = self.phase_checkpoint.advance_to(target)
+        phase_checkpoint = self.phase_checkpoint
+        assert phase_checkpoint is not None
+        self.phase_checkpoint = phase_checkpoint.advance_to(target)
 
     def complete_current_phase(self) -> None:
-        self.phase_checkpoint = self.phase_checkpoint.mark_current_phase_complete()
+        phase_checkpoint = self.phase_checkpoint
+        assert phase_checkpoint is not None
+        self.phase_checkpoint = phase_checkpoint.mark_current_phase_complete()
 
     def add_review_note(self, note: str) -> None:
         value = note.strip()
@@ -52,9 +65,11 @@ class ReviewPublishWorkflow:
         self.review_notes = (*self.review_notes, value)
 
     def to_dict(self) -> dict[str, object]:
+        phase_checkpoint = self.phase_checkpoint
+        assert phase_checkpoint is not None
         return {
             "workflow_id": self.workflow_id,
-            "phase_checkpoint": self.phase_checkpoint.to_dict(),
+            "phase_checkpoint": phase_checkpoint.to_dict(),
             "current_phase": self.current_phase.value,
             "completed_phases": [phase.value for phase in self.completed_phases],
             "resume_phase": self.resume_phase.value if self.resume_phase else None,
@@ -70,15 +85,26 @@ class ReviewPublishWorkflow:
         if checkpoint_payload is None:
             checkpoint = PipelineCheckpoint.from_dict(payload)
         else:
-            checkpoint = PipelineCheckpoint.from_dict(dict(checkpoint_payload))
+            if not isinstance(checkpoint_payload, dict):
+                raise ValueError("phase_checkpoint must be a checkpoint object")
+            checkpoint = PipelineCheckpoint.from_dict(checkpoint_payload)
+
+        raw_proposals = payload.get("proposals", ())
+        if not isinstance(raw_proposals, Iterable):
+            raise ValueError("proposals must be a sequence of proposal objects")
+        raw_review_notes = payload.get("review_notes", ())
+        if not isinstance(raw_review_notes, Iterable):
+            raise ValueError("review_notes must be a sequence of strings")
+        raw_publish_targets = payload.get("publish_targets", ())
+        if not isinstance(raw_publish_targets, Iterable):
+            raise ValueError("publish_targets must be a sequence of strings")
 
         return cls(
             workflow_id=str(payload["workflow_id"]),
             phase_checkpoint=checkpoint,
             proposals=tuple(
-                CompilationProposal.from_dict(dict(item))
-                for item in payload.get("proposals", ())
+                CompilationProposal.from_dict(dict(item)) for item in raw_proposals
             ),
-            review_notes=tuple(str(item) for item in payload.get("review_notes", ())),
-            publish_targets=tuple(str(item) for item in payload.get("publish_targets", ())),
+            review_notes=tuple(str(item) for item in raw_review_notes),
+            publish_targets=tuple(str(item) for item in raw_publish_targets),
         )

@@ -44,3 +44,24 @@ class PublishProjectionStore:
 
 
 projection_store = PublishProjectionStore()
+
+
+def remember_publish_projection(
+    object_id: str,
+    *,
+    selected_action: str,
+    result: PublishGovernanceResult,
+) -> PublishProjectionSnapshot:
+    return projection_store.remember(
+        object_id,
+        selected_action=selected_action,
+        result=result,
+    )
+
+
+def get_publish_projection(object_id: str) -> PublishProjectionSnapshot | None:
+    return projection_store.get(object_id)
+
+
+def clear_publish_projections() -> None:
+    projection_store.clear()

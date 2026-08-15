@@ -47,16 +47,18 @@ export function PieCenterShell({
   );
 
   useEffect(() => {
+    let outerRaf = 0;
+    let innerRaf = 0;
+
     if (!animateEntrance) {
-      setFlowTotal(centerValue);
-      return;
+      innerRaf = requestAnimationFrame(() => setFlowTotal(centerValue));
+      return () => cancelAnimationFrame(innerRaf);
     }
 
     if (!introStartedRef.current) {
       introStartedRef.current = true;
-      setFlowTotal(0);
-      let innerRaf = 0;
-      const outerRaf = requestAnimationFrame(() => {
+      innerRaf = requestAnimationFrame(() => setFlowTotal(0));
+      outerRaf = requestAnimationFrame(() => {
         innerRaf = requestAnimationFrame(() => setFlowTotal(centerValue));
       });
       return () => {
@@ -66,7 +68,8 @@ export function PieCenterShell({
       };
     }
 
-    setFlowTotal(centerValue);
+    innerRaf = requestAnimationFrame(() => setFlowTotal(centerValue));
+    return () => cancelAnimationFrame(innerRaf);
   }, [animateEntrance, centerValue]);
 
   const data: PieData[] = useMemo(

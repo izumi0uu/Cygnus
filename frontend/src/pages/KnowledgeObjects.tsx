@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
-import { X } from 'lucide-react'
+import { TriangleAlert, X } from 'lucide-react'
 import ForceGraph2D from 'react-force-graph-2d'
 import type { ForceGraphMethods, GraphData, LinkObject, NodeObject } from 'react-force-graph-2d'
 import {
@@ -126,7 +126,7 @@ export default function KnowledgeObjects() {
   if (error)
     return (
       <div className="bp-panel p-4">
-        <div className="font-mono text-sm" style={{ color: 'var(--urgent)' }}>⚠ {t('state.error')}</div>
+        <div className="flex items-center gap-1.5 font-mono text-sm" style={{ color: 'var(--urgent)' }}><TriangleAlert size={15} aria-hidden="true" /> {t('state.error')}</div>
         <Button variant="ghost" className="mt-3" onClick={load}>{t('state.retry')}</Button>
       </div>
     )
@@ -164,6 +164,7 @@ export default function KnowledgeObjects() {
 
   return (
     <>
+      <h1 className="sr-only">{t('nav.objects')}</h1>
       <div className="mb-3 flex flex-wrap items-center gap-4">
         <Legend color="#185ee0" ring label={t('kg.object')} extra={t('kg.objectNote')} />
         <Legend color="#30a46c" label={t('kg.evidence')} />
@@ -172,7 +173,14 @@ export default function KnowledgeObjects() {
       </div>
 
       <div ref={wrapRef} className="bp-panel overflow-hidden" style={{ height: H }}>
-        {w > 0 && (
+        {data.nodes.length === 0 ? (
+          <div className="flex h-full items-center justify-center px-8 text-center">
+            <div className="max-w-xl">
+              <div className="mb-2 bp-label">{t('placeholder.noData')}</div>
+              <p className="font-mono text-[12px] leading-relaxed text-muted-foreground">{t('observation.graphEmpty')}</p>
+            </div>
+          </div>
+        ) : w > 0 ? (
           <ForceGraph2D
             key={resolvedTheme}
             ref={fgRef}
@@ -191,7 +199,7 @@ export default function KnowledgeObjects() {
             nodePointerAreaPaint={drawHit}
             onNodeClick={(node: ForceNode) => { if (node.kind === 'object' && node.node) openObject(node.node.id) }}
           />
-        )}
+        ) : null}
       </div>
 
       {selected && <Drawer node={selected} edges={data.edges} nodes={data.nodes} onClose={closeObject} />}
@@ -231,7 +239,7 @@ function Drawer({ node, edges, nodes, onClose }: { node: KnowledgeGraphNode; edg
       <aside ref={ref} role="dialog" aria-modal="true" aria-labelledby="ko-drawer-title" tabIndex={-1} className="bp-panel fixed right-0 top-0 z-50 flex h-full w-full max-w-[440px] flex-col overflow-y-auto p-5 outline-none">
         <div className="flex items-center gap-2">
           <span className="bp-tol bp-tol-flat">{v.objectType(node.object_type ?? '')}</span>
-          <span className={`bp-tol ${LC[node.lifecycle_state ?? ''] ?? 'bp-tol-flat'}`}>{node.lifecycle_state}</span>
+          <span className={`bp-tol ${LC[node.lifecycle_state ?? ''] ?? 'bp-tol-flat'}`}>{v.lifecycle(node.lifecycle_state ?? '')}</span>
           <button className="ml-auto flex h-8 w-8 items-center justify-center bp-panel text-muted-foreground hover:bg-muted" aria-label={t('detail.close')} onClick={onClose}><X size={15} /></button>
         </div>
         <h2 id="ko-drawer-title" className="mt-3 font-mono text-lg font-bold leading-tight">{node.label}</h2>
@@ -247,7 +255,7 @@ function Drawer({ node, edges, nodes, onClose }: { node: KnowledgeGraphNode; edg
                   <span className="mt-1 h-2 w-2 shrink-0 rotate-45" style={{ background: EV_COLOR[e.source_type ?? ''] ?? '#aab0bd' }} />
                   <div>
                     <div className="font-mono text-sm font-medium">{e.label}</div>
-                    <div className="font-mono text-[10px] text-faint">{e.source_type} · {e.freshness} · {e.source_ref}</div>
+                    <div className="font-mono text-[10px] text-faint">{v.evidenceSourceType(e.source_type ?? '')} · {v.freshness(e.freshness ?? '')} · {e.source_ref}</div>
                   </div>
                 </li>
               ))}
@@ -319,7 +327,7 @@ function TraceabilitySection({ objectId }: { objectId: string }) {
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="bp-label-inline">{t('trace.freshness')}</span>
             <span className={`bp-tol ${FRESH_TOL[trace.trace.freshness] ?? 'bp-tol-flat'}`} style={{ color: FRESH_COLOR[trace.trace.freshness] ?? 'var(--faint)' }}>
-              {trace.trace.freshness}
+              {v.freshness(trace.trace.freshness)}
             </span>
           </div>
           {trace.trace.blind_spots.length > 0 && (
@@ -331,13 +339,11 @@ function TraceabilitySection({ objectId }: { objectId: string }) {
             </div>
           )}
 
-          {/* what-if projection from the last APPLY on this object.
-              persisted:false — the executor ran, but the fixture store did not
-              change, so this is a projection of what the action WOULD do, not a
-              claim that the trace changed. Tagged explicitly so it never reads
-              as durable post-publish state. */}
+          {/* The latest APPLY result for this object. Durable results come
+              from the persisted publication ledger; explicit rehearsal
+              results remain labelled as non-persisted projections. */}
           {trace.projection && (
-            <WhatIfProjection
+            <PublishExecutionResult
               actionKey={trace.projection.selected_action}
               opened={trace.projection.opened_bindings}
               removed={trace.projection.removed_bindings}
@@ -357,7 +363,7 @@ function TraceabilitySection({ objectId }: { objectId: string }) {
                   <div className="min-w-0">
                     <div className="font-mono text-sm font-medium">{ref.title}</div>
                     <div className="font-mono text-[10px] text-faint">
-                      {v.surface(ref.source_type)} · {ref.freshness} · {t('trace.sourceRef')}: {ref.source_ref}
+                      {v.evidenceSourceType(ref.source_type)} · {v.freshness(ref.freshness)} · {t('trace.sourceRef')}: {ref.source_ref}
                     </div>
                     <div className="mt-0.5 font-mono text-[10px] leading-relaxed text-muted-foreground">{t('trace.excerpt')}: {ref.excerpt_ref}</div>
                   </div>
@@ -377,7 +383,7 @@ function TraceabilitySection({ objectId }: { objectId: string }) {
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="bp-label-inline">{t('trace.reviewHistory')}</span>
               {trace.trace.review_history_summary.map((h, i) => (
-                <span key={i} className="bp-tol bp-tol-flat">{h.stage}: {h.status}</span>
+                <span key={i} className="bp-tol bp-tol-flat">{h.stage}: {v.lifecycle(h.status)}</span>
               ))}
             </div>
           )}
@@ -396,12 +402,10 @@ function Section({ label, children }: { label: string; children: React.ReactNode
   )
 }
 
-// Post-apply what-if projection. The apply ran (opened/removed/held bindings
-// are real executor output) but persisted:false — the fixture store did not
-// change. So this is labelled PROJECTION, never "published". When there is
-// nothing to project (no bindings moved), we still render the stamp so the
-// user sees the apply was a no-op on bindings, not silently swallowed.
-function WhatIfProjection({
+// Render either the latest durable publication result or an explicit rehearsal
+// projection. The server-owned persisted flag controls every label and verb;
+// the frontend never promotes a rehearsal result into published truth.
+function PublishExecutionResult({
   actionKey,
   opened,
   removed,
@@ -420,17 +424,17 @@ function WhatIfProjection({
     <div className="bp-panel px-3 py-2.5">
       <div className="mb-2 flex flex-wrap items-center gap-1.5">
         <span className="bp-stamp" style={{ color: 'var(--high)', borderColor: 'color-mix(in srgb, var(--high) 45%, transparent)' }}>
-          {t('trace.projection')}
+          {persisted ? t('trace.executionResult') : t('trace.projection')}
         </span>
         <span className="bp-label-inline">{v.command(actionKey)}</span>
         <span className="bp-label-inline" style={{ color: 'var(--medium)', opacity: 0.7 }}>
           {persisted ? t('trace.persisted') : t('trace.notPersisted')}
         </span>
       </div>
-      <ProjectionGroup label={t('trace.wouldOpen')} bindings={opened} tol="bp-tol-high" dot="var(--high)" />
-      <ProjectionGroup label={t('trace.wouldRemove')} bindings={removed} tol="bp-tol-flat" dot="var(--medium)" />
-      <ProjectionGroup label={t('trace.wouldHold')} bindings={held} tol="bp-tol-urgent" dot="var(--urgent)" />
-      <p className="mt-2 font-mono text-[10px] leading-relaxed text-faint">{t('trace.projectionNote')}</p>
+      <ProjectionGroup label={persisted ? t('trace.didOpen') : t('trace.wouldOpen')} bindings={opened} tol="bp-tol-high" dot="var(--high)" />
+      <ProjectionGroup label={persisted ? t('trace.didRemove') : t('trace.wouldRemove')} bindings={removed} tol="bp-tol-flat" dot="var(--medium)" />
+      <ProjectionGroup label={persisted ? t('trace.didHold') : t('trace.wouldHold')} bindings={held} tol="bp-tol-urgent" dot="var(--urgent)" />
+      <p className="mt-2 font-mono text-[10px] leading-relaxed text-faint">{persisted ? t('trace.persistedResultNote') : t('trace.projectionNote')}</p>
     </div>
   )
 }

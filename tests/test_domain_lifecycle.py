@@ -25,7 +25,9 @@ class LifecycleTests(unittest.TestCase):
             assert_transition(LifecycleState.PUBLISHED, LifecycleState.DRAFT)
 
     def test_can_transition_matches_allowed_targets(self) -> None:
-        self.assertTrue(can_transition(LifecycleState.APPROVED, LifecycleState.PUBLISHED))
+        self.assertTrue(
+            can_transition(LifecycleState.APPROVED, LifecycleState.PUBLISHED)
+        )
         self.assertFalse(
             can_transition(LifecycleState.SUPERSEDED, LifecycleState.PUBLISHED)
         )

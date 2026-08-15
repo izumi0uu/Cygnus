@@ -29,4 +29,3 @@ class EvidenceNormalizationTests(unittest.TestCase):
         self.assertEqual(evidence.evidence_id, "ev-2")
         self.assertEqual(evidence.audience_filter.product_lines, ("billing",))
         self.assertEqual(evidence.tags[0], "resolved_ticket")
-

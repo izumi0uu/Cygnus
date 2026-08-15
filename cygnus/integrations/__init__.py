@@ -1,31 +1,89 @@
+"""External and session-facing integration adapters for Cygnus.
+
+Ownership:
+- Nanobot/MCP-facing tool adapters and outward integration surfaces live here
+- MCP auth/scope adapters live here
+- OAuth session adapters live here
+- external notification fan-out adapters live here
+- this package is an adapter boundary, not the core governance domain itself
+"""
+
+from cygnus.integrations.governed_feedback_tools import (
+    GovernedFeedbackTools,
+    feedback_tool_bindings,
+    feedback_tool_definitions,
+    normalize_feedback_arguments,
+)
+from cygnus.integrations.governed_publish_tools import (
+    GovernedPublishTools,
+    publish_tool_bindings,
+    publish_tool_definitions,
+)
+from cygnus.integrations.governed_draft_review_tools import (
+    GovernedDraftReviewTools,
+    draft_review_tool_bindings,
+    draft_review_tool_definitions,
+)
+from cygnus.integrations.governed_drift_tools import (
+    GovernedDriftTools,
+    drift_tool_bindings,
+    drift_tool_definitions,
+)
+from cygnus.integrations.governed_session_tools import (
+    governed_session_tool_definition,
+    governed_session_tool_definitions,
+)
+from cygnus.integrations.mcp_auth import (
+    MCPAuthService,
+    ResolvedIdentity,
+    apply_scope_filter,
+    hash_token,
+)
 from cygnus.integrations.nanobot_tools import (
-    build_default_tool_registry,
-    get_downstream_reality_check,
-    get_governance_overview,
-    get_recovery_window,
-    get_source_trace,
-    list_drift_alerts,
-    propose_knowledge_object,
-    publish_knowledge_object,
-    read_knowledge_object,
-    request_review,
-    search_knowledge_objects,
-    search_support_evidence,
-    validate_publish_policy,
+    GovernedKnowledgeTools,
+    build_governed_tool_registry,
+)
+from cygnus.integrations.notification_dispatch import dispatch_external
+from cygnus.integrations.oauth_service import OAuthService
+from cygnus.integrations.session_bridge import (
+    ContinuityDisposition,
+    GovernanceDisposition,
+    GovernedQueryRequest,
+    GovernedSessionBridge,
+    PriorGovernanceContext,
+    session_bridge_capabilities,
+    session_bridge_openapi_projection,
 )
 
 __all__ = [
-    "build_default_tool_registry",
-    "get_downstream_reality_check",
-    "get_governance_overview",
-    "get_recovery_window",
-    "get_source_trace",
-    "list_drift_alerts",
-    "propose_knowledge_object",
-    "publish_knowledge_object",
-    "read_knowledge_object",
-    "request_review",
-    "search_knowledge_objects",
-    "search_support_evidence",
-    "validate_publish_policy",
+    "ContinuityDisposition",
+    "GovernanceDisposition",
+    "GovernedKnowledgeTools",
+    "GovernedDraftReviewTools",
+    "GovernedDriftTools",
+    "GovernedFeedbackTools",
+    "GovernedPublishTools",
+    "GovernedQueryRequest",
+    "GovernedSessionBridge",
+    "MCPAuthService",
+    "OAuthService",
+    "PriorGovernanceContext",
+    "ResolvedIdentity",
+    "apply_scope_filter",
+    "build_governed_tool_registry",
+    "draft_review_tool_bindings",
+    "draft_review_tool_definitions",
+    "drift_tool_bindings",
+    "feedback_tool_bindings",
+    "feedback_tool_definitions",
+    "normalize_feedback_arguments",
+    "drift_tool_definitions",
+    "governed_session_tool_definition",
+    "governed_session_tool_definitions",
+    "publish_tool_bindings",
+    "publish_tool_definitions",
+    "dispatch_external",
+    "hash_token",
+    "session_bridge_capabilities",
+    "session_bridge_openapi_projection",
 ]

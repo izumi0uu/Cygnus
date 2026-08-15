@@ -42,7 +42,11 @@ class SurfacePropagationUpdate:
             raise ValueError("surface_id must not be blank")
         if not self.reason.strip():
             raise ValueError("reason must not be blank")
-        object.__setattr__(self, "channel_refs", _normalize_strings(self.channel_refs, label="channel ref"))
+        object.__setattr__(
+            self,
+            "channel_refs",
+            _normalize_strings(self.channel_refs, label="channel ref"),
+        )
         object.__setattr__(
             self,
             "follow_up_commands",
@@ -65,7 +69,11 @@ class SurfacePropagationRecord:
             raise ValueError("surface_id must not be blank")
         if not self.reason.strip():
             raise ValueError("reason must not be blank")
-        object.__setattr__(self, "channel_refs", _normalize_strings(self.channel_refs, label="channel ref"))
+        object.__setattr__(
+            self,
+            "channel_refs",
+            _normalize_strings(self.channel_refs, label="channel ref"),
+        )
         object.__setattr__(self, "binding_refs", tuple(self.binding_refs))
         object.__setattr__(
             self,
@@ -120,9 +128,15 @@ class PublishPropagationLedger:
             raise ValueError("object_id must not be blank")
         if not self.title.strip():
             raise ValueError("title must not be blank")
-        object.__setattr__(self, "action_log", _normalize_strings(self.action_log, label="action log"))
+        object.__setattr__(
+            self, "action_log", _normalize_strings(self.action_log, label="action log")
+        )
         object.__setattr__(self, "records", tuple(self.records))
-        object.__setattr__(self, "unresolved_surfaces", _normalize_strings(self.unresolved_surfaces, label="unresolved surface"))
+        object.__setattr__(
+            self,
+            "unresolved_surfaces",
+            _normalize_strings(self.unresolved_surfaces, label="unresolved surface"),
+        )
         object.__setattr__(
             self,
             "continue_commands",
@@ -161,8 +175,14 @@ def build_publish_propagation_ledger(
     for surface_id in surface_ids:
         explicit = update_map.get(surface_id)
         if explicit is not None:
-            bindings = explicit.binding_refs or tuple(channel_bindings.get(surface_id, ()))
-            channels = explicit.channel_refs or _channels_from_bindings(bindings) or ((surface_id,) if surface_id in channel_bindings else ())
+            bindings = explicit.binding_refs or tuple(
+                channel_bindings.get(surface_id, ())
+            )
+            channels = (
+                explicit.channel_refs
+                or _channels_from_bindings(bindings)
+                or ((surface_id,) if surface_id in channel_bindings else ())
+            )
             records.append(
                 SurfacePropagationRecord(
                     surface_id=surface_id,
@@ -175,20 +195,34 @@ def build_publish_propagation_ledger(
             )
             continue
 
-        record = _default_record(surface_id=surface_id, governance_result=governance_result, channel_bindings=channel_bindings)
+        record = _default_record(
+            surface_id=surface_id,
+            governance_result=governance_result,
+            channel_bindings=channel_bindings,
+        )
         if record is not None:
             records.append(record)
 
     summary = PropagationLedgerSummary(
-        synced=sum(1 for record in records if record.status is PropagationStatus.SYNCED),
-        pending=sum(1 for record in records if record.status is PropagationStatus.PENDING),
-        failed=sum(1 for record in records if record.status is PropagationStatus.FAILED),
+        synced=sum(
+            1 for record in records if record.status is PropagationStatus.SYNCED
+        ),
+        pending=sum(
+            1 for record in records if record.status is PropagationStatus.PENDING
+        ),
+        failed=sum(
+            1 for record in records if record.status is PropagationStatus.FAILED
+        ),
         manual_action_required=sum(
-            1 for record in records if record.status is PropagationStatus.MANUAL_ACTION_REQUIRED
+            1
+            for record in records
+            if record.status is PropagationStatus.MANUAL_ACTION_REQUIRED
         ),
     )
     unresolved_surfaces = tuple(
-        record.surface_id for record in records if record.status is not PropagationStatus.SYNCED
+        record.surface_id
+        for record in records
+        if record.status is not PropagationStatus.SYNCED
     )
     continue_commands = _dedupe(
         command
@@ -218,7 +252,8 @@ def _default_record(
             binding
             for binding in channel_bindings[surface_id]
             if any(
-                held.audience_filter == binding.audience_filter and held.channel == binding.channel
+                held.audience_filter == binding.audience_filter
+                and held.channel == binding.channel
                 for held in governance_result.held_bindings
             )
         )
@@ -231,14 +266,20 @@ def _default_record(
                 binding_refs=blocked,
                 follow_up_commands=("resolve_surface_hold", "recheck_propagation"),
             )
-        removed = tuple(binding for binding in governance_result.removed_bindings if binding.channel == surface_id)
+        removed = tuple(
+            binding
+            for binding in governance_result.removed_bindings
+            if binding.channel == surface_id
+        )
         if removed:
             return SurfacePropagationRecord(
                 surface_id=surface_id,
                 status=PropagationStatus.PENDING,
                 reason="This surface has removal or routing changes defined, but downstream confirmation has not been recorded yet.",
                 channel_refs=(surface_id,),
-                binding_refs=_dedupe_bindings((*channel_bindings[surface_id], *removed)),
+                binding_refs=_dedupe_bindings(
+                    (*channel_bindings[surface_id], *removed)
+                ),
                 follow_up_commands=("check_propagation_status",),
             )
         return SurfacePropagationRecord(
@@ -260,7 +301,9 @@ def _default_record(
     )
 
 
-def _group_bindings_by_channel(governance_result: PublishGovernanceResult) -> dict[str, tuple[PublishBinding, ...]]:
+def _group_bindings_by_channel(
+    governance_result: PublishGovernanceResult,
+) -> dict[str, tuple[PublishBinding, ...]]:
     grouped: dict[str, list[PublishBinding]] = {}
     for binding in governance_result.updated_candidate.target_bindings:
         grouped.setdefault(binding.channel, []).append(binding)
@@ -275,7 +318,11 @@ def _ordered_surfaces(
     updated_surfaces: Iterable[str],
 ) -> tuple[str, ...]:
     ordered: list[str] = []
-    for surface_id in (*tuple(channel_surfaces), *tuple(supporting_surfaces), *tuple(updated_surfaces)):
+    for surface_id in (
+        *tuple(channel_surfaces),
+        *tuple(supporting_surfaces),
+        *tuple(updated_surfaces),
+    ):
         if surface_id not in ordered:
             ordered.append(surface_id)
     return tuple(ordered)

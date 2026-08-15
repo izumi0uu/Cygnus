@@ -103,7 +103,6 @@ class PublishPreviewCandidate:
             "target_channels",
             _normalize_strings(self.target_channels, label="target channel"),
         )
-        object.__setattr__(self, "target_bindings", tuple(self.target_bindings))
         object.__setattr__(self, "current_bindings", tuple(self.current_bindings))
         object.__setattr__(self, "blocked_bindings", tuple(self.blocked_bindings))
         if not self.target_audiences:
@@ -120,6 +119,8 @@ class PublishPreviewCandidate:
                     for channel in self.target_channels
                 ),
             )
+        else:
+            object.__setattr__(self, "target_bindings", tuple(self.target_bindings))
         object.__setattr__(
             self,
             "target_audiences",
@@ -137,11 +138,17 @@ class PublishPreviewCandidate:
             "object_type": self.object_type.value,
             "title": self.title,
             "action_type": self.action_type.value,
-            "target_audiences": [audience.to_dict() for audience in self.target_audiences],
+            "target_audiences": [
+                audience.to_dict() for audience in self.target_audiences
+            ],
             "target_channels": list(self.target_channels),
             "target_bindings": [binding.to_dict() for binding in self.target_bindings],
-            "current_bindings": [binding.to_dict() for binding in self.current_bindings],
-            "blocked_bindings": [binding.to_dict() for binding in self.blocked_bindings],
+            "current_bindings": [
+                binding.to_dict() for binding in self.current_bindings
+            ],
+            "blocked_bindings": [
+                binding.to_dict() for binding in self.blocked_bindings
+            ],
         }
 
 
@@ -155,9 +162,21 @@ class AudienceScopeSummary:
     def __post_init__(self) -> None:
         if self.total_audiences <= 0:
             raise ValueError("total_audiences must be positive")
-        object.__setattr__(self, "visibility_mix", _normalize_strings(self.visibility_mix, label="visibility mix"))
-        object.__setattr__(self, "audience_labels", _normalize_strings(self.audience_labels, label="audience label"))
-        object.__setattr__(self, "affected_channels", _normalize_strings(self.affected_channels, label="affected channel"))
+        object.__setattr__(
+            self,
+            "visibility_mix",
+            _normalize_strings(self.visibility_mix, label="visibility mix"),
+        )
+        object.__setattr__(
+            self,
+            "audience_labels",
+            _normalize_strings(self.audience_labels, label="audience label"),
+        )
+        object.__setattr__(
+            self,
+            "affected_channels",
+            _normalize_strings(self.affected_channels, label="affected channel"),
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -239,7 +258,9 @@ class BlastRadiusPreview:
             raise ValueError("title must not be blank")
         object.__setattr__(self, "channel_gate_matrix", tuple(self.channel_gate_matrix))
         object.__setattr__(self, "impacts", tuple(self.impacts))
-        object.__setattr__(self, "warnings", _normalize_strings(self.warnings, label="warning"))
+        object.__setattr__(
+            self, "warnings", _normalize_strings(self.warnings, label="warning")
+        )
         if not self.channel_gate_matrix:
             raise ValueError("channel_gate_matrix must not be empty")
         if not self.impacts:
@@ -252,7 +273,9 @@ class BlastRadiusPreview:
             "title": self.title,
             "action_type": self.action_type.value,
             "audience_scope": self.audience_scope.to_dict(),
-            "channel_gate_matrix": [summary.to_dict() for summary in self.channel_gate_matrix],
+            "channel_gate_matrix": [
+                summary.to_dict() for summary in self.channel_gate_matrix
+            ],
             "impacts": [impact.to_dict() for impact in self.impacts],
             "warnings": list(self.warnings),
         }
@@ -266,7 +289,11 @@ def build_publish_preview_candidate(
     current_bindings: Iterable[PublishBinding] | None = None,
     blocked_bindings: Iterable[PublishConflict] | None = None,
 ) -> PublishPreviewCandidate:
-    channels = tuple(target_channels) if target_channels is not None else _default_target_channels(knowledge_object)
+    channels = (
+        tuple(target_channels)
+        if target_channels is not None
+        else _default_target_channels(knowledge_object)
+    )
     audiences = _resolve_target_audiences(knowledge_object)
     return PublishPreviewCandidate(
         object_id=knowledge_object.object_id,
@@ -280,7 +307,9 @@ def build_publish_preview_candidate(
     )
 
 
-def build_publish_blast_radius_preview(candidate: PublishPreviewCandidate) -> BlastRadiusPreview:
+def build_publish_blast_radius_preview(
+    candidate: PublishPreviewCandidate,
+) -> BlastRadiusPreview:
     target_bindings = candidate.target_bindings
     current_by_key = {binding.key: binding for binding in candidate.current_bindings}
     blocked_by_key = {binding.key: binding for binding in candidate.blocked_bindings}
@@ -350,10 +379,14 @@ def build_publish_blast_radius_preview(candidate: PublishPreviewCandidate) -> Bl
 def _default_target_channels(knowledge_object: KnowledgeObject) -> tuple[str, ...]:
     if isinstance(knowledge_object, AnswerCard) and knowledge_object.publish_targets:
         return knowledge_object.publish_targets
-    raise ValueError("target_channels must be provided when the object has no publish_targets")
+    raise ValueError(
+        "target_channels must be provided when the object has no publish_targets"
+    )
 
 
-def _resolve_target_audiences(knowledge_object: KnowledgeObject) -> tuple[AudienceFilter, ...]:
+def _resolve_target_audiences(
+    knowledge_object: KnowledgeObject,
+) -> tuple[AudienceFilter, ...]:
     audiences: list[AudienceFilter] = []
     for audience in knowledge_object.supported_audiences:
         if audience not in audiences:
@@ -363,7 +396,9 @@ def _resolve_target_audiences(knowledge_object: KnowledgeObject) -> tuple[Audien
             if variant.audience_filter not in audiences:
                 audiences.append(variant.audience_filter)
     if not audiences:
-        raise ValueError("knowledge object must expose at least one supported or variant audience")
+        raise ValueError(
+            "knowledge object must expose at least one supported or variant audience"
+        )
     return tuple(audiences)
 
 
@@ -378,18 +413,24 @@ def _build_audience_scope(impacts: list[BlastRadiusImpact]) -> AudienceScopeSumm
 
     visibility_mix = []
     for visibility in (Visibility.EXTERNAL, Visibility.INTERNAL):
-        count = sum(1 for audience in unique_audiences if audience.visibility is visibility)
+        count = sum(
+            1 for audience in unique_audiences if audience.visibility is visibility
+        )
         if count:
             visibility_mix.append(f"{visibility.value}:{count}")
     return AudienceScopeSummary(
         total_audiences=len(unique_audiences),
         visibility_mix=tuple(visibility_mix),
-        audience_labels=tuple(_audience_label(audience) for audience in unique_audiences),
+        audience_labels=tuple(
+            _audience_label(audience) for audience in unique_audiences
+        ),
         affected_channels=tuple(channels),
     )
 
 
-def _build_channel_gate_matrix(impacts: list[BlastRadiusImpact]) -> tuple[ChannelGateSummary, ...]:
+def _build_channel_gate_matrix(
+    impacts: list[BlastRadiusImpact],
+) -> tuple[ChannelGateSummary, ...]:
     ordered_channels: list[str] = []
     for impact in impacts:
         if impact.channel not in ordered_channels:
@@ -401,14 +442,26 @@ def _build_channel_gate_matrix(impacts: list[BlastRadiusImpact]) -> tuple[Channe
         summaries.append(
             ChannelGateSummary(
                 channel=channel,
-                new_exposure=sum(1 for impact in channel_impacts if impact.effect is BlastRadiusEffect.NEW_EXPOSURE),
+                new_exposure=sum(
+                    1
+                    for impact in channel_impacts
+                    if impact.effect is BlastRadiusEffect.NEW_EXPOSURE
+                ),
                 continuing_exposure=sum(
-                    1 for impact in channel_impacts if impact.effect is BlastRadiusEffect.CONTINUING_EXPOSURE
+                    1
+                    for impact in channel_impacts
+                    if impact.effect is BlastRadiusEffect.CONTINUING_EXPOSURE
                 ),
                 stopped_exposure=sum(
-                    1 for impact in channel_impacts if impact.effect is BlastRadiusEffect.STOPPED_EXPOSURE
+                    1
+                    for impact in channel_impacts
+                    if impact.effect is BlastRadiusEffect.STOPPED_EXPOSURE
                 ),
-                conflicts=sum(1 for impact in channel_impacts if impact.effect is BlastRadiusEffect.CONFLICT),
+                conflicts=sum(
+                    1
+                    for impact in channel_impacts
+                    if impact.effect is BlastRadiusEffect.CONFLICT
+                ),
             )
         )
     return tuple(summaries)
@@ -420,7 +473,9 @@ def _build_warnings(
 ) -> tuple[str, ...]:
     warnings: list[str] = []
     if any(impact.effect is BlastRadiusEffect.CONFLICT for impact in impacts):
-        warnings.append("At least one audience-channel path is blocked by a governance conflict.")
+        warnings.append(
+            "At least one audience-channel path is blocked by a governance conflict."
+        )
     if any(impact.effect is BlastRadiusEffect.STOPPED_EXPOSURE for impact in impacts):
         warnings.append("This command would remove at least one current exposure path.")
     if candidate.action_type is PublishActionType.RESTRICT and any(
@@ -428,7 +483,9 @@ def _build_warnings(
         and impact.effect is BlastRadiusEffect.NEW_EXPOSURE
         for impact in impacts
     ):
-        warnings.append("A restrict command still introduces new external exposure and should be double-checked.")
+        warnings.append(
+            "A restrict command still introduces new external exposure and should be double-checked."
+        )
     return tuple(warnings)
 
 
@@ -449,7 +506,9 @@ def _audience_label(audience: AudienceFilter) -> str:
     return " · ".join(parts)
 
 
-def _bindings_to_audiences(bindings: tuple[PublishBinding, ...]) -> tuple[AudienceFilter, ...]:
+def _bindings_to_audiences(
+    bindings: tuple[PublishBinding, ...],
+) -> tuple[AudienceFilter, ...]:
     audiences: list[AudienceFilter] = []
     for binding in bindings:
         if binding.audience_filter not in audiences:

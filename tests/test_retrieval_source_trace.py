@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import unittest
 
-from cygnus.retrieval import SourceTraceResolver, sample_knowledge_objects, sample_support_evidence
+from cygnus.retrieval import (
+    SourceTraceResolver,
+    sample_knowledge_objects,
+    sample_support_evidence,
+)
 
 
 class SourceTraceResolverTests(unittest.TestCase):
@@ -26,7 +30,9 @@ class SourceTraceResolverTests(unittest.TestCase):
 
     def test_trace_marks_missing_evidence_as_blind_spot(self) -> None:
         object_with_missing = next(
-            item for item in sample_knowledge_objects() if item.object_id == "ko-billing-refund-policy"
+            item
+            for item in sample_knowledge_objects()
+            if item.object_id == "ko-billing-refund-policy"
         )
         filtered_evidence = tuple(
             item

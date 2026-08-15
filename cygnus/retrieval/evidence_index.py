@@ -2,8 +2,14 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
+from cygnus.domain.audience import AudienceContext, audience_context_allowed
 from cygnus.evidence.records import EvidenceSourceType, SupportEvidence
-from cygnus.retrieval.contracts import EvidenceHit, excerpt_ref_for, keyword_score, tokenize
+from cygnus.retrieval.contracts import (
+    EvidenceHit,
+    excerpt_ref_for,
+    keyword_score,
+    tokenize,
+)
 
 
 class EvidenceIndex:
@@ -14,6 +20,7 @@ class EvidenceIndex:
         self,
         *,
         query: str,
+        audience_context: AudienceContext | None = None,
         filters: dict[str, Any] | None = None,
         limit: int = 10,
     ) -> tuple[EvidenceHit, ...]:
@@ -22,6 +29,12 @@ class EvidenceIndex:
         ranked: list[tuple[float, EvidenceHit]] = []
 
         for evidence in self._evidence:
+            if audience_context is not None and not audience_context_allowed(
+                audience_context, (evidence.audience_filter,)
+            ):
+                # Strict requested-vs-allowed intersection: evidence outside
+                # the requested audience is never returned.
+                continue
             if not _matches_filters(evidence, filters):
                 continue
 
@@ -43,10 +56,14 @@ class EvidenceIndex:
                         title=evidence.title,
                         source_type=evidence.source_type.value,
                         source_ref=evidence.source_ref,
-                        excerpt_ref=excerpt_ref_for(evidence.evidence_id, evidence.content),
+                        excerpt_ref=excerpt_ref_for(
+                            evidence.evidence_id, evidence.content
+                        ),
                         freshness=evidence.freshness_state,
                         confidence=score,
                         snippet=evidence.content[:160],
+                        revision=evidence.revision,
+                        captured_at=evidence.updated_at,
                     ),
                 )
             )
@@ -58,10 +75,11 @@ class EvidenceIndex:
         return self._evidence
 
 
-
 def _matches_filters(evidence: SupportEvidence, filters: dict[str, Any]) -> bool:
     source_type = filters.get("source_type")
-    if source_type is not None and evidence.source_type is not EvidenceSourceType(source_type):
+    if source_type is not None and evidence.source_type is not EvidenceSourceType(
+        source_type
+    ):
         return False
 
     filter_pairs = (

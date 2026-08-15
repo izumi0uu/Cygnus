@@ -1,18 +1,32 @@
 from __future__ import annotations
 
 import unittest
+from typing import cast
 
 from cygnus.domain import AudienceFilter, Visibility
 from cygnus.domain.objects import KnowledgeObjectType
-from cygnus.review import OwnerState, PriorityStackCard, ReviewCommandBrief, ReviewCommandSurface, ReviewRiskItem, ReviewRiskType, SituationFrame, build_review_command_brief
+from cygnus.review import (
+    ObservationState,
+    OwnerState,
+    PriorityStackCard,
+    ReviewCommandSurface,
+    ReviewRiskItem,
+    ReviewRiskType,
+    SituationFrame,
+    SurfaceObservation,
+    build_review_command_brief,
+)
 from cygnus.review.briefing import WhyNowFrame
 from cygnus.substrate import UrgencyLevel
 
 
 class ReviewSurfaceTests(unittest.TestCase):
-    def test_review_command_surface_to_dict_includes_situation_frame_and_priority_stack(self) -> None:
+    def test_review_command_surface_to_dict_includes_situation_frame_and_priority_stack(
+        self,
+    ) -> None:
         item = ReviewRiskItem(
             risk_id="risk-1",
+            signal_ref="risk-1",
             title="Source blindness",
             risk_type=ReviewRiskType.SOURCE_BLINDNESS,
             object_type=KnowledgeObjectType.KNOWN_ISSUE_PAGE,
@@ -34,6 +48,12 @@ class ReviewSurfaceTests(unittest.TestCase):
         surface = ReviewCommandSurface(
             surface_id="review-home",
             headline=brief.headline,
+            observation=SurfaceObservation(
+                state=ObservationState.READY,
+                observed_count=1,
+                reason="review_signals_observed",
+                covered_signals=("source_status", "review_assignment"),
+            ),
             situation_frame=SituationFrame(
                 briefing_note="Morning command brief before opening any draft detail.",
                 summary="1 governance risk is stacked for command attention.",
@@ -46,6 +66,7 @@ class ReviewSurfaceTests(unittest.TestCase):
             priority_stack=(
                 PriorityStackCard(
                     risk_id="risk-1",
+                    signal_ref="risk-1",
                     title="Source blindness",
                     risk_type=ReviewRiskType.SOURCE_BLINDNESS,
                     urgency=UrgencyLevel.URGENT,
@@ -53,7 +74,9 @@ class ReviewSurfaceTests(unittest.TestCase):
                     object_ref="cp-1",
                     why_now_summary="Incident feed failed during active support pressure.",
                     audience_labels=("external · global",),
-                    affected_audiences=(AudienceFilter(visibility=Visibility.EXTERNAL),),
+                    affected_audiences=(
+                        AudienceFilter(visibility=Visibility.EXTERNAL),
+                    ),
                     affected_surfaces=("help_center", "copilot"),
                     owner_state=OwnerState.UNASSIGNED,
                     queue_owner=None,
@@ -68,5 +91,9 @@ class ReviewSurfaceTests(unittest.TestCase):
         payload = surface.to_dict()
         self.assertEqual(payload["surface_id"], "review-home")
         self.assertIn("situation_frame", payload)
-        self.assertEqual(payload["priority_stack"][0]["owner_state"], "unassigned")
-        self.assertEqual(payload["command_brief"]["brief_id"], "brief-1")
+        observation = cast(dict[str, object], payload["observation"])
+        self.assertEqual(observation["state"], "ready")
+        priority_stack = cast(list[dict[str, object]], payload["priority_stack"])
+        self.assertEqual(priority_stack[0]["owner_state"], "unassigned")
+        command_brief = cast(dict[str, object], payload["command_brief"])
+        self.assertEqual(command_brief["brief_id"], "brief-1")

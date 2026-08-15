@@ -18,6 +18,13 @@ export interface PriorityItem {
   urgency: string
   object_type: string
   object_ref: string
+  // Durable review-assignment provenance: the governance signal this risk is
+  // bound to, plus the owner-of-record trace/version read back from the
+  // durable provider. Commands must send assignment_version verbatim as
+  // expected_version.
+  signal_ref: string
+  assignment_trace_ref: string
+  assignment_version: number
   why_now_summary: string
   audience_labels: string[]
   affected_audiences: AffectedAudience[]
@@ -38,9 +45,20 @@ export interface SituationFrame {
   recommended_commands: string[]
 }
 
+export type ObservationState = 'ready' | 'partial' | 'unavailable'
+
+export interface SurfaceObservation {
+  state: ObservationState
+  observed_count: number
+  reason: string
+  covered_signals: string[]
+  missing_signals: string[]
+}
+
 export interface CommandCenterSurface {
   surface_id: string
   headline: string
+  observation: SurfaceObservation
   situation_frame: SituationFrame
   priority_stack: PriorityItem[]
   available_commands: string[]
@@ -157,6 +175,7 @@ export interface DriftSurface {
   surface_id: string
   headline: string
   summary: string
+  observation: SurfaceObservation
   contexts: DriftContext[]
   available_commands: string[]
   proposal_lane: string[]
@@ -182,17 +201,249 @@ export interface SourceBlindnessContext {
   signal_loss_summary: string
 }
 
+// Durable source-impact truth. A source failure is an observed fact, not an
+// inference: `mapped` means at least one visible linked Wiki page exists;
+// `unmapped` means the provider ran but no governed Wiki impact is mapped in
+// the current read scope — never present unmapped as "no business impact".
+export type SourceImpactState = 'mapped' | 'unmapped'
+
+// Persisted audience binding affected by the failed source; `version` is the
+// binding's durable version read back from the provider.
+export interface SourceAudienceImpact {
+  binding_ref: string
+  object_ref: string
+  variant_ref: string
+  channel: string
+  audience: AffectedAudience
+  version: number
+}
+
+// Persisted propagation record for an object grounded in the failed source.
+export interface SourcePropagationImpact {
+  propagation_ref: string
+  publication_ref: string
+  object_ref: string
+  surface_id: string
+  status: string // synced | pending | failed | manual_action_required
+  channel_refs: string[]
+  version: number
+}
+
+export interface SourceFailureObservation {
+  source_id: string
+  title: string
+  source_ref: string
+  status: 'error'
+  error_message: string
+  linked_wiki_refs: string[]
+  linked_object_refs: string[]
+  audience_impacts: SourceAudienceImpact[]
+  propagation_impacts: SourcePropagationImpact[]
+  observed_at: string | null
+  impact_state: SourceImpactState
+}
+
 export interface SourceBlindnessSurface {
   surface_id: string
   headline: string
   summary: string
+  observation: SurfaceObservation
   contexts: SourceBlindnessContext[]
+  source_observations: SourceFailureObservation[]
   available_commands: string[]
   proposal_lane: string[]
 }
 
 export async function fetchSourceBlindnessSurface(): Promise<SourceBlindnessSurface> {
   return authApi<SourceBlindnessSurface>('/api/source-blindness')
+}
+
+// ============================================================
+// Ticket Cluster Insights — bounded, source-scoped pilot surface.
+// These projections point to the durable import and funnel owners;
+// the SPA must not derive a second lifecycle or analytics aggregate.
+// ============================================================
+
+export interface ReadySourceOption {
+  id: string
+  title: string | null
+  source_type: string | null
+  file_name: string | null
+  status: string
+  created_at: string
+  updated_at: string
+}
+
+export interface SourceListPage {
+  items: ReadySourceOption[]
+  total: number
+  page: number
+  page_size: number
+  total_pages: number
+}
+
+export async function fetchReadySources(): Promise<SourceListPage> {
+  return authApi<SourceListPage>('/api/sources?status=ready&page=1&page_size=500')
+}
+
+export type TicketExportFormat = 'csv' | 'jsonl'
+
+export interface TicketClusterCandidate {
+  cluster_ref: string
+  signal_ref: string | null
+  source_ref: string
+  issue_signature: string
+  title: string
+  object_type: string
+  audience_filter: Record<string, unknown>
+  feature: string | null
+  member_count: number
+  minimum_cluster_size: number
+  qualifies: boolean
+  window_start: string
+  window_end: string
+  evidence_ref_count: number
+  evidence_refs: Record<string, unknown>[]
+  representative_excerpt: string
+}
+
+export interface ImportedGovernanceSignal {
+  id: string
+  signal_ref: string
+  signal_type: string
+  object_ref: string
+  title: string
+  object_type: string
+  source_id: string | null
+  audience_filter: Record<string, unknown>
+  affected_surfaces: string[]
+  evidence_source_type: string
+  freshness: string
+  summary: string
+  reason: string
+  evidence_excerpt: string
+  evidence_refs: Record<string, unknown>[]
+  status: string
+  observed_at: string
+  created_at: string
+  updated_at: string
+  version: number
+}
+
+export interface TicketImportResult {
+  contract_version: string
+  source_ref: string
+  export_format: TicketExportFormat
+  import_digest: string
+  minimum_cluster_size: number
+  record_count: number
+  candidate_count: number
+  qualifying_candidate_count: number
+  candidates: TicketClusterCandidate[]
+  source_id: string
+  persisted_signal_count: number
+  persisted_signal_refs: string[]
+  governance_signals: ImportedGovernanceSignal[]
+  publication_state: 'not_published'
+  next_step: 'review_qualifying_candidates'
+}
+
+export interface TicketPilotDurationSummary {
+  observed_count: number
+  average: number | null
+  minimum: number | null
+  maximum: number | null
+}
+
+export interface TicketPilotSummary {
+  eligible_signal_count: number
+  promoted_draft_count: number
+  review_submitted_draft_count: number
+  review_decided_draft_count: number
+  approved_draft_count: number
+  rejected_draft_count: number
+  needs_revision_draft_count: number
+  published_draft_count: number
+  rates: {
+    signal_to_draft: number | null
+    draft_to_review: number | null
+    terminal_review_acceptance: number | null
+    draft_to_publish: number | null
+  }
+  durations_seconds: {
+    signal_to_draft: TicketPilotDurationSummary
+    draft_to_review: TicketPilotDurationSummary
+    signal_to_publish: TicketPilotDurationSummary
+  }
+}
+
+export interface TicketPilotItem {
+  source_ref: string
+  import_digest: string
+  signal_ref: string
+  ticket_cluster_ref: string
+  object_type: string
+  signal_status: string
+  signal_observed_at: string
+  signal_created_at: string
+  evidence_ref_count: number
+  promotion: { id: string | null; created_at: string | null }
+  draft: { id: string | null; status: string | null }
+  review: {
+    submitted_at: string | null
+    decision_at: string | null
+    decision: string | null
+  }
+  publication: { id: string | null; published_at: string | null }
+  durations_seconds: {
+    signal_to_draft: number | null
+    draft_to_review: number | null
+    signal_to_publish: number | null
+  }
+  persisted: true
+  rehearsal: false
+}
+
+export interface TicketPilotFunnelReport {
+  source_ref: string
+  import_digests: string[]
+  matched_signal_count: number
+  excluded_signal_count: number
+  summary: TicketPilotSummary
+  items: TicketPilotItem[]
+  observation: SurfaceObservation
+  metric_boundary: {
+    kind: 'durable_pilot_instrumentation'
+    business_impact_proven: false
+  }
+  persisted: true
+  rehearsal: false
+}
+
+export async function importResolvedTicketExport(input: {
+  file: File
+  sourceRef: string
+  sourceId: string
+  exportFormat: TicketExportFormat
+  minimumClusterSize: number
+}): Promise<TicketImportResult> {
+  const body = new FormData()
+  body.append('file', input.file)
+  body.append('source_ref', input.sourceRef)
+  body.append('source_id', input.sourceId)
+  body.append('export_format', input.exportFormat)
+  body.append('minimum_cluster_size', String(input.minimumClusterSize))
+  return authApi<TicketImportResult>('/api/governance/ticket-imports', {
+    method: 'POST',
+    body,
+    timeoutMs: 60_000,
+  })
+}
+
+export async function fetchTicketPilotFunnel(sourceRef: string): Promise<TicketPilotFunnelReport> {
+  return authApi<TicketPilotFunnelReport>(
+    `/api/governance/ticket-pilot?source_ref=${encodeURIComponent(sourceRef)}`,
+  )
 }
 
 export interface GovernanceOpenLoop {
@@ -225,6 +476,8 @@ export interface GovernanceOverviewSurface {
   surface_id: string
   headline: string
   summary: string
+  persisted: true
+  rehearsal: false
   open_loops: GovernanceOpenLoop[]
   open_loop_ranks: GovernanceOpenLoopRank[]
   highest_leverage_command: string | null
@@ -251,13 +504,166 @@ export interface ReviewIntakeBundle {
   audience_notes: string[]
 }
 
+export interface ReviewPressureLine {
+  proposal_ref: string
+  title: string
+  risk_type: string
+  suggested_object_type: string
+  owner_state: string
+  queue_owner: string | null
+  urgency: string
+  trigger_signals: string[]
+  affected_audience_labels: string[]
+  affected_surfaces: string[]
+  evidence_sufficiency: string
+  visibility_consequence: string
+  impact_summary: string
+  command_actions: string[]
+}
+
+export interface ReviewPressureSurface {
+  surface_id: string
+  headline: string
+  summary: string
+  pressure_lines: ReviewPressureLine[]
+  available_commands: string[]
+  proposal_lane: string[]
+}
+
 export interface ReviewIntakeSurface {
   bundles: ReviewIntakeBundle[]
   review_home: CommandCenterSurface
+  pressure_surface: ReviewPressureSurface | null
+  source_blindness_surface: SourceBlindnessSurface | null
 }
 
 export async function fetchReviewIntake(): Promise<ReviewIntakeSurface> {
   return authApi<ReviewIntakeSurface>('/api/review-intake')
+}
+
+// ============================================================
+// Review assignment — durable owner commands on one governance
+// signal (POST /api/review-assignments/{signal_ref}/commands).
+// The assignment is the persisted owner of record for a review
+// signal; every command appends one event and bumps `version`.
+// Callers must send the version they read as expected_version
+// and re-read authoritative state after success — never claim
+// persistence before this endpoint answers persisted: true.
+// ============================================================
+
+export const REVIEW_ASSIGNMENT_REF_MAX_LENGTH = 220
+export const REVIEW_ASSIGNMENT_REASON_MAX_LENGTH = 2_000
+
+export type ReviewAssignmentAction = 'assign' | 'escalate' | 'release'
+
+export type ReviewAssignmentState = 'unassigned' | 'assigned' | 'escalated'
+
+export interface ReviewAssignmentCommandRequest {
+  command_id: string
+  action: ReviewAssignmentAction
+  owner_ref: string | null
+  reason: string
+  expected_version: number
+}
+
+export interface ReviewAssignment {
+  id: string
+  signal_ref: string
+  owner_ref: string | null
+  lifecycle_state: ReviewAssignmentState
+  escalation_reason: string | null
+  version: number
+  trace_ref: string
+  persisted: true
+  created_at: string
+  updated_at: string
+}
+
+export interface ReviewAssignmentEvent {
+  id: string
+  event_type: string
+  from_state: ReviewAssignmentState | null
+  to_state: ReviewAssignmentState
+  actor_id: string
+  owner_ref: string | null
+  reason: string
+  sequence: number
+  trace_ref: string
+  persisted: true
+  occurred_at: string
+}
+
+export interface ReviewAssignmentCommandResult {
+  assignment: ReviewAssignment
+  event: ReviewAssignmentEvent
+  replayed: boolean
+}
+
+export async function executeReviewAssignment(
+  signalRef: string,
+  command: ReviewAssignmentCommandRequest,
+): Promise<ReviewAssignmentCommandResult> {
+  return authApi<ReviewAssignmentCommandResult>(
+    `/api/review-assignments/${encodeURIComponent(signalRef)}/commands`,
+    { method: 'POST', body: command },
+  )
+}
+
+
+// Ticket-cluster draft promotion — reviewer-controlled materialization
+// of one qualifying governance signal into a durable, unsubmitted draft
+// (POST /api/governance-signals/{signal_ref}/commands/promote-draft).
+// The command is replay-safe and version-bound to the assignment truth read
+// by ReviewQueue. A persisted receipt does not imply review or publication.
+// ============================================================
+
+export const TICKET_DRAFT_PROMOTION_REF_MAX_LENGTH = 220
+export const TICKET_DRAFT_PROMOTION_REASON_MAX_LENGTH = 2_000
+
+export interface TicketDraftPromotionRequest {
+  command_id: string
+  reason: string
+  expected_assignment_version: number
+}
+
+export interface GovernanceTicketDraftPromotion {
+  id: string
+  signal_ref: string
+  command_id: string
+  draft_id: string
+  actor_id: string
+  expected_assignment_version: number
+  trace_ref: string
+  persisted: true
+  created_at: string
+}
+
+export interface PromotedTicketDraft {
+  draft_id: string
+  draft_version: number
+  draft_kind: 'create'
+  draft_status: 'draft'
+  object_type: string
+  title: string
+}
+
+export interface TicketDraftPromotionResult {
+  promotion: GovernanceTicketDraftPromotion
+  draft: PromotedTicketDraft
+  replayed: boolean
+  review_state: 'not_submitted'
+  publication_state: 'not_published'
+  next_step: 'update_draft_or_request_review'
+}
+
+export async function promoteTicketClusterToDraft(
+  signalRef: string,
+  command: TicketDraftPromotionRequest,
+): Promise<TicketDraftPromotionResult> {
+  return authApi<TicketDraftPromotionResult>(
+    `/api/governance-signals/${encodeURIComponent(signalRef)}/commands/promote-draft`,
+    { method: 'POST', body: command },
+  )
 }
 
 // ============================================================
@@ -338,6 +744,25 @@ export interface BlastRadiusPreview {
   warnings: string[]
 }
 
+// Durable publish envelope. Present on a preview only when the selected
+// action is qualified for durable publication (approved draft, ready sources,
+// explicit persisted audience bindings). When present, APPLY must send these
+// fields verbatim — they bind the write to one draft, one approval, and one
+// idempotent command_id.
+export interface DurablePublishCommandEnvelope {
+  draft_id: string
+  approval_ref: string
+  approval_digest: string
+  scope_digest: string
+  signal_id: string
+  signal_freshness: 'fresh' | 'stale' | 'unknown'
+  command_id: string
+  action_key: string
+  target_channels: string[]
+  expected_version: number
+  reason: string | null
+}
+
 export interface PublishPreviewSurface {
   surface_id: string
   headline: string
@@ -354,6 +779,9 @@ export interface PublishPreviewSurface {
   action_presets: PublishActionPreset[]
   selected_action: string | null
   action_echo: PublishActionEcho | null
+  durable_command?: DurablePublishCommandEnvelope | null
+  persisted: true
+  rehearsal: false
 }
 
 export async function fetchPublishPreview(
@@ -368,11 +796,17 @@ export async function fetchPublishPreview(
 }
 
 // ============================================================
-// Publish apply — the write path. Runs the real governance
-// executor (POST /api/publish/apply) and returns the full
-// result: opened / removed / held bindings + action_log.
-// `persisted` is false because the store is fixture-backed; the
-// loop is real (the executor actually runs) but not durable.
+// Publish apply — the write path (POST /api/publish/apply). Two
+// explicitly distinguished paths:
+// - durable: the preview carried a durable_command envelope, so the
+//   SPA sends the full draft/approval/command/channel payload. The
+//   executor stages a real GovernancePublication; the response is
+//   persisted truth (persisted: true, rehearsal: false) with the
+//   durable receipt fields below.
+// - explicit rehearsal: object_ref + action_key only. The executor
+//   runs against the pressure-intake projection and returns
+//   rehearsal: true / persisted: false. It must never be presented
+//   as durable.
 // ============================================================
 
 export interface PublishApplyResult {
@@ -385,12 +819,44 @@ export interface PublishApplyResult {
   preview: BlastRadiusPreview
   rehearsal: boolean
   persisted: boolean
+  // Durable receipt — only present when persisted is true.
+  replayed?: boolean
+  publication_record_id?: string
+  ledger_event_id?: string
+  approval_ref?: string
+  command_id?: string
+  object_ref?: string
+  object_version?: number
+  published_at?: string
+  propagation?: {
+    summary: Record<string, number>
+    records: unknown[]
+  }
 }
 
 export async function applyPublishAction(
   objectRef: string | undefined,
   actionKey: string,
+  durableCommand?: DurablePublishCommandEnvelope | null,
 ): Promise<PublishApplyResult> {
+  if (durableCommand) {
+    return authApi<PublishApplyResult>('/api/publish/apply', {
+      method: 'POST',
+      body: {
+        draft_id: durableCommand.draft_id,
+        approval_ref: durableCommand.approval_ref,
+        approval_digest: durableCommand.approval_digest,
+        scope_digest: durableCommand.scope_digest,
+        signal_id: durableCommand.signal_id,
+        signal_freshness: durableCommand.signal_freshness,
+        command_id: durableCommand.command_id,
+        action_key: durableCommand.action_key,
+        target_channels: durableCommand.target_channels,
+        expected_version: durableCommand.expected_version,
+        reason: durableCommand.reason,
+      },
+    })
+  }
   return authApi<PublishApplyResult>('/api/publish/apply', {
     method: 'POST',
     body: { object_ref: objectRef ?? null, action_key: actionKey },
@@ -440,6 +906,12 @@ export interface PublishPropagationSurface {
   headline: string
   summary: string
   selected_card: PriorityItem
+  // Durable provenance — present on the durable provider (persisted truth,
+  // never a rehearsal); absent only on legacy-shaped payloads.
+  persisted?: boolean
+  rehearsal?: boolean
+  publication_record_id?: string
+  command_id?: string
   propagation_ledger: PublishPropagationLedger
   status_lanes: PropagationStatusLane[]
   selected_position: number
@@ -454,11 +926,15 @@ export interface PublishPropagationSurface {
 
 export async function fetchPublishPropagation(
   objectRef?: string,
-  actionKey?: string,
+  publicationId?: string,
 ): Promise<PublishPropagationSurface> {
+  // Durable lookup: publication_id addresses one staged publication and wins
+  // when both are sent; object_ref alone resolves the latest durable
+  // publication for that object. The backend answers an explicit 404 when
+  // neither resolves — never a fixture projection.
   const params = new URLSearchParams()
+  if (publicationId) params.set('publication_id', publicationId)
   if (objectRef) params.set('object_ref', objectRef)
-  if (actionKey) params.set('action_key', actionKey)
   const qs = params.toString()
   return authApi<PublishPropagationSurface>(`/api/publish-propagation${qs ? `?${qs}` : ''}`)
 }
@@ -610,4 +1086,550 @@ export interface DownstreamRealityCheckSurface {
 
 export async function fetchDownstreamRealityCheck(commandId: string): Promise<DownstreamRealityCheckSurface> {
   return authApi<DownstreamRealityCheckSurface>(`/api/recovery/downstream-reality-check/${encodeURIComponent(commandId)}`)
+}
+
+// ============================================================
+// Durable recipient-scoped governance notifications
+// ============================================================
+
+export type NotificationLifecycleState = 'unread' | 'read'
+
+export interface PersistedNotification {
+  id: string
+  trace_ref: string
+  type: string
+  subject: string
+  body: string
+  target_type: string
+  target_id: string
+  actor_id: string | null
+  lifecycle_state: NotificationLifecycleState
+  read_at: string | null
+  created_at: string
+  persisted: true
+}
+
+export async function fetchNotifications(
+  lifecycleState?: NotificationLifecycleState,
+): Promise<PersistedNotification[]> {
+  const query = lifecycleState ? `?lifecycle_state=${lifecycleState}` : ''
+  return authApi<PersistedNotification[]>(`/api/notifications${query}`)
+}
+
+export async function markNotificationRead(id: string): Promise<PersistedNotification> {
+  return authApi<PersistedNotification>(`/api/notifications/${encodeURIComponent(id)}/read`, {
+    method: 'POST',
+  })
+}
+
+export async function markAllNotificationsRead(): Promise<{
+  updated: number
+  lifecycle_state: 'read'
+  persisted: true
+}> {
+  return authApi('/api/notifications/read-all', { method: 'POST' })
+}
+
+// ============================================================
+// Governance audit — permission-scoped durable ledger read
+// (GET /api/governance/audit). Every item is one committed
+// governance transition inside the caller's Wiki read scope,
+// ordered newest first by its durable recorded timestamp. `persisted: true` / `rehearsal: false`
+// only prove the ledger event itself committed — never that a
+// downstream publication or propagation completed. `details`
+// is the backend-whitelisted payload subset; render it as
+// recorded, without local inference.
+// ============================================================
+
+export type GovernanceAuditPhase = 'review' | 'approval' | 'publish' | 'recovery'
+
+export interface GovernanceAuditActor {
+  actor_id: string
+  name: string | null
+}
+
+export interface GovernanceAuditResource {
+  page_id: string | null
+  slug: string | null
+  title: string | null
+  object_ref: string | null
+  scope_type: string
+  scope_id: string | null
+}
+
+export interface GovernanceAuditEvent {
+  event_id: string
+  trace_ref: string
+  draft_id: string
+  sequence: number
+  phase: GovernanceAuditPhase
+  event_type: string
+  from_state: string | null
+  to_state: string
+  actor: GovernanceAuditActor | null
+  resource: GovernanceAuditResource
+  reason: string | null
+  details: Record<string, unknown>
+  occurred_at: string
+  recorded_at: string
+  persisted: true
+  rehearsal: false
+}
+
+export interface GovernanceAuditPage {
+  items: GovernanceAuditEvent[]
+  total: number
+  page: number
+  page_size: number
+  observation: SurfaceObservation
+  persisted: true
+  rehearsal: false
+}
+
+export async function fetchGovernanceAudit(
+  phase?: GovernanceAuditPhase,
+  page = 1,
+  pageSize = 20,
+): Promise<GovernanceAuditPage> {
+  const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
+  if (phase) params.set('phase', phase)
+  return authApi<GovernanceAuditPage>(`/api/governance/audit?${params.toString()}`)
+}
+
+export async function fetchGovernanceAuditEvent(eventId: string): Promise<GovernanceAuditEvent> {
+  return authApi<GovernanceAuditEvent>(`/api/governance/audit/${encodeURIComponent(eventId)}`)
+}
+
+// ============================================================
+// Internal Copilot — one bounded, request-scoped governed query.
+// The manifest version is negotiated in a header; it is not duplicated in
+// the body. Every submission re-reads Cygnus truth and carries no chat memory.
+// ============================================================
+
+export const SESSION_CONTRACT_VERSION = '1.0' as const
+
+export type SessionVisibility = 'internal' | 'external'
+export type SessionGovernanceDisposition = 'answerable' | 'restricted' | 'fallback' | 'escalate'
+
+export interface SessionAudienceContext {
+  visibility: SessionVisibility
+  brand?: string | null
+  product_line?: string | null
+  plan_tier?: string | null
+  region?: string | null
+  language?: string | null
+  product_version?: string | null
+}
+
+export interface SessionManifestTool {
+  name: string
+  description: string
+  input_schema: Record<string, unknown>
+  output_schema: Record<string, unknown>
+  permission_requirement: string
+  risk_class: string
+  side_effect_class: string
+  idempotency_class: string
+  timeout_seconds: number
+  retry_policy: Record<string, unknown>
+  availability_semantics: string
+  availability: 'available' | 'denied'
+  denial_reason: string | null
+}
+
+export interface SessionBridgeManifest {
+  contract_version: string
+  schema_fingerprint: string
+  governed_tools: SessionManifestTool[]
+  visible_tools: SessionManifestTool[]
+  denied_tools: SessionManifestTool[]
+}
+
+export interface SessionGovernanceContext {
+  governance_state: SessionGovernanceDisposition
+  audience_context: SessionAudienceContext
+  object_id: string | null
+  object_version: number | null
+  trace_ref: string | null
+  freshness: string | null
+}
+
+export interface SessionContinuity {
+  state: 'started' | 'revalidated' | 'refreshed' | 'invalidated'
+  revalidated: boolean
+  session_memory_used_as_truth: false
+  reasons: string[]
+  governance_context: SessionGovernanceContext
+}
+
+export interface SessionAnswer {
+  object_id: string
+  slug: string
+  object_type: string
+  title: string
+  audience_match: string
+  freshness: string
+  publication_status: string
+  snippet: string
+  trace_ref: string
+  content: Record<string, unknown> | null
+  allowed_channels: string[]
+  usage: 'direct' | 'internal_reference_only' | 'withheld'
+  direct_external_use: boolean
+}
+
+export interface SessionQueryData {
+  request_ref: string
+  session_ref: string | null
+  query: string
+  audience_context: SessionAudienceContext
+  governance: {
+    state: SessionGovernanceDisposition
+    codes: string[]
+    directives: string[]
+  }
+  answer: SessionAnswer | null
+  source_trace: SourceTrace | null
+  alternatives: Array<Omit<SessionAnswer, 'content' | 'allowed_channels' | 'usage' | 'direct_external_use'>>
+  continuity: SessionContinuity
+  governance_context: SessionGovernanceContext
+  tool_trace: Array<{
+    name: string
+    risk_level: string
+    owner: string
+    result_ref: string | null
+  }>
+}
+
+export interface SessionQueryResponse {
+  contract_version: string
+  status: string
+  summary: string
+  data: SessionQueryData
+  trace_ref: string | null
+  warnings: string[]
+  errors: string[]
+}
+
+export interface SessionQueryRequest {
+  request_ref: string
+  session_ref?: string | null
+  query: string
+  channel: string
+  audience_context: SessionAudienceContext
+  object_types?: string[]
+  limit?: number
+  previous_governance_context?: SessionGovernanceContext | null
+}
+
+const SESSION_CONTRACT_HEADER = {
+  'X-Cygnus-Session-Contract-Version': SESSION_CONTRACT_VERSION,
+}
+
+export async function fetchSessionBridgeManifest(): Promise<SessionBridgeManifest> {
+  return authApi<SessionBridgeManifest>('/api/session-bridge/capabilities', {
+    headers: SESSION_CONTRACT_HEADER,
+  })
+}
+
+export async function submitSessionQuery(input: SessionQueryRequest): Promise<SessionQueryResponse> {
+  return authApi<SessionQueryResponse>('/api/session-bridge/query', {
+    method: 'POST',
+    headers: SESSION_CONTRACT_HEADER,
+    body: input,
+  })
+}
+
+export type SessionFeedbackSignalType =
+  | 'answer_accepted'
+  | 'human_rewrite'
+  | 'escalated'
+  | 'low_rating'
+  | 'unsupported_answer'
+  | 'stale_answer'
+
+export interface SessionFeedbackResponse {
+  contract_version: string
+  status: 'success' | 'conflict' | string
+  summary: string
+  data: Record<string, unknown>
+  signal_id?: string
+  command_id?: string
+  replayed?: boolean
+  signal_type?: SessionFeedbackSignalType
+  object_id?: string | null
+  draft_id?: string | null
+  routing_state?: string
+  route_id?: string | null
+  route_ref?: string | null
+  persisted?: boolean
+  rehearsal?: boolean
+  trace_ref?: string | null
+  warnings?: string[]
+  errors: string[]
+}
+
+export async function submitSessionFeedback(input: {
+  command_id: string
+  signal_type: SessionFeedbackSignalType
+  audience_context: SessionAudienceContext
+  object_id?: string
+  notes?: string
+  source_context_ref?: string
+}): Promise<SessionFeedbackResponse> {
+  return authApi<SessionFeedbackResponse>('/api/session-bridge/feedback', {
+    method: 'POST',
+    headers: SESSION_CONTRACT_HEADER,
+    body: input,
+  })
+}
+
+// ============================================================
+// Source Operations — persisted inventory, bounded ingestion, progress, and
+// compilation-plan commands. Command responses prove only the server truth
+// named by each receipt; the SPA never synthesizes lifecycle completion.
+// ============================================================
+
+export type SourceLifecycleStatus =
+  | 'pending'
+  | 'processing'
+  | 'awaiting_approval'
+  | 'plan_ready'
+  | 'ready'
+  | 'error'
+  | 'deleting'
+
+export type SourceFreshnessState = 'fresh' | 'stale' | 'unknown'
+export type SourceLanguage = 'en' | 'zh'
+
+export interface SourceRecord extends ReadySourceOption {
+  language: SourceLanguage
+  url: string | null
+  file_size: number | null
+  error_message: string | null
+  progress: number
+  progress_message: string | null
+  job_id: string | null
+  page_count: number
+  wiki_page_count: number
+  extracted_token_count: number | null
+  image_count: number
+  auto_recover_count: number
+  knowledge_type_id: string | null
+  knowledge_type_name: string | null
+  knowledge_type_color: string | null
+  department_ids: string[]
+  department_names: string[]
+  contributed_by_employee_id: string | null
+  contributed_by_name: string | null
+  scope_type: string
+  scope_id: string | null
+  preserve_verbatim: boolean
+  freshness_state: SourceFreshnessState
+  freshness_active: boolean
+  freshness_expired: boolean
+  freshness_actor_id: string | null
+  freshness_reason: string | null
+  freshness_attested_at: string | null
+  freshness_expires_at: string | null
+}
+
+export interface SourceOperationsPage {
+  items: SourceRecord[]
+  total: number
+  page: number
+  page_size: number
+  total_pages: number
+}
+
+export interface SourceProgress {
+  id: string
+  status: SourceLifecycleStatus
+  progress: number
+  progress_message: string | null
+  page_count: number
+  wiki_page_count: number
+}
+
+export interface SourceCompilationPlanPage {
+  action: string
+  slug: string
+  title: string
+  summary?: string
+  priority?: number
+}
+
+export interface SourceCompilationPlan {
+  id: string
+  source_id: string
+  status: 'pending_review' | 'approved' | 'regenerating' | 'rejected' | 'done'
+  plan: Record<string, unknown> & { pages?: SourceCompilationPlanPage[] }
+  created_at: string
+  reviewed_at: string | null
+  review_note: string | null
+}
+
+export type SourceScopeType = 'global' | 'department'
+
+export interface SourceKnowledgeType {
+  id: string
+  slug: string
+  name: string
+  color: string
+  description: string | null
+  sort_order: number
+  source_count: number
+}
+
+export interface SourceDepartment {
+  id: string
+  name: string
+  description: string | null
+  employee_count: number
+}
+
+export async function fetchSourceKnowledgeTypes(): Promise<SourceKnowledgeType[]> {
+  return authApi<SourceKnowledgeType[]>('/api/knowledge-types')
+}
+
+export async function fetchSourceDepartments(): Promise<SourceDepartment[]> {
+  return authApi<SourceDepartment[]>('/api/departments')
+}
+
+export async function fetchSources(input: {
+  search?: string
+  status?: string
+  page?: number
+  pageSize?: number
+} = {}): Promise<SourceOperationsPage> {
+  const params = new URLSearchParams({
+    page: String(input.page ?? 1),
+    page_size: String(input.pageSize ?? 20),
+  })
+  if (input.search?.trim()) params.set('search', input.search.trim())
+  if (input.status?.trim()) params.set('status', input.status.trim())
+  return authApi<SourceOperationsPage>(`/api/sources?${params.toString()}`)
+}
+
+export async function uploadSource(input: {
+  file: File
+  language: SourceLanguage
+  title?: string
+  knowledgeTypeId?: string
+  departmentIds?: string[]
+  scopeType?: SourceScopeType
+  scopeId?: string
+  preserveVerbatim?: boolean
+}): Promise<SourceRecord> {
+  const body = new FormData()
+  body.set('file', input.file)
+  body.set('language', input.language)
+  if (input.title?.trim()) body.set('title', input.title.trim())
+  if (input.knowledgeTypeId) body.set('knowledge_type_id', input.knowledgeTypeId)
+  if (input.departmentIds?.length) body.set('department_ids', input.departmentIds.join(','))
+  if (input.scopeType) body.set('scope_type', input.scopeType)
+  if (input.scopeId) body.set('scope_id', input.scopeId)
+  body.set('preserve_verbatim', String(input.preserveVerbatim ?? false))
+  return authApi<SourceRecord>('/api/sources/upload', { method: 'POST', body })
+}
+
+export async function addUrlSource(input: {
+  url: string
+  language: SourceLanguage
+  title?: string
+  knowledgeTypeId?: string
+  departmentIds?: string[]
+  scopeType?: SourceScopeType
+  scopeId?: string
+  preserveVerbatim?: boolean
+}): Promise<SourceRecord> {
+  return authApi<SourceRecord>('/api/sources/url', {
+    method: 'POST',
+    body: {
+      url: input.url,
+      language: input.language,
+      title: input.title?.trim() || null,
+      knowledge_type_id: input.knowledgeTypeId || null,
+      department_ids: input.departmentIds ?? [],
+      scope_type: input.scopeType ?? null,
+      scope_id: input.scopeId ?? null,
+      preserve_verbatim: input.preserveVerbatim ?? false,
+    },
+  })
+}
+
+export async function updateSourceLanguage(sourceId: string, language: SourceLanguage): Promise<SourceRecord> {
+  return authApi<SourceRecord>(`/api/sources/${encodeURIComponent(sourceId)}`, {
+    method: 'PATCH',
+    body: { language },
+  })
+}
+
+export async function fetchSourceProgress(sourceId: string): Promise<SourceProgress> {
+  return authApi<SourceProgress>(`/api/sources/${encodeURIComponent(sourceId)}/progress`)
+}
+
+export async function retrySource(sourceId: string): Promise<SourceRecord> {
+  return authApi<SourceRecord>(`/api/sources/${encodeURIComponent(sourceId)}/retry`, { method: 'POST' })
+}
+
+export async function attestSourceFreshness(sourceId: string, input: {
+  freshnessState: SourceFreshnessState
+  reason: string
+  expiresAt?: string
+}): Promise<SourceRecord> {
+  return authApi<SourceRecord>(`/api/sources/${encodeURIComponent(sourceId)}/freshness`, {
+    method: 'POST',
+    body: {
+      freshness_state: input.freshnessState,
+      reason: input.reason.trim(),
+      expires_at: input.freshnessState === 'fresh' ? input.expiresAt ?? null : null,
+    },
+  })
+}
+
+export async function fetchSourceCompilationPlan(sourceId: string): Promise<SourceCompilationPlan> {
+  return authApi<SourceCompilationPlan>(`/api/sources/${encodeURIComponent(sourceId)}/plan`)
+}
+
+export async function approveSourceExtraction(sourceId: string): Promise<{
+  status: string
+  job_id: string
+  has_images: boolean
+  token_count: number | null
+}> {
+  return authApi<{ status: string; job_id: string; has_images: boolean; token_count: number | null }>(
+    `/api/sources/${encodeURIComponent(sourceId)}/approve-extraction`,
+    { method: 'POST' },
+  )
+}
+
+export async function approveSourceCompilationPlan(sourceId: string, note?: string): Promise<{
+  approved: true
+  job_id: string
+}> {
+  return authApi<{ approved: true; job_id: string }>(`/api/sources/${encodeURIComponent(sourceId)}/plan/approve`, {
+    method: 'POST',
+    body: { note: note?.trim() || null },
+  })
+}
+
+export async function regenerateSourceCompilationPlan(sourceId: string, note: string): Promise<{
+  queued: true
+  status: string
+  job_id: string
+}> {
+  return authApi<{ queued: true; status: string; job_id: string }>(
+    `/api/sources/${encodeURIComponent(sourceId)}/plan/regenerate`,
+    { method: 'POST', body: { note: note.trim() } },
+  )
+}
+
+export async function rejectSourceCompilationPlan(sourceId: string, note: string): Promise<{
+  rejected: true
+}> {
+  return authApi<{ rejected: true }>(`/api/sources/${encodeURIComponent(sourceId)}/plan/reject`, {
+    method: 'POST',
+    body: { note: note.trim() },
+  })
 }

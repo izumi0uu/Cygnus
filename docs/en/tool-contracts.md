@@ -1,0 +1,656 @@
+# Support Brain for SaaS — Tool Contracts (Nanobot ↔ Cygnus)
+
+## 1. Purpose
+This document defines the first **target** tool-contract surface when **Nanobot** acts as the **session layer** and **Cygnus** acts as the **domain control plane**.
+
+It describes the interface shape that should stabilize over time, and should not be auto-read as “the current code already fulfills all of this.”
+
+The goal is not to write SDK code yet. The goal is to settle:
+- which capabilities Nanobot consumes
+- which capabilities must remain inside the Cygnus domain harness
+- the input/output/risk/approval boundary for each tool
+- how retrieval, review, publication, and traceability stay domain-native rather than collapsing into generic runtime behavior
+
+## 2. Boundary principles
+### 2.1 All high-risk business decisions stay in Cygnus
+Nanobot may:
+- initiate retrieval
+- initiate draft generation
+- initiate review requests
+- initiate policy validation
+- initiate publish requests
+
+Nanobot should **not**:
+- mutate business state by bypassing Cygnus
+- publish externally by bypassing approvals
+- implement audience policy on its own
+- own source-of-truth traceability on its own
+
+### 2.2 Tools return structured observations, not free-form side effects
+Every tool call must return a structured result, even when denied, timed out, blocked for approval, or missing data.
+
+### 2.3 Draft and commit stay separate
+- `propose_knowledge_object`, `update_draft_object`, and `request_review` belong to the draft side
+- `publish_knowledge_object` belongs to the commit side
+
+### 2.4 RAG belongs to Cygnus
+Object retrieval, evidence retrieval, audience filtering, and traceability should be implemented inside Cygnus.
+Nanobot only consumes the result surface.
+
+## 3. Shared context fields
+These fields can be reused across tools.
+
+### 3.1 `audience_context`
+```json
+{
+  "brand": "optional-string",
+  "product_line": "optional-string",
+  "plan_tier": "optional-string",
+  "region": "optional-string",
+  "language": "optional-string",
+  "product_version": "optional-string",
+  "visibility": "internal|external"
+}
+```
+
+### 3.2 `source_ref`
+```json
+{
+  "source_id": "string",
+  "source_type": "help_center|ticket|chat|release_note|incident|wiki|other",
+  "locator": "string"
+}
+```
+
+### 3.3 `evidence_ref`
+```json
+{
+  "evidence_id": "string",
+  "source_id": "string",
+  "excerpt_ref": "string",
+  "confidence": 0.0,
+  "freshness": "fresh|stale|unknown"
+}
+```
+
+## 4. Shared result envelope
+All tools should ideally share this top-level result shape:
+
+```json
+{
+  "status": "success|error|denied|approval_required|not_found|conflict",
+  "summary": "short human-readable summary",
+  "data": {},
+  "trace_ref": "optional-trace-or-audit-id",
+  "warnings": [],
+  "errors": []
+}
+```
+
+### 4.1 Common error codes
+- `invalid_arguments`
+- `scope_denied`
+- `approval_required`
+- `policy_violation`
+- `not_found`
+- `stale_draft`
+- `conflict_detected`
+- `trace_unavailable`
+- `result_too_large`
+- `upstream_timeout`
+
+## 5. Risk classes
+### R0 — Read only
+Pure read, no side effects.
+
+### R1 — Draft write
+Creates durable drafts or signals, or explicitly requests a governed queue transition, without making an externally visible commit.
+
+### R2 — Governance check
+Evaluates policy/review/publication readiness without publishing.
+
+### R3 — Commit / publish
+Causes real state changes or externally visible publication.
+
+## 6. Tool Group A — Retrieval
+
+## 6.1 `search_knowledge_objects`
+### Purpose
+Search existing knowledge objects using a query plus audience context.
+
+### Use when
+- a support copilot needs directly consumable objects
+- a graph must check whether a similar object already exists
+- a reviewer needs comparable objects
+
+### Do not use when
+- raw evidence is required instead of object-level knowledge
+- audience gating would be bypassed by broad search
+
+### Risk class
+`R0`
+
+### Input
+```json
+{
+  "query": "string",
+  "audience_context": {},
+  "object_types": ["answer_card", "troubleshooting_flow", "policy_rule", "known_issue_page", "escalation_route"],
+  "limit": 10,
+  "include_unpublished": false
+}
+```
+
+### Output
+```json
+{
+  "status": "success",
+  "summary": "3 matching knowledge objects found",
+  "data": {
+    "results": [
+      {
+        "object_id": "ko_123",
+        "slug": "billing-refund-policy",
+        "object_type": "policy_rule",
+        "title": "Billing Refund Policy",
+        "audience_match": "exact|partial",
+        "freshness": "fresh|stale|unknown",
+        "publication_status": "published|draft|archived",
+        "snippet": "short summary",
+        "trace_ref": "trace_abc"
+      }
+    ]
+  }
+}
+```
+
+## 6.2 `read_knowledge_object`
+### Purpose
+Read the full detail of a single knowledge object.
+
+### Risk class
+`R0`
+
+### Input
+```json
+{
+  "id_or_slug": "string",
+  "include_variants": true,
+  "include_trace": true
+}
+```
+
+### Output highlights
+- canonical content
+- audience variants
+- status / version
+- source trace summary
+- allowed channels
+
+## 6.3 `search_support_evidence`
+### Purpose
+Search raw or normalized support evidence rather than final knowledge objects.
+
+### Risk class
+`R0`
+
+### Input
+```json
+{
+  "query": "string",
+  "filters": {
+    "source_type": "optional-string",
+    "product_line": "optional-string",
+    "region": "optional-string",
+    "product_version": "optional-string"
+  },
+  "limit": 10
+}
+```
+
+### Output highlights
+- evidence excerpt refs
+- source refs
+- freshness markers
+- confidence signals
+
+## 6.4 `get_source_trace`
+### Purpose
+Return the evidence trace chain for a knowledge object.
+
+### Risk class
+`R0`
+
+### Input
+```json
+{
+  "object_id": "string"
+}
+```
+
+### Output highlights
+```json
+{
+  "status": "success",
+  "data": {
+    "object_id": "ko_123",
+    "version": 4,
+    "evidence_refs": [],
+    "publication_records": [],
+    "review_history_summary": []
+  }
+}
+```
+
+## 7. Tool Group B — Draft / Review
+
+## 7.1 `propose_knowledge_object`
+### Purpose
+Generate a draft knowledge object from evidence, ticket clusters, or operator input.
+
+### Risk class
+`R1`
+
+### Input
+```json
+{
+  "proposed_object_type": "answer_card|troubleshooting_flow|policy_rule|known_issue_page|escalation_route|auto",
+  "title": "string",
+  "input_summary": "string",
+  "audience_context": {},
+  "source_refs": [],
+  "evidence_refs": [],
+  "ticket_cluster_ref": "optional-string"
+}
+```
+
+### Output highlights
+- `draft_id`
+- inferred object type
+- draft completeness score
+- missing evidence warnings
+- next recommended step
+
+## 7.2 `update_draft_object`
+### Purpose
+Update a draft object without publishing it.
+
+### Risk class
+`R1`
+
+### Input
+```json
+{
+  "draft_id": "string",
+  "expected_version": 1,
+  "patch": {
+    "title": "optional-string",
+    "content": "optional-string",
+    "audience_variants": [],
+    "linked_evidence_refs": []
+  }
+}
+```
+
+### Output highlights
+- updated draft version
+- changed fields summary
+- validation warnings
+
+## 7.3 `request_review`
+### Purpose
+Submit a draft into the review queue.
+
+### Risk class
+`R1`
+
+### Input
+```json
+{
+  "draft_id": "string",
+  "review_type": "content|policy|compliance|publish_readiness",
+  "expected_version": 2,
+  "notes": "optional-string"
+}
+```
+
+### Output highlights
+- review request id
+- current queue state
+- expected reviewer role
+
+## 7.4 `read_review_feedback`
+### Purpose
+Read review feedback for a draft.
+
+### Risk class
+`R0`
+
+### Input
+```json
+{
+  "draft_id": "string"
+}
+```
+
+### Output highlights
+- review status
+- reviewer notes
+- blocking issues
+- approval state
+
+### Current durable concurrency behavior
+`propose_knowledge_object` now persists a real `WikiPageDraft` in `draft` state and returns `draft_version`. Both `update_draft_object` and `request_review` require that current integer as `expected_version`; stale writes return `conflict` / `stale_draft`. A successful review request moves the durable draft into `in_review` through the append-only ledger and can replay only the identical request.
+
+## 8. Tool Group C — Governance
+
+## 8.1 `validate_publish_policy`
+### Purpose
+Check audience, visibility, and policy readiness before a real publish.
+
+### Risk class
+`R2`
+
+### Input
+```json
+{
+  "draft_id": "string",
+  "target_channel": "internal_copilot|internal_mcp|external_help_center|future_customer_answer_engine",
+  "audience_context": {}
+}
+```
+
+### Output highlights
+```json
+{
+  "status": "success|denied|approval_required",
+  "data": {
+    "allowed": true,
+    "policy_checks": [
+      {
+        "name": "visibility_scope",
+        "result": "pass|fail|approval_required",
+        "reason": "string"
+      }
+    ]
+  }
+}
+```
+
+## 8.2 `publish_knowledge_object`
+### Purpose
+Publish a draft to a target channel.
+
+### Risk class
+`R3`
+
+### Current durable input
+```json
+{
+  "draft_id": "string",
+  "approval_ref": "string",
+  "command_id": "string",
+  "action_key": "publish|republish|restrict_publish|hold_external|republish_internal_only",
+  "target_channels": ["internal_copilot", "internal_mcp"],
+  "expected_version": 7
+}
+```
+
+`expected_version` is the object-level optimistic-concurrency guard; publish checks it again against the locked current `WikiPage`. A replay with an already committed `command_id` still returns the original publication first.
+
+### Permission rule
+- `validate_publish_policy` is a request-scoped read-only check; callers only receive draft/object results inside their governed scope.
+- `publish_knowledge_object` is administrator-only and requires a real approval ledger event.
+- External and policy/regulated publication remains subject to stricter audience bindings and approval rules; the adapter never widens them.
+
+### Output highlights
+- `persisted:true`, `rehearsal:false`
+- publication record id, ledger event id, approval ref, and command id
+- published object/version and effective bindings
+- explicit propagation state for every target surface
+
+### Current persistence boundary
+- Only an approved `WikiPageDraft` materialized as a typed support object, with every evidence source in `ready`, may enter durable publish.
+- `command_id` is the idempotency key: replay of the same request returns the original publication, while reuse with a different payload is rejected.
+- The durable transaction writes the append-only governance event, immutable publication record, and one propagation row per target surface together.
+- Propagation must begin as `pending`; only an explicit later update with `expected_version` may record `synced`, `failed`, or `manual_action_required`.
+- Fixture-backed calls that provide only `object_ref` remain rehearsals and must return `persisted:false`, `rehearsal:true`; they are not production publication.
+- Durable write/read HTTP surfaces remain admin-gated in the current slice; broader scoped write permissions are not inferred here.
+
+## 8.3 `list_drift_alerts`
+### Purpose
+Read current durable release and incident drift alerts without turning an empty or incomplete observation into a no-risk claim.
+
+### Risk class
+`R0`
+
+### Input
+```json
+{
+  "filters": {
+    "object_type": "optional-supported-knowledge-object-type",
+    "severity": "medium|high|urgent",
+    "channel": "optional-nonblank-string"
+  },
+  "limit": 20
+}
+```
+
+`filters` accepts only the three optional keys above. Every supplied value must be a nonblank string; unknown keys, invalid object types or severities, booleans, non-objects, and limits outside integer `1..50` return a structured `invalid` envelope.
+
+### Output highlights
+- `status`, `summary`, `warnings`, and `errors`, plus normalized `data.filters`, applied `data.limit`, `data.observation`, and `data.alerts`
+- each alert carries durable signal/object refs and types, title, compiled proposal urgency as `severity`, reason, summary, affected audience filters and surfaces, existing suggested actions, freshness, `observed_at`, and `trace_ref=governance-signal:{signal_ref}`
+- alerts retain durable `observed_at DESC, signal_ref` order; filters do not reorder them and `limit` applies only after filtering
+
+### Scope and coverage boundary
+- Runtime MCP resolves the bearer identity to the current `Employee`, then loads active release/incident `GovernanceSignal` rows through the existing SQL scope and order inside that request's DB session.
+- Inline audience filters are durable truth. Binding-backed rows batch-resolve only active, permission-visible bindings; the binding must match the signal's `page_id` and `object_ref`. Unresolved or mismatched rows are omitted and return `partial` observation coverage with `audience_binding_resolution`, never a leaked alert.
+- A complete scoped query with no matching rows is `ready` with `observed_count:0`. `unavailable` is reserved for an explicit no-coverage provider result. Provider, DB, or serialization exceptions propagate rather than becoming empty success or unavailable responses.
+
+## 8.4 `record_feedback_signal`
+### Purpose
+Record authenticated consumption feedback as a durable fact and, for the two routed signal types, create a durable route that a bounded feedback worker may claim and execute. CYG-118 froze the routing as replay-safe durable queued intent; CYG-119 adds the execution lifecycle (`queued / running / completed / blocked / failed`) with bounded claim/recovery. `queued` never means review or refresh work is complete, and `completed` proves only that the route materialized a durable outcome governance signal into governed review truth.
+
+### Risk class
+`R1`
+
+### Input
+```json
+{
+  "command_id": "string",
+  "signal_type": "answer_accepted|human_rewrite|escalated|low_rating|unsupported_answer|stale_answer",
+  "object_id": "optional-string",
+  "draft_id": "optional-uuid",
+  "audience_context": {
+    "visibility": "internal|external"
+  },
+  "notes": "optional-string",
+  "source_context_ref": "optional-string"
+}
+```
+- `command_id` is required, nonblank, and at most 220 characters.
+- When provided, `object_id` must be the exact canonical immutable governed object ref `ko-page-<WikiPage UUID>` returned by governed retrieval. The resolver parses that UUID and applies the current actor's SQL read scope to `WikiPage.id`; it never falls back to a mutable slug.
+
+### Output and truth boundary
+
+- The accepted signal types are fixed to `answer_accepted`, `human_rewrite`, `escalated`, `low_rating`, `unsupported_answer`, and `stale_answer`.
+- `GovernanceFeedbackSignal.command_id` is globally unique. Each signal stores a 64-character `request_fingerprint` over the normalized payload and authenticated actor; a distinct command ID remains a distinct feedback signal even when its payload repeats.
+- After syntactic validation, command binding is checked before governed resource lookup. An exact replay with the same `command_id`, normalized payload, and authenticated actor returns the existing signal and route, if any, without creating a signal, route, or audit row; reuse with a different normalized payload or actor returns structured `conflict` and performs no writes. Only an unbound command resolves object/draft refs, so hidden or absent refs on a new command still return `not_found` without resource disclosure. Replay is not a frozen byte-for-byte response snapshot: it preserves the same signal/route identity while projecting the route's current durable lifecycle, so a later exact replay may truthfully show `completed`, `blocked`, or `failed` without creating duplicate truth.
+- A new call stages the original `GovernanceFeedbackSignal`, one mapped route when applicable, and exactly one runtime mutation `AuditLog` entry in the same caller-owned transaction. The feedback persistence owner only flushes and never commits; the caller commits all of them or rolls all of them back. Exact replay creates no duplicate audit.
+- `GovernanceFeedbackRoute` is the only durable queue truth. It is unique on `(feedback_signal_id, route_kind)`; `route_kind` is `review|refresh` and `lifecycle_state` starts as `queued`. The mapping is frozen: `low_rating` → queued `review`, `stale_answer` → queued `refresh`, and every other accepted type → no route and `recorded_only`. The ownership migration backfills the same mapping for durable feedback signals that predate the route table.
+- Routed responses expose `route_id`, `route_ref` in the form `feedback-route:{uuid}`, `route_kind`, `route_state` across the lifecycle (`queued|running|completed|blocked|failed`), and `routing_state` as `<route_kind>_<route_state>` (`review_queued|review_running|review_completed|review_blocked|review_failed` or the `refresh_*` equivalents); exactly one of `review_queued` and `refresh_queued` is `true` only while the route state is `queued`, and both queue flags are false for `running`, `completed`, `blocked`, and `failed`.
+- Non-routed responses expose `route_id:null`, `route_ref:null`, `route_kind:null`, `route_state:null`, `routing_state:"recorded_only"`, `review_queued:false`, and `refresh_queued:false`.
+- `actor_id` and resolved `page_id` / `draft_id` are `RESTRICT` foreign keys. `object_id` and `source_context_ref` are stored context rather than database foreign keys; `source_context_ref` is not resolved to a `Source` row.
+- `persisted:true` and `rehearsal:false`; `trace_ref` identifies the durable feedback row, while the route fields identify the durable route row. Neither claims downstream work has completed.
+- Hidden or absent object/draft refs, and noncanonical object refs, share a structured `not_found`; conflicting object/draft refs return structured `conflict` without resource disclosure or a write.
+
+#### Route execution lifecycle (CYG-119)
+- CYG-118 fixed the replay-safe queue-intent seam above; CYG-119 adds bounded execution on top of it. `GovernanceFeedbackRoute.lifecycle_state` advances through `queued / running / completed / blocked / failed`: a worker claims due routes (up to `limit=25`) under a 60s lease, retryable failures return the route to `queued` (at most 3 attempts, 30s base retry), and routes whose target object is missing, draft-only, or ineligible for governed review end in `blocked` without guessing at a target.
+- The durable route row carries `attempt_count`, `next_attempt_at`, `lease_token`, `lease_expires_at`, `outcome_signal_id`, `terminal_reason`, `last_error`, and `completed_at`. Every mutation only flushes; the caller owns the commit. The worker wrapper commits the claim first, then each execution or failure in its own transaction.
+- A completed route materializes a durable outcome `GovernanceSignal` whose signal identity is exactly `route_ref=feedback-route:<route UUID>` on the `feedback` and `review_queue` surfaces; the durable route row stores `outcome_signal_id`, and responses project `outcome_signal_ref=governance-signal:<signal UUID>` from that ID (a response projection, not a stored column). `low_rating` materializes as review pressure (`ticket_pressure`, unknown freshness) and `stale_answer` as suspected freshness/drift review (`drift`, stale freshness). Deriving these outcome signals is worker-owned: feedback-derived types cannot be created through the admin write endpoint, while the admin read endpoint can observe worker-created rows. Route execution does not log raw `source_context` or `notes` payloads.
+- Execution never auto-changes knowledge content and never publishes. Route completion proves materialization into governed review truth only — not reviewer action, draft creation, publication, downstream propagation, KPI improvement, or business impact.
+
+## 8.5 Governance audit read surface
+### Purpose
+Read durable review, approval, publish, and recovery transitions from append-only `GovernanceLedgerEvent` truth so human governance workbenches and controlled clients can trace one change.
+
+### Risk class
+`R0`
+
+### Current HTTP surface
+- `GET /api/governance/audit`
+- `GET /api/governance/audit/{event_id}`
+- The list accepts `phase`, `event_type`, `draft_id`, `page_id`, and `actor_id` filters plus `page` / `page_size` pagination; `page_size` is capped at `100`.
+- This authenticated HTTP read surface remains separate from the shared twelve-tool Runtime MCP/session ready contract; it adds no tool definition.
+
+### Output highlights
+- `event_id` and stable `trace_ref=governance-event:{event_id}`
+- `phase` (`review|approval|publish|recovery`) and the original ledger `event_type`
+- `from_state` / `to_state`, actor, draft/page/object references, scope, reason, and timestamps
+- event-type allowlisted `details` only; never the complete ledger payload, request fingerprints, or internal execution results
+- list `total`, pagination fields, and `SurfaceObservation`
+
+### Permission and truth boundary
+- Filter in SQL inside the current user's Wiki read scope before projection: admin / `wiki:read:all` may read all rows, while `wiki:read:own_dept` sees only global and member-department truth.
+- A create draft without a materialized page uses `suggested_metadata.scope_type/scope_id` for the same scope decision; a user without Wiki read permission receives an empty result.
+- A missing or out-of-scope detail uses the same `404`, preventing hidden-ID disclosure.
+- Data comes only from the durable governance ledger; never fall back to runtime `AuditLog`, `sample_*` fixtures, or session memory.
+- `persisted:true` / `rehearsal:false` on an audit item or list proves that the ledger event itself is durable. It does not claim the knowledge object is published or propagation is complete.
+- No matching in-scope events still yields a `ready` observation with `observed_count:0`; this is a truthful empty query, not `unavailable`.
+## 8.6 Durable recipient notification inbox
+### Purpose
+Read in-app notifications produced by governance lifecycles and advance unread → read state inside the current recipient scope.
+
+### Current HTTP surface
+- `GET /api/notifications?lifecycle_state=unread|read`: paginated durable records for the current user.
+- `GET /api/notifications/unread-count`: the current user's durable unread count.
+- `POST /api/notifications/{notification_id}/read`: idempotently advances a record owned by the current user to `read`.
+- `POST /api/notifications/read-all`: advances only the current user's unread records.
+
+### Truth and lifecycle
+- The `Notification` table is migration-owned by Alembic revision `20260809_01`; local `create_all` is only a compatibility aid for an already-existing development schema.
+- `read_at IS NULL` projects to `lifecycle_state=unread`; a non-null value projects to `read`. This slice has no implicit dismiss or unread reversal.
+- Every response includes `trace_ref=notification:{id}` and `persisted:true`. That proves the notification record is durable, not that external email/webhook delivery succeeded.
+- External fan-out must run after the response transaction commits and reload the still-existing notification IDs in a fresh session; rolled-back records must not be sent.
+- Every list / count / transition query includes `recipient_id=current_user.id`; absent and another-user records share `404`, preventing cross-user ID disclosure.
+- This runtime HTTP inbox remains separate from the shared twelve-tool Runtime MCP/session ready contract; it adds no tool definition.
+
+
+
+## 9. First-pass approval and permission matrix (target-state guidance, not proof of full implementation)
+| Tool | Risk | Default policy |
+|---|---:|---|
+| `search_knowledge_objects` | R0 | auto-allow in scope |
+| `read_knowledge_object` | R0 | auto-allow in scope |
+| `search_support_evidence` | R0 | auto-allow in scope |
+| `get_source_trace` | R0 | auto-allow in scope |
+| `propose_knowledge_object` | R1 | auto-allow into draft scope |
+| `update_draft_object` | R1 | auto-allow with audit |
+| `request_review` | R1 | auto-allow |
+| `read_review_feedback` | R0 | auto-allow in scope |
+| `validate_publish_policy` | R2 | auto-allow |
+| `publish_knowledge_object` | R3 | low-risk internal may pass; external defaults to approval |
+| `list_drift_alerts` | R0 | auto-allow |
+| `record_feedback_signal` | R1 | auto-allow with audit |
+
+## 10. Result-size and timeout guidance
+### Result size
+- retrieval results should default to summaries
+- large content should be re-read via ids or trace refs
+- do not push full large objects into live session context by default
+
+### Timeouts
+- retrieval: 5-10s
+- draft/review queue writes: 10-15s
+- publish validation: 10s
+- publish commit: 15-30s
+
+## 11. Relationship to internal workflow orchestration
+These tools are the stable interface between the **Nanobot session runtime** and the **Cygnus domain control plane**.
+
+Internal workflow orchestration should not replace these tools. Instead, any future Cygnus governance orchestration should run across the same business phases, such as:
+- creation workflow: `propose_knowledge_object` -> `request_review` -> `validate_publish_policy` -> `publish_knowledge_object`
+- freshness workflow: `list_drift_alerts` -> `search_support_evidence` -> `update_draft_object` -> `request_review`
+
+## 12. First-pass success criteria
+This contract succeeds first as a **boundary definition**, not as proof that every write path is already product-complete.
+
+It is successful if:
+- the Nanobot–Cygnus boundary is stable
+- draft, review, and publish are clearly separated
+- RAG remains inside Cygnus
+- high-risk publication is still expected to remain under Cygnus domain rules
+- later workflow orchestration, eval, and UI work can grow on top of the same contract surface
+
+## 13. Current implementation status (reconciled with code)
+This section reconciles `cygnus/integrations/nanobot_tools.py`, `cygnus/integrations/governed_draft_review_tools.py`, `cygnus/integrations/governed_publish_tools.py`, `cygnus/integrations/governed_drift_tools.py`, and `cygnus/integrations/governed_feedback_tools.py`, plus the CYG-119 route-execution module `cygnus/governance/feedback_execution.py` and the CYG-120 operations-read module `cygnus/governance/feedback_operations.py`. It explicitly separates:
+- the **target contract** above
+- the **currently callable durable interface** below
+- the replay-safe durable feedback-routing boundary implemented by CYG-118, the bounded route-execution lifecycle implemented by CYG-119, and the scoped operations reads and structured worker-outcome events implemented by CYG-120
+
+### 13.1 Capabilities actually fulfilled today
+- **Group A — Retrieval (4/4):** `search_knowledge_objects`, `read_knowledge_object`, `search_support_evidence`, and `get_source_trace` use the substrate-backed, request-scoped governed retrieval surface.
+- **Group B — Draft/Review (4/4):** `propose_knowledge_object`, `update_draft_object`, `request_review`, and `read_review_feedback` use the durable `WikiPageDraft` lifecycle, review queue, source/evidence metadata, ledger events, notification path, and scoped review feedback truth.
+- **Group C — Governance (4/4):** `validate_publish_policy` and `publish_knowledge_object` use durable draft, approval, audience-binding, and publication services; `list_drift_alerts` reads scoped durable release/incident signal truth with explicit observation coverage; `record_feedback_signal` writes replay-safe durable consumption-feedback truth and the frozen `low_rating`/`stale_answer` route mapping, which CYG-119's bounded worker executes into durable outcome governance signals whose identity is `feedback-route:<uuid>` on the feedback/review-queue surfaces without auto-changing content or publishing.
+
+### 13.2 Implemented durable feedback-routing seam (CYG-118 scope)
+The bullets below describe the CYG-118 queue-intent slice: the replay-safe signal and frozen route mapping, with no worker or consumer yet executing routes. CYG-119's bounded execution lifecycle is documented in 13.2.1.
+- `record_feedback_signal` is an authenticated R1 request-scoped adapter backed by dedicated `GovernanceFeedbackSignal`; it accepts only the six fixed consumption-feedback types and never overloads `GovernanceSignal` pressure facts or fixture observations.
+- `GovernanceFeedbackSignal` owns a globally unique `command_id` and 64-character `request_fingerprint`. An exact replay with the same `command_id`, normalized payload, and actor returns the existing signal and route; reusing the command ID with either the normalized payload or actor changed returns `conflict` without writes, while a new command ID is distinct feedback.
+- The caller-owned transaction stages the original feedback row, the mapped route when applicable, and exactly one runtime mutation `AuditLog`; the persistence owner only flushes. Exact replay creates no duplicate audit. Object and draft refs resolve through SQL Wiki scope before projection; hidden, absent, or ambiguous refs share `not_found`, and mismatched refs return `conflict` without disclosure or writes.
+- `GovernanceFeedbackRoute` is the only durable queue truth, unique on `(feedback_signal_id, route_kind)`, with `review|refresh` kind and `queued` lifecycle. The frozen mapping is `low_rating` → `review`, `stale_answer` → `refresh`, and every other accepted type → `recorded_only`. Routed results expose the queued route fields and exactly one queue flag; non-routed results expose null route fields and both flags false. No feedback worker or consumer is introduced, and queued intent never claims completed review or refresh.
+
+### 13.2.1 Implemented durable feedback-route execution (CYG-119)
+- The core execution module is `cygnus/governance/feedback_execution.py`, exporting `FeedbackRouteClaim`, `FeedbackRouteLeaseLost`, `claim_feedback_routes(session, *, now=None, limit=25)`, `execute_feedback_route(session, claim, *, now=None)`, and `record_feedback_route_failure(session, claim, *, error, now=None)`. Exact command replay preserves the same signal/route identity and projects the route's current durable lifecycle (a later replay may truthfully return `completed`, `blocked`, or `failed`) without creating duplicate signal, route, or audit truth.
+- Route states are `queued`, `running`, `completed`, `blocked`, and `failed`. A worker claims up to `limit=25` due routes under a 60s lease; a lost lease raises `FeedbackRouteLeaseLost` instead of racing. Unexpected worker execution failures return the route to `queued` with bounded backoff until the third attempt; after the third unsuccessful attempt the route ends `failed` with `terminal_reason` and `last_error`. Routes whose target object is missing, draft-only, or ineligible for governed review end `blocked` without guessing at a target.
+- The durable route row carries `attempt_count`, `next_attempt_at`, `lease_token`, `lease_expires_at`, `outcome_signal_id`, `terminal_reason`, `last_error`, and `completed_at`. Every mutation only flushes; the caller owns the commit, and the worker wrapper commits the claim first, then each execution or failure in its own transaction.
+- A completed route materializes a durable outcome `GovernanceSignal` whose signal identity is exactly `route_ref=feedback-route:<route UUID>` on the `feedback` and `review_queue` surfaces; the durable route row stores `outcome_signal_id`, and responses project `outcome_signal_ref=governance-signal:<signal UUID>` from that ID (a response projection, not a stored column). `low_rating` materializes as review pressure (`ticket_pressure`, unknown freshness) and `stale_answer` as suspected freshness/drift review (`drift`, stale freshness). Deriving these outcome signals is worker-owned: feedback-derived types cannot be created through the admin write endpoint, while the admin read endpoint can observe worker-created rows. Route execution does not log raw `source_context` or `notes` payloads. `routing_state` follows `<route_kind>_<route_state>` across the lifecycle (`review_running`, `review_completed`, etc.); exactly one queue flag is true while the route is `queued`, according to its route kind, and both queue flags are false for all other route states.
+- Execution never auto-changes knowledge content and never publishes. Route completion proves materialization into governed review truth only — not reviewer action, draft creation, publication, downstream propagation, KPI improvement, or business impact.
+
+### 13.2.2 Implemented feedback-route operational truth (CYG-120)
+- `GET /api/governance/feedback-routes` is an authenticated, SQL-first R0 operations read. It filters by the current user's Wiki page/draft read scope before projection, accepts `route_state`, `route_kind`, `page`, and `page_size<=100`, and orders deterministically by `updated_at DESC, id DESC`. Its visible-row summary includes state/kind counts, oldest due queued age, expired running leases, retry distribution, completion latency, and stable blocked/failed terminal-reason counts.
+- `GET /api/governance/feedback-routes/{route_id}` applies the same SQL scope; hidden and absent routes return the same `404`. A visible drilldown links only the originating feedback ref, durable route, outcome governance signal, current review assignment, and relevant audit trace. It does not expose `last_error`, `notes`, or `source_context_ref`.
+- After the claim transaction commits, the worker emits `claimed|lease_recovered|failed`; after an execution/failure transaction commits or rolls back it emits `completed|blocked|retry_scheduled|failed|lease_lost|execution_error|failure_recording_error`. The event allowlist is limited to event, route ID/kind, transition, attempt count, duration, outcome ref, stable terminal reason, and exception class. Exception text and customer/source payload are never recorded.
+- Operational `completed` and worker-outcome events prove route progress or materialized outcome truth only. They do not prove reviewer action, draft creation, publication, propagation, KPI improvement, or business impact. This slice adds no manual retry/requeue mutation and no second queue or session loop.
+
+### 13.3 Implemented durable draft/review seam
+- `propose_knowledge_object` creates a typed create-kind `WikiPageDraft` in durable `draft` state, records only `proposal_created`, and stores the proposed object type, audience context, source refs, evidence refs, and source IDs for later materialization.
+- `update_draft_object` is author/admin scoped and version-checked. It never publishes; a revision after `needs_revision` returns to durable `draft`, increments the draft content version, snapshots the prior round, and appends `draft_updated`.
+- `request_review` is author/admin scoped and version-checked. It transitions `draft -> in_review` through `review_requested`, writes a unique durable pre-review outbox intent keyed by `(draft_id, draft_version, revision_round)`, and lets request middleware only accelerate delivery; worker startup/cron recovery drains committed intents with deterministic ARQ job IDs and rejects jobs without both revision fields, while stale, config-disabled, and retry-exhausted outcomes remain explicit terminal state. Replays only an identical ledger request for the same draft revision.
+- `read_review_feedback` scopes the draft in SQL before projection, then exposes review state, durable feedback, blocking issues, approval ref, and review-event history only to the author, an eligible reviewer, or an administrator. Hidden and absent draft/source IDs both return `not_found` without resource details.
+
+### 13.4 Implemented durable publish seam
+- `validate_publish_policy` is a request-scoped read adapter. It reloads the current draft, typed object, approval ledger, ready sources, active audience bindings, and optional audience/version conditions; out-of-scope objects are returned as structured `not_found`.
+- `publish_knowledge_object` only constructs `DurablePublishCommand` and delegates to `cygnus/publish/durable.py`; the existing governance kernel remains authoritative for admin and approval gates, source readiness, bindings, locks, idempotency, ledger, publication, and propagation.
+- Success and replay preserve `persisted:true`, `rehearsal:false`, publication/ledger/approval/command IDs, and propagation records. Publish success never implies downstream sync; initial propagation remains `pending`.
+- `expected_version` is checked in both the adapter and the locked durable core to prevent stale writes. Reusing a `command_id` returns the original publication; changing the payload returns a conflict.
+
+### 13.4.1 Implemented durable drift-alert seam
+- `list_drift_alerts` is a request-scoped R0 adapter over active durable release/incident `GovernanceSignal` truth. It preserves SQL-scoped provider ordering, validates only `object_type` / `severity` / `channel` filters and an integer `limit` from `1..50`, and applies the limit after filtering.
+- Inline audiences remain direct durable truth. Binding-backed rows resolve active visible bindings in one batch and must match the persisted `page_id` and `object_ref`; unresolved rows are omitted with explicit `partial` `audience_binding_resolution` coverage, not leaked or recast as empty healthy truth.
+- A complete empty query remains `ready`; `unavailable` is only an explicit no-coverage provider state. Provider failures propagate instead of becoming empty success or unavailable envelopes.
+
+### 13.5 Boundary reminder
+This seam does not create a second session loop or memory store. Nanobot still owns session continuity and the general-purpose loop; Cygnus owns typed draft versions, review state, permission checks, audit events, source/evidence traceability, approval truth, and publication decisions.
+
+### 13.6 Implemented governed-observation boundary (CYG-97, CYG-101–104, CYG-108, CYG-114)
+`/api/command-center`, `/api/review-intake`, `/api/drift`, and `/api/source-blindness` now read from a request-scoped, permission-filtered `GovernanceReadSnapshot`; those runtime paths must not implicitly call `sample_*` fixtures.
+
+- Every governance-risk surface returns `observation`: `ready` means complete coverage, `partial` names both covered and missing detectors, and `unavailable` means a detector is not connected—not that there is no risk. Reasons and signals are machine codes rendered through client i18n.
+- Without a complete proposal bundle, Review Queue, drift, and source-blindness contexts must be empty and offer no governance command. Ordinary `WikiPageDraft` rows must not be projected into an owner, audience, surface, or risk.
+- A `Source.status="error"` row remains a source-failure fact, but the CYG-108 provider now projects impact inside the same request permission scope through visible `WikiPage.source_ids`, active audience bindings, and each object's latest durable publication and propagation. `impact_state="mapped"` means at least one visible Wiki relationship exists; `unmapped` means no governed Wiki impact is mapped in the current scope, not that there is no business impact. `audience_impacts` and `propagation_impacts` may come only from those persisted records; a raw source row cannot imply an owner, risk rank, or executable command.
+- The Sources Evidence client renders returned source-failure facts, complete-risk contexts, and durable mapped/unmapped impact fields directly. It must not infer watched or healthy counts through client-side subtraction, and neither `unmapped` nor an incomplete empty result is a health claim.
+- `/api/recovery/overview`, `/api/recovery/window/{command_id}`, and `/api/recovery/downstream-reality-check/{command_id}` read permission-scoped persisted publication / propagation truth and return `persisted: true, rehearsal: false`; they do not fall back to rehearsal fixtures.
+
+CYG-101–104 and CYG-108 connect ticket/rewrite pressure, release/incident drift, audience conflict, review assignment, and source impact to persisted or persistently derived providers. A surface may return `ready` only after its detectors run completely with no unresolved relationship; an unresolved audience binding still requires `partial`, and provider failures must surface as `5xx` rather than an empty array or green UI.
+
+### 13.7 Implemented governed session seam (CYG-92–96)
+Nanobot can now hand `request_ref`, optional `session_ref`, the support query, `audience_context`, and an optional prior `governance_context` to Cygnus through `POST /api/session-bridge/query`. Cygnus reloads the substrate-backed knowledge snapshot inside the request permission scope and returns one envelope containing `answer`, `source_trace`, `tool_trace`, `governance`, `continuity`, and the next portable `governance_context`.
+
+- `GET /api/session-bridge/capabilities` and Runtime MCP consume the same shared adapter-definition contract and mark exactly twelve governed tools `ready` with `not_exposed:[]`: `search_knowledge_objects`, `read_knowledge_object`, `search_support_evidence`, `get_source_trace`, `list_drift_alerts`, `propose_knowledge_object`, `update_draft_object`, `request_review`, `read_review_feedback`, `record_feedback_signal`, `validate_publish_policy`, and `publish_knowledge_object`.
+- Runtime MCP uses authenticated visibility gates for `list_drift_alerts`, `read_review_feedback`, and `record_feedback_signal`, contributor gates for the three R1 draft/review writes, and an administrator gate for publication. For new feedback, the caller-owned transaction stages the signal, any mapped route, and one runtime audit; an exact replay returns the existing durable result without a duplicate audit. A queued feedback route is claimable intent: CYG-119's bounded worker executes it through `queued / running / completed / blocked / failed`, and completion proves materialization into governed review truth only — never reviewer action, draft creation, publication, downstream propagation, KPI improvement, or business impact.
+- Audience mismatch, pending review, stale or unknown freshness, source blindness, and no match all return structured governance states. They converge to `restricted`, `escalate`, or `fallback` rather than fabricating an externally usable answer.
+- Continuity re-queries Cygnus truth on every turn. An audience, object, version, trace, or freshness change invalidates the prior context; an unchanged context is only `revalidated`, and the response always carries `session_memory_used_as_truth:false`.
+
+This seam adds no second session loop or memory store inside Cygnus. Nanobot still owns the session; Cygnus owns knowledge, retrieval, and governance decisions.

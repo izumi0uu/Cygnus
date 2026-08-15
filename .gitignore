@@ -2,13 +2,16 @@
 AGENTS.md
 CLAUDE.md
 .codex/
+!.codex/
+.codex/*
+!.codex/skills/
+.codex/skills/*
+!.codex/skills/cygnus-jira-execution/
+.codex/skills/cygnus-jira-execution/*
+!.codex/skills/cygnus-jira-execution/SKILL.md
 .claude/
-
-# Local product documentation drafts
-DESIGN.md
-docs/
-README.md
-frontend/README.md
+.cursor/
+.trellis/
 
 # Local test/runtime cache
 __pycache__/
@@ -17,6 +20,14 @@ __pycache__/
 # Local env (secrets) — the .env.example template is tracked, real .env is not
 .env
 .env.local
+.env.docker.local
+
+# Production deployment (CYG-128) — templates/examples are tracked, real values are not
+deploy/.env.prod
+deploy/.state
+deploy/releases/*.env
+deploy/production-inputs.json
+deploy/rendered/
 
 # Local prototype exports
 prototypes/
@@ -30,10 +41,9 @@ prototypes/
 frontend/public/fonts/thunder.woff2
 
 
-# Local venv / OMX state / tool caches
+# Local venv / tool caches
 .venv/
 .venv-runability/
-.omx/
 .pytest_cache/
 .uv-cache/
 .ruff_cache/

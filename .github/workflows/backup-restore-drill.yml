@@ -1,0 +1,55 @@
+name: Production backup and isolated restore drill
+
+# This workflow runs only on the protected runner/environment. It never creates
+# a placeholder backup: absent encrypted source credentials, key files, an
+# approved release identity, RPO/RTO approval references, or a disposable target
+# makes the job fail before a restore write. The release workflow invokes the
+# same checked-in command for the candidate it promotes.
+
+on:
+  schedule:
+    - cron: '17 03 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-backup-drill
+  cancel-in-progress: false
+
+jobs:
+  encrypted-backup-and-drill:
+    name: Encrypted production backup and measured isolated drill
+    runs-on: [self-hosted, cygnus-production-certification]
+    environment: production
+    timeout-minutes: 120
+    env:
+      CYGNUS_RELEASE: ${{ vars.CYGNUS_RELEASE }}
+      CYGNUS_PRODUCTION_ENV_FILE: ${{ vars.CYGNUS_PRODUCTION_ENV_FILE }}
+      CYGNUS_RELEASE_METADATA_FILE: ${{ vars.CYGNUS_RELEASE_METADATA_FILE }}
+      CYGNUS_EXPECTED_GIT_SHA: ${{ vars.CYGNUS_RELEASE_GIT_SHA }}
+      CYGNUS_EXPECTED_BACKEND_IMAGE: ${{ vars.CYGNUS_RELEASE_BACKEND_IMAGE }}
+      CYGNUS_EXPECTED_FRONTEND_IMAGE: ${{ vars.CYGNUS_RELEASE_FRONTEND_IMAGE }}
+      CYGNUS_EXPECTED_ALEMBIC_HEAD: ${{ vars.CYGNUS_RELEASE_ALEMBIC_HEAD }}
+      CYGNUS_CERTIFICATION_ARTIFACT_DIR: ${{ github.workspace }}/production/evidence
+      UV_VERSION: '0.9.11'
+    steps:
+      - name: Checkout approved certification source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - name: Install locked backup/drill dependencies
+        run: uv sync --frozen --all-extras
+      - name: Run encrypted backup and destructive isolated drill
+        run: scripts/prod/backup_restore_drill.sh
+      - name: Retain native backup/drill reports
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: production-backup-drill-${{ github.run_id }}
+          path: production/evidence/
+          retention-days: 90
+          if-no-files-found: error

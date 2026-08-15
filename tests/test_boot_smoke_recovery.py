@@ -3,9 +3,13 @@ from __future__ import annotations
 import types
 import unittest
 import uuid
+from typing import cast
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from cygnus.runtime.utils.progress import ProgressTracker
 
 
 class _HealthySession:
@@ -42,12 +46,20 @@ class _HealthyRedis:
 
 class ApiBootSmokeTests(unittest.TestCase):
     def test_fastapi_app_can_boot_with_stubbed_infra_dependencies(self) -> None:
-        from cygnus.backend import main as app_main
+        from cygnus.runtime import main as app_main
 
         with (
-            patch.object(app_main, "seed_default_admin", AsyncMock(return_value=None)) as seed_admin,
-            patch("cygnus.backend.services.storage_service.storage_service.ensure_bucket", AsyncMock(return_value=None)) as ensure_bucket,
-            patch("cygnus.backend.scripts.seed_skills.seed_builtin_skills", AsyncMock(return_value=None)) as seed_skills,
+            patch.object(
+                app_main, "seed_default_admin", AsyncMock(return_value=None)
+            ) as seed_admin,
+            patch(
+                "cygnus.runtime.services.storage_service.storage_service.ensure_bucket",
+                AsyncMock(return_value=None),
+            ) as ensure_bucket,
+            patch(
+                "cygnus.runtime.bootstrap.seed_builtin_skills.seed_builtin_skills",
+                AsyncMock(return_value=None),
+            ) as seed_skills,
         ):
             with TestClient(app_main.app) as client:
                 response = client.get("/")
@@ -58,15 +70,29 @@ class ApiBootSmokeTests(unittest.TestCase):
         ensure_bucket.assert_awaited()
         seed_skills.assert_awaited()
 
-    def test_health_routes_have_minimal_smoke_path_when_services_are_stubbed(self) -> None:
-        from cygnus.backend import main as app_main
+    def test_health_routes_have_minimal_smoke_path_when_services_are_stubbed(
+        self,
+    ) -> None:
+        from cygnus.runtime import main as app_main
 
         with (
             patch.object(app_main, "seed_default_admin", AsyncMock(return_value=None)),
-            patch("cygnus.backend.services.storage_service.storage_service.ensure_bucket", AsyncMock(return_value=None)),
-            patch("cygnus.backend.scripts.seed_skills.seed_builtin_skills", AsyncMock(return_value=None)),
-            patch("cygnus.backend.database.async_session_factory", new=_HealthySessionFactory()),
-            patch("cygnus.backend.routers.sources.get_arq_pool", new=AsyncMock(return_value=_HealthyArqPool())),
+            patch(
+                "cygnus.runtime.services.storage_service.storage_service.ensure_bucket",
+                AsyncMock(return_value=None),
+            ),
+            patch(
+                "cygnus.runtime.bootstrap.seed_builtin_skills.seed_builtin_skills",
+                AsyncMock(return_value=None),
+            ),
+            patch(
+                "cygnus.runtime.database.async_session_factory",
+                new=_HealthySessionFactory(),
+            ),
+            patch(
+                "cygnus.runtime.routers.sources.get_arq_pool",
+                new=AsyncMock(return_value=_HealthyArqPool()),
+            ),
             patch("redis.asyncio.Redis", new=_HealthyRedis),
         ):
             with TestClient(app_main.app) as client:
@@ -83,16 +109,60 @@ class ApiBootSmokeTests(unittest.TestCase):
 
 class WorkerBootSmokeTests(unittest.IsolatedAsyncioTestCase):
     async def test_worker_hooks_expose_a_bootable_contract(self) -> None:
-        from cygnus.backend.worker import WorkerSettings
+        import json
 
-        await WorkerSettings.on_startup({})
-        await WorkerSettings.on_shutdown({})
+        from cygnus.runtime.readiness import WORKER_HEARTBEAT_CONTEXT_KEY
+        from cygnus.runtime.worker import WorkerSettings
 
+        class _HeartbeatRedis:
+            def __init__(self):
+                self.sets = []
+
+            async def set(self, key, value, ex=None):
+                self.sets.append((key, value, ex))
+
+        redis = _HeartbeatRedis()
+        ctx: dict[str, object] = {"redis": redis}
+
+        with (
+            patch(
+                "cygnus.review.pre_review.dispatch.sweep_ai_pre_review_dispatches",
+                AsyncMock(return_value=0),
+            ) as sweep,
+            patch(
+                "cygnus.runtime.worker.drain_feedback_routes",
+                AsyncMock(return_value=0),
+            ) as feedback_sweep,
+        ):
+            await WorkerSettings.on_startup(ctx)
+        await WorkerSettings.on_shutdown(ctx)
+
+        sweep.assert_awaited_once()
+        feedback_sweep.assert_awaited_once()
         self.assertGreaterEqual(len(WorkerSettings.functions), 1)
         self.assertGreaterEqual(len(WorkerSettings.cron_jobs), 1)
 
+        # Heartbeat lifecycle: starting -> ready -> stopped, with a bounded TTL.
+        states = [json.loads(value)["state"] for _k, value, _ex in redis.sets]
+        self.assertEqual(states[0], "starting")
+        self.assertIn("ready", states)
+        self.assertEqual(states[-1], "stopped")
+        self.assertTrue(all(ex is not None for _k, _v, ex in redis.sets))
+        self.assertIsNotNone(ctx.get(WORKER_HEARTBEAT_CONTEXT_KEY))
+
+    async def test_worker_pre_review_cron_sweeps_durable_intents(self) -> None:
+        import cygnus.runtime.worker as worker_module
+
+        with patch(
+            "cygnus.review.pre_review.dispatch.sweep_ai_pre_review_dispatches",
+            AsyncMock(return_value=1),
+        ) as sweep:
+            await worker_module.sweep_ai_pre_review_dispatch_cron({})
+
+        sweep.assert_awaited_once()
+
     async def test_arq_pool_lazy_init_only_calls_factory_once(self) -> None:
-        import cygnus.backend.worker as worker_module
+        import cygnus.runtime.worker as worker_module
 
         fake_pool = object()
         fake_create_pool = AsyncMock(return_value=fake_pool)
@@ -110,23 +180,29 @@ class WorkerBootSmokeTests(unittest.IsolatedAsyncioTestCase):
 
 
 class MrpResumeSmokeTests(unittest.IsolatedAsyncioTestCase):
-    async def test_map_reduce_reenters_plan_review_without_rerunning_extract_phases(self) -> None:
-        import cygnus.backend.ai.mrp.pipeline as pipeline_module
+    async def test_map_reduce_reenters_plan_review_without_rerunning_extract_phases(
+        self,
+    ) -> None:
+        import cygnus.runtime.ai.mrp.pipeline as pipeline_module
 
         source_id = uuid.uuid4()
         source = types.SimpleNamespace(id=source_id, pipeline_phase="plan_review")
         plan = types.SimpleNamespace(id=uuid.uuid4(), status="pending_review")
 
         with (
-            patch.object(pipeline_module, "_load_plan", AsyncMock(return_value=plan)) as load_plan,
+            patch.object(
+                pipeline_module, "_load_plan", AsyncMock(return_value=plan)
+            ) as load_plan,
             patch.object(pipeline_module, "run_map_phase", AsyncMock()) as map_phase,
-            patch.object(pipeline_module, "run_reduce_phase", AsyncMock()) as reduce_phase,
+            patch.object(
+                pipeline_module, "run_reduce_phase", AsyncMock()
+            ) as reduce_phase,
         ):
             result = await pipeline_module.run_mrp_pipeline(
-                session=object(),
+                session=cast(AsyncSession, object()),
                 source=source,
                 full_text="full text",
-                tracker=object(),
+                tracker=cast(ProgressTracker, object()),
                 registry=object(),
                 kt_slug=None,
                 kt_name=None,
@@ -138,8 +214,10 @@ class MrpResumeSmokeTests(unittest.IsolatedAsyncioTestCase):
         map_phase.assert_not_called()
         reduce_phase.assert_not_called()
 
-    async def test_refine_pipeline_resumes_from_verify_using_persisted_page_drafts(self) -> None:
-        import cygnus.backend.ai.mrp.pipeline as pipeline_module
+    async def test_refine_pipeline_resumes_from_verify_using_persisted_page_drafts(
+        self,
+    ) -> None:
+        import cygnus.runtime.ai.mrp.pipeline as pipeline_module
 
         source_id = uuid.uuid4()
         source = types.SimpleNamespace(id=source_id, pipeline_phase="verify")
@@ -175,17 +253,25 @@ class MrpResumeSmokeTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch.object(pipeline_module, "_load_plan", AsyncMock(return_value=plan)),
-            patch.object(pipeline_module, "_load_chunk_extracts", AsyncMock(return_value=[])),
-            patch.object(pipeline_module, "_get_embedding_spec", AsyncMock(return_value=(None, None))),
-            patch.object(pipeline_module, "run_refine_phase", AsyncMock()) as refine_phase,
+            patch.object(
+                pipeline_module, "_load_chunk_extracts", AsyncMock(return_value=[])
+            ),
+            patch.object(
+                pipeline_module,
+                "_get_embedding_spec",
+                AsyncMock(return_value=(None, None)),
+            ),
+            patch.object(
+                pipeline_module, "run_refine_phase", AsyncMock()
+            ) as refine_phase,
             patch.object(pipeline_module, "run_verify_phase", verify_phase),
             patch.object(pipeline_module, "run_commit_phase", commit_phase),
         ):
             result = await pipeline_module.run_refine_pipeline(
-                session=_FakeSession(),
+                session=cast(AsyncSession, _FakeSession()),
                 source=source,
                 full_text="full text",
-                tracker=object(),
+                tracker=cast(ProgressTracker, object()),
                 registry=_FakeRegistry(),
                 kt_slug=None,
                 kt_name=None,

@@ -1,341 +1,230 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Search, Plus, Minus, Maximize2 } from 'lucide-react'
+import { Menu, Search, X } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
-import { useZoom } from '@/lib/zoom'
-import { useToast } from '@/lib/toast'
 import ThemeToggle from '@/components/ThemeToggle'
 import LangToggle from '@/components/LangToggle'
 import NotificationBell from '@/components/NotificationBell'
 import { RevisionClouds } from '@/components/RevisionClouds'
 import CommandPalette from '@/components/CommandPalette'
+import { PageSkeleton } from '@/components/Skeleton'
+import { useFocusTrap } from '@/lib/useFocusTrap'
 
-type Group = 'gov' | 'obs'
-type NavItem = { to: string; key: string; code: string; group: Group; end?: boolean; badge?: string }
+type Group = 'gov' | 'obs' | 'admin'
+type NavItem = { to: string; key: string; code: string; group: Group; end?: boolean; adminOnly?: boolean }
 
 const NAV: NavItem[] = [
   { to: '/console', key: 'overview', code: 'DWG-01', group: 'gov', end: true },
-  { to: '/console/queue', key: 'reviewQueue', code: 'SEC-A', group: 'gov', badge: '4' },
+  { to: '/console/queue', key: 'reviewQueue', code: 'SEC-A', group: 'gov' },
   { to: '/console/objects', key: 'objects', code: 'SEC-B', group: 'gov' },
   { to: '/console/sources', key: 'sources', code: 'SEC-C', group: 'gov' },
-  { to: '/console/audience', key: 'audience', code: 'SEC-D', group: 'gov' },
-  { to: '/console/drift', key: 'drift', code: 'SEC-E', group: 'obs' },
-  { to: '/console/propagation', key: 'propagation', code: 'SEC-F', group: 'obs' },
-  { to: '/console/audit', key: 'audit', code: 'SEC-G', group: 'obs' },
+  { to: '/console/tickets', key: 'ticketInsights', code: 'SEC-D', group: 'gov', adminOnly: true },
+  { to: '/console/audience', key: 'audience', code: 'SEC-E', group: 'gov' },
+  { to: '/console/copilot', key: 'copilot', code: 'SEC-I', group: 'gov' },
+  { to: '/console/drift', key: 'drift', code: 'SEC-F', group: 'obs' },
+  { to: '/console/propagation', key: 'propagation', code: 'SEC-G', group: 'obs' },
+  { to: '/console/audit', key: 'audit', code: 'SEC-H', group: 'obs' },
+  { to: '/console/employees', key: 'employees', code: 'ADM-A', group: 'admin', adminOnly: true },
+  { to: '/console/roles', key: 'roles', code: 'ADM-B', group: 'admin', adminOnly: true },
+  { to: '/console/settings', key: 'settings', code: 'ADM-C', group: 'admin', adminOnly: true },
 ]
 
-function DirGroup({ group }: { group: Group }) {
+function isNavActive(item: NavItem, pathname: string) {
+  return pathname === item.to
+    || (!item.end && pathname.startsWith(`${item.to}/`))
+    || (item.to === '/console' && pathname.startsWith('/console/recovery/'))
+}
+
+function DirGroup({ group, onNavigate, isAdmin, pathname }: { group: Group; onNavigate?: () => void; isAdmin: boolean; pathname: string }) {
   const { t } = useTranslation()
   return (
     <div>
-      <div className="bp-dir-group">{t(`nav.${group}Group`)}</div>
-      {NAV.filter((i) => i.group === group).map((item) => (
-        <NavLink
-          key={item.to}
-          to={item.to}
-          end={item.end}
-          className="bp-dir-item"
-        >
-          {({ isActive }) => (
-            <>
-              <span className="bp-dir-vis" data-active={isActive ? 'true' : 'false'} />
-              <span className="bp-dir-code">{item.code}</span>
-              <span>{t(`nav.${item.key}`)}</span>
-              {item.badge && <span className="bp-dir-badge">{item.badge}</span>}
-            </>
-          )}
-        </NavLink>
-      ))}
+      <h2 className="bp-dir-group">{t(`nav.${group}Group`)}</h2>
+      {NAV.filter((i) => i.group === group && (!i.adminOnly || isAdmin)).map((item) => {
+        const active = isNavActive(item, pathname)
+        return (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.end}
+            className={`bp-dir-item${active ? ' is-active' : ''}`}
+            data-active={active ? 'true' : 'false'}
+            aria-current={active ? 'page' : undefined}
+            onClick={onNavigate}
+          >
+            <span className="bp-dir-vis" aria-hidden="true" />
+            <span className="bp-dir-code">{item.code}</span>
+            <span>{t(`nav.${item.key}`)}</span>
+          </NavLink>
+        )
+      })}
     </div>
   )
 }
 
-// Dynamic grid background — grid size scales with zoom level
-function CanvasGrid({ zoom }: { zoom: number }) {
-  const major = 80 * zoom
-  const minor = 20 * zoom
-  return (
-    <div
-      className="bp-canvas-grid"
-      style={{
-        backgroundImage: `
-          linear-gradient(color-mix(in srgb, var(--primary) 7%, transparent) 1px, transparent 1px),
-          linear-gradient(90deg, color-mix(in srgb, var(--primary) 7%, transparent) 1px, transparent 1px),
-          linear-gradient(color-mix(in srgb, var(--primary) 3%, transparent) 1px, transparent 1px),
-          linear-gradient(90deg, color-mix(in srgb, var(--primary) 3%, transparent) 1px, transparent 1px)
-        `,
-        backgroundSize: `${major}px ${major}px, ${major}px ${major}px, ${minor}px ${minor}px, ${minor}px ${minor}px`,
-        backgroundPosition: '0 0',
-      }}
-    />
-  )
-}
+
 
 export default function AppShell() {
   const { t } = useTranslation()
   const { pathname } = useLocation()
-  const navigate = useNavigate()
   const { user, logout } = useAuth()
-  const active = NAV.find((i) => i.to === pathname) ?? NAV[0]
+  const active = NAV.find((item) => isNavActive(item, pathname)) ?? NAV[0]
+  const sectionTitle = pathname.startsWith('/console/recovery/') ? t('recovery.window') : t(`nav.${active.key}`)
   const [paletteOpen, setPaletteOpen] = useState(false)
-  const { zoom, panX, panY, zoomIn, zoomOut, zoomFit, setZoom, panBy, resetView } = useZoom()
-  const toast = useToast()
+  const [cloudsVisible, setCloudsVisible] = useState(false)
 
-  const canvasRef = useRef<HTMLDivElement>(null)
-  const [isPanning, setIsPanning] = useState(false)
-  const [mouseCoord, setMouseCoord] = useState({ x: 0, y: 0 })
-  const [cloudsVisible, setCloudsVisible] = useState(true)
+  // Narrow-viewport navigation drawer (< md breakpoint)
+  const [navOpen, setNavOpen] = useState(false)
+  const navRef = useRef<HTMLElement>(null)
+  const closeNav = useCallback(() => setNavOpen(false), [])
+  const closePalette = useCallback(() => setPaletteOpen(false), [])
+  useFocusTrap(navRef, navOpen, closeNav)
 
-  // Reset view when navigating between sections
+
+  // A live viewport resize must not leave the desktop directory behaving as
+  // a modal focus trap.
   useEffect(() => {
-    resetView()
-  }, [pathname, resetView])
-
-  // P3: Click coordinate readout to copy
-  const copyCoord = useCallback(() => {
-    const coord = `${mouseCoord.x},${mouseCoord.y}`
-    navigator.clipboard?.writeText(coord).then(
-      () => toast(t('coord.copied')),
-      () => {},
-    )
-  }, [mouseCoord, toast, t])
-
-  // Mouse wheel — Ctrl/⌘ + wheel = zoom, plain wheel = native scroll
-  const onWheel = useCallback((e: React.WheelEvent) => {
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault()
-      const canvas = canvasRef.current
-      if (!canvas) return
-      const rect = canvas.getBoundingClientRect()
-      const mouseX = e.clientX - rect.left
-      const mouseY = e.clientY - rect.top
-      const delta = e.deltaY > 0 ? -0.1 : 0.1
-      const newZoom = Math.max(0.5, Math.min(2.0, Math.round((zoom + delta) * 100) / 100))
-      const zoomRatio = newZoom / zoom
-      setZoom(newZoom)
-      panBy(mouseX - mouseX * zoomRatio, mouseY - mouseY * zoomRatio)
+    const desktop = window.matchMedia('(min-width: 768px)')
+    const onChange = (event: MediaQueryListEvent) => {
+      if (event.matches) setNavOpen(false)
     }
-  }, [zoom, setZoom, panBy])
+    desktop.addEventListener('change', onChange)
+    return () => desktop.removeEventListener('change', onChange)
+  }, [])
 
-  // Drag to pan — limited to a small range (~25px) for a subtle nudge feel
-  const MAX_PAN = 25
-  const panStartRef = useRef<{ x: number; y: number } | null>(null)
-  const lastMoveRef = useRef<{ x: number; y: number } | null>(null)
-  const panOriginRef = useRef<{ panX: number; panY: number }>({ panX: 0, panY: 0 })
-
-  const onMouseDown = useCallback((e: React.MouseEvent) => {
-    if (e.button !== 0) return
-    const target = e.target as HTMLElement
-    if (target.closest('button, a, input, [role="button"], [role="checkbox"], .bp-panel, .bp-cloud, .bp-cloud-panel')) return
-    setIsPanning(true)
-    panStartRef.current = { x: e.clientX, y: e.clientY }
-    panOriginRef.current = { panX, panY }
-    lastMoveRef.current = { x: e.clientX, y: e.clientY }
-  }, [panX, panY])
-
-  const onMouseMove = useCallback((e: React.MouseEvent) => {
-    const canvas = canvasRef.current
-    if (canvas) {
-      const rect = canvas.getBoundingClientRect()
-      setMouseCoord({
-        x: Math.round((e.clientX - rect.left - panX) / zoom),
-        y: Math.round((e.clientY - rect.top - panY) / zoom),
-      })
-    }
-    if (!isPanning || !panStartRef.current) return
-    const rawDx = e.clientX - panStartRef.current.x
-    const rawDy = e.clientY - panStartRef.current.y
-    const clamp = (raw: number) => {
-      if (Math.abs(raw) <= MAX_PAN) return raw
-      const sign = raw > 0 ? 1 : -1
-      const overshoot = Math.abs(raw) - MAX_PAN
-      return sign * (MAX_PAN + overshoot * 0.15)
-    }
-    const targetPanX = panOriginRef.current.panX + clamp(rawDx)
-    const targetPanY = panOriginRef.current.panY + clamp(rawDy)
-    panBy(targetPanX - panX, targetPanY - panY)
-    lastMoveRef.current = { x: e.clientX, y: e.clientY }
-  }, [isPanning, panX, panY, zoom, panBy])
-
-  const onMouseUp = useCallback(() => {
-    setIsPanning(false)
-    panStartRef.current = null
-    lastMoveRef.current = null
-    resetView()
-  }, [resetView])
-
-  // Keyboard shortcuts for zoom
+  // Preserve native browser zoom and text entry. The only global command
+  // shortcut is explicit Mod+K, and it never fires from interactive/modal UI.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const el = document.activeElement as HTMLElement | null
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
-      if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomIn() }
-      else if (e.key === '-') { e.preventDefault(); zoomOut() }
-      else if (e.key === '0' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); zoomFit() }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.altKey || event.shiftKey) return
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'k') return
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return
+      const target = event.target instanceof Element ? event.target : document.activeElement
+      if (
+        target instanceof Element
+        && target.closest('input, textarea, select, button, a[href], [contenteditable]:not([contenteditable="false"]), [role="dialog"], [aria-modal="true"]')
+      ) return
+      event.preventDefault()
+      setPaletteOpen((open) => !open)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [zoomIn, zoomOut, zoomFit])
+  }, [])
 
-  // g-key navigation + command palette
   useEffect(() => {
-    const GO: Record<string, string> = {
-      o: '/console', q: '/console/queue', k: '/console/objects', s: '/console/sources',
-      a: '/console/audience', d: '/console/drift', p: '/console/propagation', t: '/console/audit',
-    }
-    const isTyping = () => {
-      const el = document.activeElement as HTMLElement | null
-      return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
-    }
-    let gPending = false
-    let gTimer: ReturnType<typeof setTimeout> | undefined
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault()
-        setPaletteOpen((o) => !o)
-        return
-      }
-      if (isTyping()) return
-      if (e.key === '/') { e.preventDefault(); setPaletteOpen(true); return }
-      if (e.key === 'g') { gPending = true; clearTimeout(gTimer); gTimer = setTimeout(() => { gPending = false }, 1200); return }
-      if (gPending) {
-        gPending = false
-        const to = GO[e.key.toLowerCase()]
-        if (to) { e.preventDefault(); navigate(to) }
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => { window.removeEventListener('keydown', onKey); clearTimeout(gTimer) }
-  }, [navigate])
+    document.title = `${sectionTitle} · Cygnus`
+    return () => { document.title = t('document.baseTitle') }
+  }, [sectionTitle, t])
 
-  const scaleLabel = `${zoom.toFixed(2)}:1`
+  const mainHeading = `${t('app.surface')} - ${sectionTitle}`
 
   return (
-    <div className="grid h-screen grid-cols-[220px_1fr]">
-      {/* Drawing directory panel */}
-      <aside className="bp-dir">
+    <div className="bp-shell grid min-h-dvh min-w-0 grid-cols-1 md:grid-cols-[220px_minmax(0,1fr)]">
+      <a className="bp-skip-link" href="#main-content">{t('app.skipToContent')}</a>
+
+      <aside
+        ref={navRef}
+        className="bp-dir"
+        id="bp-nav-drawer"
+        data-open={navOpen}
+        role={navOpen ? 'dialog' : undefined}
+        aria-modal={navOpen || undefined}
+        aria-label={t('nav.primary')}
+        tabIndex={-1}
+      >
         <div className="bp-dir-header">
-          <div className="bp-dir-dwg-id">DWG-SHEET · 1/1</div>
-          <div className="bp-dir-dwg-title">CYGNUS</div>
+          <div>
+            <div className="bp-dir-dwg-id">{t('app.sheetIndex')}</div>
+            <div className="bp-dir-dwg-title">CYGNUS</div>
+          </div>
+          <button
+            type="button"
+            onClick={closeNav}
+            aria-label={t('nav.close')}
+            title={t('nav.close')}
+            className="bp-nav-close"
+          >
+            <X size={14} aria-hidden="true" />
+          </button>
         </div>
         <div className="thin-scroll flex-1 overflow-y-auto pb-2">
-          <DirGroup group="gov" />
-          <DirGroup group="obs" />
+          <nav aria-label={t('nav.primary')}>
+            <DirGroup group="gov" onNavigate={closeNav} isAdmin={user?.role === 'admin'} pathname={pathname} />
+            <DirGroup group="obs" onNavigate={closeNav} isAdmin={user?.role === 'admin'} pathname={pathname} />
+            {user?.role === 'admin' && <DirGroup group="admin" onNavigate={closeNav} isAdmin pathname={pathname} />}
+          </nav>
         </div>
         <div className="bp-dir-footer">
           <div className="bp-dir-footer-info">
-            <div className="bp-dir-footer-name">{user?.name ?? 'support-lead'}</div>
-            <div className="bp-dir-footer-email">{user?.email ?? 'admin@cygnus.local'}</div>
+            <div className="bp-dir-footer-name">{user?.name}</div>
+            <div className="bp-dir-footer-email">{user?.email}</div>
           </div>
           <button
+            type="button"
             onClick={logout}
             aria-label={t('auth.logout')}
             title={t('auth.logout')}
             className="bp-dir-footer-btn"
           >
-            EXIT
+            {t('auth.logout')}
           </button>
         </div>
       </aside>
 
-      {/* Main drawing area */}
-      <div className="flex min-w-0 flex-col">
-        {/* Coordinate bar */}
-        <div className="bp-coord-bar">
-          <span className="bp-coord-dwg">{active.code}</span>
-          <span className="bp-coord-sep">/</span>
-          <span className="bp-coord-sec">{t(`nav.${active.key}`)}</span>
+      {navOpen && <div className="bp-nav-backdrop" aria-hidden="true" onClick={closeNav} />}
 
-          {/* P3: Clickable coordinate readout — click to copy */}
-          <span className="bp-coord-sep">·</span>
-          <button
-            className="bp-coord-readout"
-            onClick={copyCoord}
-            title={t('coord.copied')}
-          >
-            X:{mouseCoord.x} Y:{mouseCoord.y}
-          </button>
+      <div className="flex min-h-0 min-w-0 flex-col">
+        <header>
+          <nav className="bp-coord-bar" aria-label={t('nav.utility')}>
+            <button
+              type="button"
+              className="bp-nav-trigger"
+              onClick={() => setNavOpen((open) => !open)}
+              aria-expanded={navOpen}
+              aria-controls="bp-nav-drawer"
+              aria-label={t('nav.menu')}
+              title={t('nav.menu')}
+            >
+              <Menu size={16} aria-hidden="true" />
+            </button>
+            <span className="bp-coord-dwg">{active.code}</span>
+            <span className="bp-coord-sep" aria-hidden="true">/</span>
+            <span className="bp-coord-sec">{t(`nav.${active.key}`)}</span>
 
-          {/* Zoom controls */}
-          <div className="bp-zoom-ctrl ml-4">
-            <button className="bp-zoom-btn" onClick={zoomOut} aria-label="Zoom out" title="Zoom out (−)">
-              <Minus size={13} />
+            <button
+              type="button"
+              onClick={() => setPaletteOpen(true)}
+              className="bp-palette-trigger ml-auto"
+              aria-label={t('queue.search')}
+              aria-haspopup="dialog"
+              aria-expanded={paletteOpen}
+              aria-controls="command-palette"
+            >
+              <Search size={14} aria-hidden="true" />
+              <span className="bp-palette-trigger-label">{t('queue.search')}</span>
+              <kbd className="bp-palette-trigger-key">{t('palette.shortcut')}</kbd>
             </button>
-            <span className="bp-zoom-display">{(zoom * 100).toFixed(0)}%</span>
-            <button className="bp-zoom-btn" onClick={zoomIn} aria-label="Zoom in" title="Zoom in (+)">
-              <Plus size={13} />
-            </button>
-            <button className="bp-zoom-btn" onClick={zoomFit} aria-label="Fit to screen" title="Fit (⌘0)">
-              <Maximize2 size={12} />
-            </button>
+            <ThemeToggle />
+            <LangToggle />
+            <NotificationBell cloudsVisible={cloudsVisible} onToggleClouds={() => setCloudsVisible((visible) => !visible)} />
+          </nav>
+        </header>
+
+        <main id="main-content" tabIndex={-1} aria-label={mainHeading} className="bp-canvas bp-page-container">
+          <div className="bp-canvas-grid" aria-hidden="true" />
+          <div id="bp-revision-cloud-overlay" className="bp-cloud-overlay" role="region" aria-label={t('cloud.revisions')} aria-hidden={!cloudsVisible}>
+            {cloudsVisible && <RevisionClouds zoom={1} panX={0} panY={0} />}
           </div>
-
-          <button
-            onClick={() => setPaletteOpen(true)}
-            className="ml-auto flex items-center gap-2 border border-[color-mix(in_srgb,var(--primary)_25%,transparent)] bg-transparent px-3 py-1.5 font-mono text-[11px] text-faint transition-all hover:border-[color-mix(in_srgb,var(--primary)_50%,transparent)] hover:text-foreground"
-            style={{ borderRadius: 0 }}
-          >
-            <Search size={12} />
-            <span>{t('queue.search')}</span>
-            <kbd className="font-mono text-[9px] opacity-50">⌘K</kbd>
-          </button>
-          <ThemeToggle />
-          <LangToggle />
-          <NotificationBell cloudsVisible={cloudsVisible} onToggleClouds={() => setCloudsVisible((v) => !v)} />
-        </div>
-
-        {/* Drawing canvas — zoomable + pannable */}
-        <div
-          ref={canvasRef}
-          className="bp-canvas"
-          data-panning={isPanning}
-          onWheel={onWheel}
-          onMouseDown={onMouseDown}
-          onMouseMove={onMouseMove}
-          onMouseUp={onMouseUp}
-          onMouseLeave={onMouseUp}
-        >
-          <CanvasGrid zoom={zoom} />
-
-          {/* P4: Revision cloud notifications on canvas */}
-          {cloudsVisible && (
-            <RevisionClouds zoom={zoom} panX={panX} panY={panY} />
-          )}
-
-          {/* Transformed content layer */}
-          <div
-            className="bp-canvas-inner"
-            style={{ transform: `translate(${panX}px, ${panY}px) scale(${zoom})` }}
-          >
-            <Suspense fallback={<div className="font-mono text-sm text-muted-foreground p-6">{t('state.loading')}</div>}>
+          <div className="bp-canvas-inner">
+            <Suspense fallback={<PageSkeleton />}>
               <Outlet />
             </Suspense>
           </div>
-        </div>
+        </main>
       </div>
 
-      {/* Title block */}
-      <div className="bp-titleblock">
-        <div className="bp-tb-col">
-          <div className="bp-tb-col-key">DWG</div>
-          <div className="bp-tb-col-val">{active.code}</div>
-        </div>
-        <div className="bp-tb-col">
-          <div className="bp-tb-col-key">SCALE</div>
-          <div className="bp-tb-col-val">{scaleLabel}</div>
-        </div>
-        <div className="bp-tb-col">
-          <div className="bp-tb-col-key">REV</div>
-          <div className="bp-tb-col-val">2026.06</div>
-        </div>
-        <div className="bp-tb-col">
-          <div className="bp-tb-col-key">DRAFTED BY</div>
-          <div className="bp-tb-col-val">{(user?.name || 'ID').slice(0, 8)}</div>
-        </div>
-      </div>
-
-      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <CommandPalette open={paletteOpen} onClose={closePalette} />
     </div>
   )
 }

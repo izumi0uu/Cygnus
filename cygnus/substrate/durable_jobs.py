@@ -91,15 +91,30 @@ class DurableWorkflowJob:
         phase = self.checkpoint.resume_phase
         return None if phase is None else phase.value
 
-    def transition_to(self, target: QueueStatus, *, error: str | None = None) -> DurableWorkflowJob:
+    def transition_to(
+        self, target: QueueStatus, *, error: str | None = None
+    ) -> DurableWorkflowJob:
         if target not in _ALLOWED_STATUS_TRANSITIONS[self.queue_status]:
-            allowed = ", ".join(item.value for item in sorted(_ALLOWED_STATUS_TRANSITIONS[self.queue_status], key=lambda value: value.value)) or "none"
+            allowed = (
+                ", ".join(
+                    item.value
+                    for item in sorted(
+                        _ALLOWED_STATUS_TRANSITIONS[self.queue_status],
+                        key=lambda value: value.value,
+                    )
+                )
+                or "none"
+            )
             raise ValueError(
                 f"invalid queue transition: {self.queue_status.value} -> {target.value}; "
                 f"allowed targets: {allowed}"
             )
 
-        attempt_count = self.attempt_count + 1 if target is QueueStatus.ACTIVE else self.attempt_count
+        attempt_count = (
+            self.attempt_count + 1
+            if target is QueueStatus.ACTIVE
+            else self.attempt_count
+        )
         last_error = None
         if target is QueueStatus.FAILED:
             if error is None or not error.strip():
@@ -168,7 +183,9 @@ class FileDurableJobStore:
 
     def save(self, job: DurableWorkflowJob) -> DurableWorkflowJob:
         path = self._path_for(job.job_id)
-        path.write_text(json.dumps(job.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
+        path.write_text(
+            json.dumps(job.to_dict(), indent=2, sort_keys=True), encoding="utf-8"
+        )
         return job
 
     def activate(self, job_id: str) -> DurableWorkflowJob:

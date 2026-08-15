@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable react-refresh/only-export-components -- This context module intentionally exports its provider and typed consumer hooks together. */
 
 import type { Transition } from "motion/react";
 import {

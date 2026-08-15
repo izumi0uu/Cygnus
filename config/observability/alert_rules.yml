@@ -1,0 +1,559 @@
+# Cygnus Production V1 alert-rule template — machine-readable (CYG-142).
+#
+# This file is not loaded directly by Prometheus. `scripts/render_alert_rules.py`
+# replaces every declared alert-threshold token from one hash-bound, externally
+# approved deployment input and adds approval provenance labels to every rule. Rendering
+# fails closed when any value/ref/hash is missing or mismatched. The rendered
+# deployment file is `deploy/rendered/alert_rules.yml`.
+#
+# Mandatory fields per rule:
+#   alert      — stable alert name (IDs like ALERT-142-<ROUTE>-<METRIC> are the
+#                contract values consumed by CapacityThresholds.alert_rule_mappings)
+#   expr       — deterministic PromQL expression (testable)
+#   for        — duration the condition must hold before firing
+#   labels     — severity, owner (owning agent/team), team
+#   annotations— summary, description, runbook (relative path under docs/),
+#                recovery (what proves the alert is resolved)
+#
+# Recovery semantics: each rule declares the exact metric expression that must
+# return to a healthy state; dashboards/runbooks treat `recovery` as the
+# resolution condition, and the on-call checklist verifies it before closing.
+#
+# Capacity-gate contract (consumed by cygnus/capacity/thresholds.py):
+#   `alert_rule_mappings` = {"<route>.<metric>": "<alert rule id>"} for all 45
+#   keys. Every mapped alert consumes only `cygnus_capacity_gate_breach`, whose
+#   route/metric series is emitted after a measured gate check and carries the
+#   externally approved approval/threshold/target refs plus threshold fingerprint.
+#   No live numeric pass value is stored in this checked-in file.
+
+groups:
+  - name: cygnus_availability
+    rules:
+      - alert: CygnusApiDown
+        expr: up{job="cygnus-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          owner: SecurityBaseline
+          team: platform
+        annotations:
+          summary: "Cygnus API process is down"
+          description: "The API job {{ $labels.job }} has been down for over 2 minutes."
+          runbook: docs/en/cygnus-telemetry-runbook.md
+          recovery: "up{job=\"cygnus-api\"} == 1 for 1m"
+
+      - alert: CygnusWorkerDead
+        expr: cygnus_worker_heartbeat == 0
+        for: 5m
+        labels:
+          severity: critical
+          owner: ReadinessOps
+          team: platform
+        annotations:
+          summary: "Worker heartbeat stale for role {{ $labels.role }}"
+          description: "No fresh heartbeat from worker role {{ $labels.role }} for 5 minutes."
+          runbook: docs/en/cygnus-telemetry-runbook.md
+          recovery: "cygnus_worker_heartbeat{role=\"{{ $labels.role }}\"} == 1 for 2m"
+
+  - name: cygnus_red
+    # Numeric limits are rendered from an approved external threshold document.
+    # The stable alert IDs and metric meanings remain source-controlled.
+    rules:
+      - alert: ALERT-142-HTTP-ERROR_RATE
+        expr: |
+          sum by (route, method) (
+            rate(cygnus_http_requests_total{status=~"5.."}[5m])
+          ) / clamp_min(
+            sum by (route, method) (rate(cygnus_http_requests_total[5m])), 1
+          ) > {{alert.http_error_rate}}
+        for: 10m
+        labels:
+          severity: warning
+          owner: SecurityBaseline
+          team: platform
+        annotations:
+          summary: "HTTP 5xx rate breached on {{ $labels.route }}"
+          description: "Route {{ $labels.route }} ({{ $labels.method }}) exceeded the approved error-rate threshold."
+          runbook: docs/en/cygnus-telemetry-runbook.md
+          recovery: "the same ratio returns below its approved threshold"
+
+      - alert: ALERT-142-HTTP-LATENCY
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (route, method, le) (
+              rate(cygnus_http_request_duration_seconds_bucket[5m])
+            )
+          ) > {{alert.http_latency_seconds}}
+        for: 10m
+        labels:
+          severity: warning
+          owner: SecurityBaseline
+          team: platform
+        annotations:
+          summary: "P95 HTTP latency breached on {{ $labels.route }}"
+          description: "P95 latency for {{ $labels.route }} exceeded the approved threshold."
+          runbook: docs/en/cygnus-telemetry-runbook.md
+          recovery: "P95 returns below its approved threshold"
+
+      - alert: ALERT-142-MCP-ERROR_RATE
+        expr: |
+          sum by (tool) (
+            rate(cygnus_mcp_tool_calls_total{status="error"}[5m])
+          ) / clamp_min(
+            sum by (tool) (rate(cygnus_mcp_tool_calls_total[5m])), 1
+          ) > {{alert.mcp_error_rate}}
+        for: 10m
+        labels:
+          severity: warning
+          owner: ToolRuntime
+          team: platform
+        annotations:
+          summary: "MCP tool error-rate threshold breached: {{ $labels.tool }}"
+          description: "Tool {{ $labels.tool }} exceeded the approved error-rate threshold."
+          runbook: docs/en/cygnus-telemetry-runbook.md
+          recovery: "error ratio returns below the approved threshold"
+
+      - alert: ALERT-142-MCP-DEADLINE
+        expr: |
+          increase(cygnus_mcp_tool_deadline_exceeded_total[15m]) > {{alert.mcp_deadline_exceeded_count}}
+        for: 5m
+        labels:
+          severity: warning
+          owner: ToolRuntime
+          team: platform
+        annotations:
+          summary: "MCP tool deadline threshold breached: {{ $labels.tool }}"
+          description: "Tool {{ $labels.tool }} exceeded the approved deadline-exceedance threshold."
+          runbook: docs/en/cygnus-telemetry-runbook.md
+          recovery: "deadline exceedance count returns below the approved threshold"
+
+      - alert: ALERT-142-HTTP-DENIAL_RATE
+        expr: |
+          sum by (route) (
+            rate(cygnus_http_requests_total{status=~"401|403"}[5m])
+          ) / clamp_min(
+            sum by (route) (rate(cygnus_http_requests_total[5m])), 1
+          ) > {{alert.http_denial_rate}}
+        for: 15m
+        labels:
+          severity: warning
+          owner: SecurityBaseline
+          team: platform
+        annotations:
+          summary: "HTTP denial-rate threshold breached: {{ $labels.route }}"
+          description: "Route {{ $labels.route }} exceeded the approved denial-rate threshold."
+          runbook: docs/en/cygnus-telemetry-runbook.md
+          recovery: "denial ratio returns below the approved threshold"
+
+      - alert: ALERT-142-HTTP-RETRY_RATE
+        expr: |
+          sum by (route) (increase(cygnus_http_requests_total{status="429"}[15m])) > {{alert.http_retry_count}}
+        for: 5m
+        labels:
+          severity: warning
+          owner: SecurityBaseline
+          team: platform
+        annotations:
+          summary: "HTTP retry threshold breached: {{ $labels.route }}"
+          description: "Route {{ $labels.route }} exceeded the approved retry threshold."
+          runbook: docs/en/cygnus-telemetry-runbook.md
+          recovery: "retry count returns below the approved threshold"
+
+  - name: cygnus_queues_workers
+    rules:
+      - alert: ALERT-142-QUEUE-AGE
+        expr: cygnus_queue_job_age_seconds > {{alert.queue_age_seconds}}
+        for: 10m
+        labels:
+          severity: warning
+          owner: DurableDispatch
+          team: platform
+        annotations:
+          summary: "Queue job age threshold breached: {{ $labels.queue }}"
+          description: "Oldest job age on {{ $labels.queue }} exceeded the approved threshold."
+          runbook: docs/en/cygnus-telemetry-runbook.md
+          recovery: "queue age returns below the approved threshold"
+
+      - alert: ALERT-142-QUEUE-TERMINAL
+        expr: |
+          sum by (queue) (increase(cygnus_queue_jobs_total{state=~"failed|error"}[15m])) > {{alert.queue_terminal_count}}
+        for: 5m
+        labels:
+          severity: warning
+          owner: DurableDispatch
+          team: platform
+        annotations:
+          summary: "Terminal queue failure threshold breached: {{ $labels.queue }}"
+          description: "Terminal queue failures exceeded the approved threshold."
+          runbook: docs/en/cygnus-telemetry-runbook.md
+          recovery: "terminal queue failure count returns below the approved threshold"
+
+  - name: cygnus_governance
+    rules:
+      - alert: ALERT-142-GOVERNANCE-EXHAUSTED
+        expr: |
+          increase(cygnus_governance_route_terminal_total{reason="exhausted"}[15m]) > {{alert.governance_exhausted_count}}
+        for: 5m
+        labels:
+          severity: warning
+          owner: ApprovalIntegrity
+          team: governance
+        annotations:
+          summary: "Governance exhaustion threshold breached: {{ $labels.route_kind }}"
+          description: "Governance terminal exhaustion exceeded the approved threshold."
+          runbook: docs/en/cygnus-telemetry-runbook.md
+          recovery: "exhausted terminal-event count returns below the approved threshold"
+
+      - alert: ALERT-142-PROPAGATION-MISMATCH
+        expr: |
+          sum by (kind) (increase(cygnus_propagation_mismatch_total[15m])) > {{alert.propagation_mismatch_count}}
+        for: 5m
+        labels:
+          severity: warning
+          owner: DeliveryReceipt
+          team: governance
+        annotations:
+          summary: "Propagation mismatch threshold breached: {{ $labels.kind }}"
+          description: "Propagation mismatch/correlation loss exceeded the approved threshold."
+          runbook: docs/en/cygnus-telemetry-runbook.md
+          recovery: "propagation mismatch count returns below the approved threshold"
+
+  - name: cygnus_dependencies
+    rules:
+      - alert: ALERT-142-READINESS-DEPENDENCY
+        expr: cygnus_readiness_dependency == 0
+        for: 5m
+        labels:
+          severity: warning
+          owner: ReadinessOps
+          team: platform
+        annotations:
+          summary: "Readiness dependency failed: {{ $labels.dependency }}"
+          description: "Dependency {{ $labels.dependency }} has become not-ready."
+          runbook: docs/en/cygnus-telemetry-runbook.md
+          recovery: "cygnus_readiness_dependency{dependency=\"{{ $labels.dependency }}\"} == 1"
+
+      - alert: ALERT-142-POOL-SATURATION
+        expr: |
+          cygnus_db_pool_connections{state="checked_out"}
+          / clamp_min(
+            cygnus_db_pool_connections{state="checked_out"}
+            + cygnus_db_pool_connections{state="checked_in"}, 1
+          ) > {{alert.db_pool_saturation}}
+        for: 10m
+        labels:
+          severity: warning
+          owner: ReadinessOps
+          team: platform
+        annotations:
+          summary: "DB pool saturation threshold breached: {{ $labels.pool }}"
+          description: "The {{ $labels.pool }} pool exceeded the approved saturation threshold."
+          runbook: docs/en/cygnus-telemetry-runbook.md
+          recovery: "pool saturation returns below the approved threshold"
+
+      - alert: ALERT-142-TELEMETRY-LOSS
+        expr: |
+          sum(increase(cygnus_telemetry_failures_total[15m])) > {{alert.telemetry_failure_count}}
+        for: 5m
+        labels:
+          severity: warning
+          owner: TelemetryPlane
+          team: platform
+        annotations:
+          summary: "Telemetry degradation threshold breached"
+          description: "Telemetry write or export failures exceeded the approved threshold."
+          runbook: docs/en/cygnus-telemetry-runbook.md
+          recovery: "telemetry failure count returns below the approved threshold"
+
+      - alert: ALERT-142-STALE-EVIDENCE
+        expr: cygnus_stale_evidence > {{alert.stale_evidence_count}}
+        for: 30m
+        labels:
+          severity: info
+          owner: DataReliabilityAudit
+          team: governance
+        annotations:
+          summary: "Stale-evidence threshold breached: {{ $labels.kind }}"
+          description: "Stale evidence count exceeded the approved threshold."
+          runbook: docs/en/cygnus-telemetry-runbook.md
+          recovery: "stale-evidence count returns below the approved threshold"
+  - name: cygnus_release
+    rules:
+      - alert: ALERT-142-RELEASE-IDENTITY
+        expr: cygnus_release_info{release="unknown"} == 1
+        for: 10m
+        labels:
+          severity: info
+          owner: ReleaseSupplyChain
+          team: platform
+        annotations:
+          summary: "Runtime release identity is unknown"
+          description: "The API reports release=\"unknown\" — build/env labels are not injected."
+          runbook: docs/en/cygnus-telemetry-runbook.md
+          recovery: "cygnus_release_info{release!=\"unknown\"} == 1"
+
+  - name: cygnus_capacity_gate
+    # These stable alert IDs are referenced by the approved thresholds document.
+    # A deployment cannot synthesize a healthy series: the capacity gate emits a
+    # value only after measurement and labels it with all externally approved refs.
+    rules:
+      - alert: ALERT-142-CAPACITY-INPUTS-MISSING
+        expr: |
+          absent(cygnus_capacity_gate_breach{
+            approval_ref!~"unknown|redacted",
+            thresholds_ref!~"unknown|redacted",
+            targets_ref!~"unknown|redacted",
+            thresholds_fingerprint!~"unknown|redacted"
+          }) == 1
+          or cygnus_capacity_gate_breach{approval_ref=~"unknown|redacted"}
+          or cygnus_capacity_gate_breach{thresholds_ref=~"unknown|redacted"}
+          or cygnus_capacity_gate_breach{targets_ref=~"unknown|redacted"}
+          or cygnus_capacity_gate_breach{thresholds_fingerprint=~"unknown|redacted"}
+        for: 1m
+        labels:
+          severity: critical
+          owner: CapacityCertification
+          team: platform
+        annotations:
+          summary: "Capacity telemetry lacks approved deployment identity"
+          description: "Capacity telemetry is not bound to approved threshold and target inputs."
+          runbook: docs/en/cygnus-telemetry-runbook.md
+          recovery: "all capacity series carry non-placeholder approval/threshold/target refs and fingerprint"
+
+      - alert: ALERT-142-PUBLISH-P50_MS
+        expr: cygnus_capacity_gate_breach{route="publish",metric="p50_ms",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: &capacity_labels
+          severity: warning
+          owner: CapacityCertification
+          team: platform
+        annotations: &capacity_annotations
+          summary: "Approved capacity threshold breached"
+          description: "The measured route/metric breached its externally approved deployment threshold."
+          runbook: docs/en/cygnus-telemetry-runbook.md
+          recovery: "the approval-bound cygnus_capacity_gate_breach series returns to 0 after a measured gate run"
+      - alert: ALERT-142-PUBLISH-P95_MS
+        expr: cygnus_capacity_gate_breach{route="publish",metric="p95_ms",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-PUBLISH-P99_MS
+        expr: cygnus_capacity_gate_breach{route="publish",metric="p99_ms",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-PUBLISH-THROUGHPUT_RPS
+        expr: cygnus_capacity_gate_breach{route="publish",metric="throughput_rps",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-PUBLISH-ERROR_RATE
+        expr: cygnus_capacity_gate_breach{route="publish",metric="error_rate",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-PUBLISH-DENIAL_RATE
+        expr: cygnus_capacity_gate_breach{route="publish",metric="denial_rate",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-PUBLISH-RETRY_RATE
+        expr: cygnus_capacity_gate_breach{route="publish",metric="retry_rate",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-PUBLISH-QUEUE_AGE_SECONDS
+        expr: cygnus_capacity_gate_breach{route="publish",metric="queue_age_seconds",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-PUBLISH-POOL_SATURATION
+        expr: cygnus_capacity_gate_breach{route="publish",metric="pool_saturation",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+
+      - alert: ALERT-142-TICKET_IMPORT-P50_MS
+        expr: cygnus_capacity_gate_breach{route="ticket_import",metric="p50_ms",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-TICKET_IMPORT-P95_MS
+        expr: cygnus_capacity_gate_breach{route="ticket_import",metric="p95_ms",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-TICKET_IMPORT-P99_MS
+        expr: cygnus_capacity_gate_breach{route="ticket_import",metric="p99_ms",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-TICKET_IMPORT-THROUGHPUT_RPS
+        expr: cygnus_capacity_gate_breach{route="ticket_import",metric="throughput_rps",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-TICKET_IMPORT-ERROR_RATE
+        expr: cygnus_capacity_gate_breach{route="ticket_import",metric="error_rate",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-TICKET_IMPORT-DENIAL_RATE
+        expr: cygnus_capacity_gate_breach{route="ticket_import",metric="denial_rate",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-TICKET_IMPORT-RETRY_RATE
+        expr: cygnus_capacity_gate_breach{route="ticket_import",metric="retry_rate",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-TICKET_IMPORT-QUEUE_AGE_SECONDS
+        expr: cygnus_capacity_gate_breach{route="ticket_import",metric="queue_age_seconds",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-TICKET_IMPORT-POOL_SATURATION
+        expr: cygnus_capacity_gate_breach{route="ticket_import",metric="pool_saturation",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+
+      - alert: ALERT-142-INGESTION-P50_MS
+        expr: cygnus_capacity_gate_breach{route="ingestion",metric="p50_ms",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-INGESTION-P95_MS
+        expr: cygnus_capacity_gate_breach{route="ingestion",metric="p95_ms",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-INGESTION-P99_MS
+        expr: cygnus_capacity_gate_breach{route="ingestion",metric="p99_ms",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-INGESTION-THROUGHPUT_RPS
+        expr: cygnus_capacity_gate_breach{route="ingestion",metric="throughput_rps",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-INGESTION-ERROR_RATE
+        expr: cygnus_capacity_gate_breach{route="ingestion",metric="error_rate",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-INGESTION-DENIAL_RATE
+        expr: cygnus_capacity_gate_breach{route="ingestion",metric="denial_rate",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-INGESTION-RETRY_RATE
+        expr: cygnus_capacity_gate_breach{route="ingestion",metric="retry_rate",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-INGESTION-QUEUE_AGE_SECONDS
+        expr: cygnus_capacity_gate_breach{route="ingestion",metric="queue_age_seconds",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-INGESTION-POOL_SATURATION
+        expr: cygnus_capacity_gate_breach{route="ingestion",metric="pool_saturation",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+
+      - alert: ALERT-142-WORKER-P50_MS
+        expr: cygnus_capacity_gate_breach{route="worker",metric="p50_ms",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-WORKER-P95_MS
+        expr: cygnus_capacity_gate_breach{route="worker",metric="p95_ms",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-WORKER-P99_MS
+        expr: cygnus_capacity_gate_breach{route="worker",metric="p99_ms",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-WORKER-THROUGHPUT_RPS
+        expr: cygnus_capacity_gate_breach{route="worker",metric="throughput_rps",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-WORKER-ERROR_RATE
+        expr: cygnus_capacity_gate_breach{route="worker",metric="error_rate",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-WORKER-DENIAL_RATE
+        expr: cygnus_capacity_gate_breach{route="worker",metric="denial_rate",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-WORKER-RETRY_RATE
+        expr: cygnus_capacity_gate_breach{route="worker",metric="retry_rate",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-WORKER-QUEUE_AGE_SECONDS
+        expr: cygnus_capacity_gate_breach{route="worker",metric="queue_age_seconds",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-WORKER-POOL_SATURATION
+        expr: cygnus_capacity_gate_breach{route="worker",metric="pool_saturation",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+
+      - alert: ALERT-142-QUERY-P50_MS
+        expr: cygnus_capacity_gate_breach{route="query",metric="p50_ms",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-QUERY-P95_MS
+        expr: cygnus_capacity_gate_breach{route="query",metric="p95_ms",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-QUERY-P99_MS
+        expr: cygnus_capacity_gate_breach{route="query",metric="p99_ms",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-QUERY-THROUGHPUT_RPS
+        expr: cygnus_capacity_gate_breach{route="query",metric="throughput_rps",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-QUERY-ERROR_RATE
+        expr: cygnus_capacity_gate_breach{route="query",metric="error_rate",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-QUERY-DENIAL_RATE
+        expr: cygnus_capacity_gate_breach{route="query",metric="denial_rate",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-QUERY-RETRY_RATE
+        expr: cygnus_capacity_gate_breach{route="query",metric="retry_rate",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-QUERY-QUEUE_AGE_SECONDS
+        expr: cygnus_capacity_gate_breach{route="query",metric="queue_age_seconds",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations
+      - alert: ALERT-142-QUERY-POOL_SATURATION
+        expr: cygnus_capacity_gate_breach{route="query",metric="pool_saturation",approval_ref!~"unknown|redacted",thresholds_ref!~"unknown|redacted",targets_ref!~"unknown|redacted",thresholds_fingerprint!~"unknown|redacted"} == 1
+        for: 1m
+        labels: *capacity_labels
+        annotations: *capacity_annotations

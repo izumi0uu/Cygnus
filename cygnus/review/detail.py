@@ -17,7 +17,6 @@ class ReviewItemQuery:
             raise ValueError("object_ref must not be blank")
 
 
-
 def get_review_item_detail(
     query: ReviewItemQuery,
     *,

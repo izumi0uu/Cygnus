@@ -166,7 +166,11 @@ def validate_commit_file(path: str) -> int:
 
 def validate_commit_range(base: str, head: str) -> int:
     merge_base = _git("merge-base", base, head).strip()
-    shas = [sha for sha in _git("rev-list", "--reverse", f"{merge_base}..{head}").splitlines() if sha]
+    shas = [
+        sha
+        for sha in _git("rev-list", "--reverse", f"{merge_base}..{head}").splitlines()
+        if sha
+    ]
     if not shas:
         return _report(["commit-range: no commits found in range"])
 
@@ -203,7 +207,14 @@ def validate_pr() -> int:
         )
 
     sections = _parse_sections(body)
-    required_sections = ["Summary", "Problem", "Solution", "Validation", "Risks", "Related"]
+    required_sections = [
+        "Summary",
+        "Problem",
+        "Solution",
+        "Validation",
+        "Risks",
+        "Related",
+    ]
     for name in required_sections:
         if name not in sections:
             errors.append(f"pr-body: missing `## {name}` section")
@@ -227,7 +238,9 @@ def validate_pr() -> int:
 
     related = sections.get("Related", "")
     if related and "N/A" not in related and not ISSUE_REF_RE.search(related):
-        errors.append("pr-body: `## Related` should include an issue reference or `N/A`")
+        errors.append(
+            "pr-body: `## Related` should include an issue reference or `N/A`"
+        )
 
     return _report(errors)
 
@@ -272,10 +285,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Repository PR + commit guardrails")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    commit_file = sub.add_parser("validate-commit-file", help="Validate a commit message file")
+    commit_file = sub.add_parser(
+        "validate-commit-file", help="Validate a commit message file"
+    )
     commit_file.add_argument("path")
 
-    commit_range = sub.add_parser("validate-commit-range", help="Validate commits between base and head")
+    commit_range = sub.add_parser(
+        "validate-commit-range", help="Validate commits between base and head"
+    )
     commit_range.add_argument("base")
     commit_range.add_argument("head")
 

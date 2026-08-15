@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Cygnus approved alert threshold inputs",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "approval",
+    "thresholds"
+  ],
+  "properties": {
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "approval_ref",
+        "thresholds_ref"
+      ],
+      "properties": {
+        "approval_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "thresholds_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    },
+    "thresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "http_error_rate",
+        "http_latency_seconds",
+        "mcp_error_rate",
+        "mcp_deadline_exceeded_count",
+        "http_denial_rate",
+        "http_retry_count",
+        "queue_age_seconds",
+        "queue_terminal_count",
+        "governance_exhausted_count",
+        "propagation_mismatch_count",
+        "db_pool_saturation",
+        "telemetry_failure_count",
+        "stale_evidence_count"
+      ],
+      "properties": {
+        "http_error_rate": {
+          "$ref": "#/$defs/fraction"
+        },
+        "http_latency_seconds": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "mcp_error_rate": {
+          "$ref": "#/$defs/fraction"
+        },
+        "mcp_deadline_exceeded_count": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "http_denial_rate": {
+          "$ref": "#/$defs/fraction"
+        },
+        "http_retry_count": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "queue_age_seconds": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "queue_terminal_count": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "governance_exhausted_count": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "propagation_mismatch_count": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "db_pool_saturation": {
+          "$ref": "#/$defs/fraction"
+        },
+        "telemetry_failure_count": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "stale_evidence_count": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "fraction": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "nonNegativeNumber": {
+      "type": "number",
+      "minimum": 0
+    }
+  }
+}

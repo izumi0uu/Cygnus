@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Check } from 'lucide-react'
+import { TriangleAlert } from 'lucide-react'
 import { fetchDriftSurface, type DriftSurface, type DriftContext } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Stat } from '@/components/Stat'
 import { useVocab } from '@/lib/vocab'
 import { CmdButton } from '@/components/CmdButton'
 import { PageSkeleton } from '@/components/Skeleton'
+import { ObservationBanner } from '@/components/ObservationBanner'
 
 const HEAT: Record<string, string> = { urgent: 'bp-tol-urgent', high: 'bp-tol-high', medium: 'bp-tol-high', low: 'bp-tol-flat' }
 
@@ -31,7 +32,7 @@ export default function CoverageDrift() {
   if (error)
     return (
       <div className="bp-panel p-4">
-        <div className="font-mono text-sm" style={{ color: 'var(--urgent)' }}>⚠ {t('state.error')}</div>
+        <div className="flex items-center gap-1.5 font-mono text-sm" style={{ color: 'var(--urgent)' }}><TriangleAlert size={15} aria-hidden="true" /> {t('state.error')}</div>
         <Button variant="ghost" className="mt-3" onClick={load}>{t('state.retry')}</Button>
       </div>
     )
@@ -40,19 +41,17 @@ export default function CoverageDrift() {
   const rows = data.contexts
   const urgent = rows.filter((c) => c.urgency === 'urgent').length
   const surfaces = new Set(rows.flatMap((c) => c.affected_surfaces)).size
-  const watched = new Set(rows.flatMap((c) => c.evidence_ids)).size
-  const driftObjs = new Set(rows.map((c) => c.proposal_ref)).size
-  const ok = Math.max(0, watched - driftObjs)
 
   return (
     <>
-      <p className="mb-3 font-mono text-[12px] leading-relaxed text-muted-foreground">{data.summary}</p>
+      <h1 className="sr-only">{t('nav.drift')}</h1>
+      <ObservationBanner observation={data.observation} />
+      {rows.length > 0 ? <p className="mb-3 font-mono text-[12px] leading-relaxed text-muted-foreground">{data.summary}</p> : null}
 
       <div className="mb-4 flex flex-wrap gap-2.5">
         <Stat n={rows.length} label={t('drift.statDrift')} dot="var(--high)" />
         <Stat n={urgent} label={t('frame.urgent')} dot="var(--urgent)" />
         <Stat n={surfaces} label={t('queue.statSurfaces')} />
-        <Stat n={watched} label={t('drift.statWatched')} />
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -62,11 +61,12 @@ export default function CoverageDrift() {
       </div>
 
       {rows.length === 0 ? (
-        <div className="bp-panel px-[18px] py-10 text-center font-mono text-sm text-muted-foreground">{t('drift.empty')}</div>
-      ) : ok > 0 ? (
-        <div className="mt-4 flex items-center gap-2 bp-panel px-4 py-3 font-mono text-[13px] text-muted-foreground">
-          <Check size={16} style={{ color: 'var(--ok)' }} />
-          {t('drift.okFmt', { n: ok })}
+        <div className="bp-panel px-[18px] py-10 text-center font-mono text-sm text-muted-foreground">
+          {data.observation.state === 'ready'
+            ? t('drift.empty')
+            : data.observation.state === 'partial'
+              ? t('observation.driftPartial')
+              : t('observation.driftUnavailable')}
         </div>
       ) : null}
     </>

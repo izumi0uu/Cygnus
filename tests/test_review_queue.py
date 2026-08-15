@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import unittest
+from typing import cast
 
 from cygnus.review import (
     QueueCommand,
     QueueCommandType,
     ReviewHomeQuery,
-    build_review_queue_surface,
-    get_review_home_surface,
     get_review_queue_surface,
     apply_queue_commands,
 )
@@ -17,9 +16,13 @@ class ReviewQueueTests(unittest.TestCase):
     def test_get_review_queue_surface_builds_command_driven_queue(self) -> None:
         payload = get_review_queue_surface().to_dict()
         self.assertEqual(payload["queue_id"], "review-queue")
-        self.assertGreaterEqual(len(payload["entries"]), 4)
-        self.assertEqual(payload["entries"][0]["upstream_trace"]["source_risk_id"], "source_blindness:cp-source-1")
-        self.assertIn("restack", payload["available_bulk_commands"])
+        entries = cast(list[dict[str, object]], payload["entries"])
+        self.assertGreaterEqual(len(entries), 4)
+        upstream_trace = cast(dict[str, object], entries[0]["upstream_trace"])
+        self.assertEqual(
+            upstream_trace["source_risk_id"], "source_blindness:cp-source-1"
+        )
+        self.assertIn("restack", cast(list[str], payload["available_bulk_commands"]))
 
     def test_restack_command_reorders_queue_and_preserves_origin_trace(self) -> None:
         queue = get_review_queue_surface()
@@ -34,8 +37,15 @@ class ReviewQueueTests(unittest.TestCase):
                 ),
             ),
         ).to_dict()
-        self.assertEqual(result["queue_surface"]["restack_lane"][0], ordered_refs[0])
-        self.assertIn("restack:new_frontline_pressure", result["queue_surface"]["entries"][0]["upstream_trace"]["command_history"])
+        queue_surface = cast(dict[str, object], result["queue_surface"])
+        restack_lane = cast(list[str], queue_surface["restack_lane"])
+        self.assertEqual(restack_lane[0], ordered_refs[0])
+        entries = cast(list[dict[str, object]], queue_surface["entries"])
+        upstream_trace = cast(dict[str, object], entries[0]["upstream_trace"])
+        self.assertIn(
+            "restack:new_frontline_pressure",
+            cast(list[str], upstream_trace["command_history"]),
+        )
 
     def test_reroute_command_updates_owner_echo(self) -> None:
         queue = get_review_queue_surface(ReviewHomeQuery(owner_state=None))
@@ -50,7 +60,8 @@ class ReviewQueueTests(unittest.TestCase):
                 ),
             ),
         ).to_dict()
-        echo = next(item for item in result["owner_echo"] if item["object_ref"] == "cp-ticket-1")
+        owner_echo = cast(list[dict[str, object]], result["owner_echo"])
+        echo = next(item for item in owner_echo if item["object_ref"] == "cp-ticket-1")
         self.assertEqual(echo["queue_owner"], "queue-b")
         self.assertEqual(echo["owner_state"], "assigned")
 
@@ -66,10 +77,15 @@ class ReviewQueueTests(unittest.TestCase):
                 ),
             ),
         ).to_dict()
-        first = result["queue_surface"]["entries"][0]
+        queue_surface = cast(dict[str, object], result["queue_surface"])
+        entries = cast(list[dict[str, object]], queue_surface["entries"])
+        first = entries[0]
         self.assertEqual(first["object_ref"], "cp-ticket-1")
         self.assertEqual(first["owner_state"], "escalated")
-        self.assertIn("escalate:cp-ticket-1:urgent_pattern_break", result["command_log"])
+        self.assertIn(
+            "escalate:cp-ticket-1:urgent_pattern_break",
+            cast(list[str], result["command_log"]),
+        )
 
     def test_waiting_echo_updates_after_restack(self) -> None:
         queue = get_review_queue_surface()
@@ -78,11 +94,17 @@ class ReviewQueueTests(unittest.TestCase):
             (
                 QueueCommand(
                     command_type=QueueCommandType.RESTACK,
-                    ordered_refs=("cp-ticket-1", "cp-source-1", "cp-audience-1", "cp-drift-1"),
+                    ordered_refs=(
+                        "cp-ticket-1",
+                        "cp-source-1",
+                        "cp-audience-1",
+                        "cp-drift-1",
+                    ),
                     reason="owner_load_balance",
                 ),
             ),
         ).to_dict()
-        touched = {item["object_ref"]: item for item in result["waiting_echo"]}
+        waiting_echo = cast(list[dict[str, object]], result["waiting_echo"])
+        touched = {cast(str, item["object_ref"]): item for item in waiting_echo}
         self.assertIn("cp-source-1", touched)
-        self.assertIn("Waiting", touched["cp-source-1"]["waiting_summary"])
+        self.assertIn("Waiting", cast(str, touched["cp-source-1"]["waiting_summary"]))

@@ -1,0 +1,3433 @@
+{
+ "metadata": {
+  "enum_types": {
+   "skill_status": [
+    "active",
+    "processing",
+    "deleting",
+    "deprecated",
+    "archived"
+   ]
+  },
+  "source": "frozen pre-governance models at commit 7702276 (2026-07-27)",
+  "table_count": 36
+ },
+ "tables": {
+  "app_config": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "key",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=100)"
+    },
+    {
+     "comment": null,
+     "name": "value",
+     "nullable": true,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "updated_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [],
+   "indexes": [],
+   "primary_key": [
+    "key"
+   ],
+   "unique_constraints": []
+  },
+  "audit_log": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "timestamp",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    },
+    {
+     "comment": "Employee or agent ID",
+     "name": "principal_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": "human or agent",
+     "name": "principal_type",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=20)"
+    },
+    {
+     "comment": "Action attempted (read, list, delete...)",
+     "name": "action",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=50)"
+    },
+    {
+     "comment": "Type of resource: source, wiki_page, etc.",
+     "name": "resource_type",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=50)"
+    },
+    {
+     "comment": "UUID or identifier of the resource",
+     "name": "resource_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=100)"
+    },
+    {
+     "comment": "allow or deny",
+     "name": "decision",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=10)"
+    },
+    {
+     "comment": "Human-readable reason for the decision",
+     "name": "reason",
+     "nullable": true,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": "Extra context (IP, user agent, request ID...)",
+     "name": "metadata",
+     "nullable": true,
+     "server_default": null,
+     "type": "JSONB(astext_type=Text())"
+    }
+   ],
+   "foreign_keys": [],
+   "indexes": [
+    {
+     "columns": [
+      "principal_id"
+     ],
+     "name": "ix_audit_log_principal",
+     "unique": false,
+     "where": null
+    },
+    {
+     "columns": [
+      "resource_type",
+      "resource_id"
+     ],
+     "name": "ix_audit_log_resource",
+     "unique": false,
+     "where": null
+    },
+    {
+     "columns": [
+      "timestamp"
+     ],
+     "name": "ix_audit_log_timestamp",
+     "unique": false,
+     "where": null
+    }
+   ],
+   "primary_key": [
+    "id"
+   ],
+   "unique_constraints": []
+  },
+  "departments": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "name",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=200)"
+    },
+    {
+     "comment": null,
+     "name": "description",
+     "nullable": true,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "created_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    },
+    {
+     "comment": null,
+     "name": "updated_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [],
+   "indexes": [],
+   "primary_key": [
+    "id"
+   ],
+   "unique_constraints": [
+    {
+     "columns": [
+      "name"
+     ],
+     "name": null
+    }
+   ]
+  },
+  "embedding_jobs": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "model_spec_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=128)"
+    },
+    {
+     "comment": null,
+     "name": "status",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=20)"
+    },
+    {
+     "comment": null,
+     "name": "total_pages",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "done_pages",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "error_message",
+     "nullable": true,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "started_at",
+     "nullable": true,
+     "server_default": null,
+     "type": "DateTime(timezone=True)"
+    },
+    {
+     "comment": null,
+     "name": "finished_at",
+     "nullable": true,
+     "server_default": null,
+     "type": "DateTime(timezone=True)"
+    },
+    {
+     "comment": null,
+     "name": "created_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [],
+   "indexes": [
+    {
+     "columns": [
+      "status",
+      "created_at"
+     ],
+     "name": "ix_embedding_jobs_status",
+     "unique": false,
+     "where": null
+    }
+   ],
+   "primary_key": [
+    "id"
+   ],
+   "unique_constraints": []
+  },
+  "employee_departments": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "employee_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "department_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "created_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [
+    {
+     "columns": [
+      "department_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "departments.id"
+     ]
+    },
+    {
+     "columns": [
+      "employee_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "employees.id"
+     ]
+    }
+   ],
+   "indexes": [
+    {
+     "columns": [
+      "department_id"
+     ],
+     "name": "ix_employee_departments_department_id",
+     "unique": false,
+     "where": null
+    }
+   ],
+   "primary_key": [
+    "employee_id",
+    "department_id"
+   ],
+   "unique_constraints": []
+  },
+  "employees": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "name",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=200)"
+    },
+    {
+     "comment": null,
+     "name": "email",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=200)"
+    },
+    {
+     "comment": "bcrypt hash of password",
+     "name": "password_hash",
+     "nullable": true,
+     "server_default": null,
+     "type": "String(length=500)"
+    },
+    {
+     "comment": "admin or employee \u2014 system-level role",
+     "name": "role",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=20)"
+    },
+    {
+     "comment": "viewer, contributor, knowledge_manager, or admin",
+     "name": "global_role",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=30)"
+    },
+    {
+     "comment": "DEPRECATED \u2014 legacy plaintext token, no longer read or written",
+     "name": "mcp_token",
+     "nullable": true,
+     "server_default": null,
+     "type": "String(length=500)"
+    },
+    {
+     "comment": "HMAC-SHA256(pepper, token) \u2014 primary lookup key for MCP auth",
+     "name": "mcp_token_hash",
+     "nullable": true,
+     "server_default": null,
+     "type": "String(length=64)"
+    },
+    {
+     "comment": "First 12 chars of the token for UI display (e.g. ark_aBcD\u2026)",
+     "name": "mcp_token_prefix",
+     "nullable": true,
+     "server_default": null,
+     "type": "String(length=12)"
+    },
+    {
+     "comment": null,
+     "name": "mcp_token_rotated_at",
+     "nullable": true,
+     "server_default": null,
+     "type": "DateTime(timezone=True)"
+    },
+    {
+     "comment": null,
+     "name": "is_active",
+     "nullable": false,
+     "server_default": null,
+     "type": "Boolean()"
+    },
+    {
+     "comment": null,
+     "name": "last_connected",
+     "nullable": true,
+     "server_default": null,
+     "type": "DateTime(timezone=True)"
+    },
+    {
+     "comment": null,
+     "name": "created_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    },
+    {
+     "comment": null,
+     "name": "updated_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [],
+   "indexes": [
+    {
+     "columns": [
+      "email"
+     ],
+     "name": "ix_employees_email",
+     "unique": false,
+     "where": null
+    },
+    {
+     "columns": [
+      "mcp_token"
+     ],
+     "name": "ix_employees_mcp_token",
+     "unique": false,
+     "where": null
+    },
+    {
+     "columns": [
+      "mcp_token_hash"
+     ],
+     "name": "ix_employees_mcp_token_hash",
+     "unique": true,
+     "where": "mcp_token_hash IS NOT NULL"
+    }
+   ],
+   "primary_key": [
+    "id"
+   ],
+   "unique_constraints": [
+    {
+     "columns": [
+      "email"
+     ],
+     "name": null
+    },
+    {
+     "columns": [
+      "mcp_token"
+     ],
+     "name": null
+    }
+   ]
+  },
+  "knowledge_types": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": "URL-safe identifier, e.g. 'sop', 'product', 'hr-policy'",
+     "name": "slug",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=50)"
+    },
+    {
+     "comment": "Display name, e.g. 'Standard Operating Procedure'",
+     "name": "name",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=100)"
+    },
+    {
+     "comment": "Hex color for UI badge",
+     "name": "color",
+     "nullable": true,
+     "server_default": null,
+     "type": "String(length=20)"
+    },
+    {
+     "comment": null,
+     "name": "description",
+     "nullable": true,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "sort_order",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "created_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [],
+   "indexes": [],
+   "primary_key": [
+    "id"
+   ],
+   "unique_constraints": [
+    {
+     "columns": [
+      "slug"
+     ],
+     "name": null
+    }
+   ]
+  },
+  "mcp_query_log": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "created_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    },
+    {
+     "comment": "Caller; NULL if token resolution failed before call",
+     "name": "employee_id",
+     "nullable": true,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": "MCP tool invoked: search_wiki, read_wiki_page, propose_wiki_edit, ...",
+     "name": "tool_name",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=80)"
+    },
+    {
+     "comment": "Search/query string when applicable",
+     "name": "query_text",
+     "nullable": true,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "result_count",
+     "nullable": true,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "latency_ms",
+     "nullable": true,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": "Department/project/filters used for the call",
+     "name": "scope_metadata",
+     "nullable": true,
+     "server_default": null,
+     "type": "JSONB(astext_type=Text())"
+    },
+    {
+     "comment": "IDs returned (wiki_page_id or source_id list)",
+     "name": "result_ids",
+     "nullable": true,
+     "server_default": null,
+     "type": "JSONB(astext_type=Text())"
+    },
+    {
+     "comment": "ok | error | denied",
+     "name": "status",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=20)"
+    },
+    {
+     "comment": null,
+     "name": "error_message",
+     "nullable": true,
+     "server_default": null,
+     "type": "Text()"
+    }
+   ],
+   "foreign_keys": [
+    {
+     "columns": [
+      "employee_id"
+     ],
+     "ondelete": "SET NULL",
+     "targets": [
+      "employees.id"
+     ]
+    }
+   ],
+   "indexes": [
+    {
+     "columns": [
+      "created_at"
+     ],
+     "name": "ix_mcp_query_log_created_at",
+     "unique": false,
+     "where": null
+    },
+    {
+     "columns": [
+      "employee_id"
+     ],
+     "name": "ix_mcp_query_log_employee_id",
+     "unique": false,
+     "where": null
+    },
+    {
+     "columns": [
+      "tool_name"
+     ],
+     "name": "ix_mcp_query_log_tool_name",
+     "unique": false,
+     "where": null
+    },
+    {
+     "columns": [
+      "created_at",
+      "result_count"
+     ],
+     "name": "ix_mcp_query_log_zero_result",
+     "unique": false,
+     "where": null
+    }
+   ],
+   "primary_key": [
+    "id"
+   ],
+   "unique_constraints": []
+  },
+  "notes": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "title",
+     "nullable": true,
+     "server_default": null,
+     "type": "String(length=500)"
+    },
+    {
+     "comment": null,
+     "name": "content",
+     "nullable": true,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "note_type",
+     "nullable": true,
+     "server_default": null,
+     "type": "String(length=50)"
+    },
+    {
+     "comment": null,
+     "name": "created_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    },
+    {
+     "comment": null,
+     "name": "updated_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [],
+   "indexes": [],
+   "primary_key": [
+    "id"
+   ],
+   "unique_constraints": []
+  },
+  "notifications": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "recipient_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "type",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=80)"
+    },
+    {
+     "comment": null,
+     "name": "subject",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=200)"
+    },
+    {
+     "comment": null,
+     "name": "body",
+     "nullable": false,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "target_type",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=40)"
+    },
+    {
+     "comment": null,
+     "name": "target_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=100)"
+    },
+    {
+     "comment": "Employee who caused the event (author/reviewer)",
+     "name": "actor_id",
+     "nullable": true,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "read_at",
+     "nullable": true,
+     "server_default": null,
+     "type": "DateTime(timezone=True)"
+    },
+    {
+     "comment": null,
+     "name": "created_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [
+    {
+     "columns": [
+      "actor_id"
+     ],
+     "ondelete": "SET NULL",
+     "targets": [
+      "employees.id"
+     ]
+    },
+    {
+     "columns": [
+      "recipient_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "employees.id"
+     ]
+    }
+   ],
+   "indexes": [
+    {
+     "columns": [
+      "created_at"
+     ],
+     "name": "ix_notifications_created_at",
+     "unique": false,
+     "where": null
+    },
+    {
+     "columns": [
+      "recipient_id",
+      "read_at"
+     ],
+     "name": "ix_notifications_recipient_unread",
+     "unique": false,
+     "where": null
+    },
+    {
+     "columns": [
+      "target_type",
+      "target_id"
+     ],
+     "name": "ix_notifications_target",
+     "unique": false,
+     "where": null
+    }
+   ],
+   "primary_key": [
+    "id"
+   ],
+   "unique_constraints": []
+  },
+  "oauth_auth_codes": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "code",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=64)"
+    },
+    {
+     "comment": null,
+     "name": "client_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=64)"
+    },
+    {
+     "comment": null,
+     "name": "employee_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "redirect_uri",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=2000)"
+    },
+    {
+     "comment": null,
+     "name": "code_challenge",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=128)"
+    },
+    {
+     "comment": null,
+     "name": "code_challenge_method",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=10)"
+    },
+    {
+     "comment": null,
+     "name": "scope",
+     "nullable": true,
+     "server_default": null,
+     "type": "String(length=500)"
+    },
+    {
+     "comment": null,
+     "name": "expires_at",
+     "nullable": false,
+     "server_default": null,
+     "type": "DateTime(timezone=True)"
+    },
+    {
+     "comment": null,
+     "name": "used",
+     "nullable": false,
+     "server_default": null,
+     "type": "Boolean()"
+    }
+   ],
+   "foreign_keys": [
+    {
+     "columns": [
+      "client_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "oauth_clients.client_id"
+     ]
+    },
+    {
+     "columns": [
+      "employee_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "employees.id"
+     ]
+    }
+   ],
+   "indexes": [
+    {
+     "columns": [
+      "code"
+     ],
+     "name": "ix_oauth_auth_codes_code",
+     "unique": true,
+     "where": null
+    }
+   ],
+   "primary_key": [
+    "id"
+   ],
+   "unique_constraints": []
+  },
+  "oauth_clients": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "client_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=64)"
+    },
+    {
+     "comment": null,
+     "name": "name",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=200)"
+    },
+    {
+     "comment": null,
+     "name": "redirect_uris",
+     "nullable": false,
+     "server_default": null,
+     "type": "ARRAY(Text())"
+    },
+    {
+     "comment": null,
+     "name": "created_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [],
+   "indexes": [
+    {
+     "columns": [
+      "client_id"
+     ],
+     "name": "ix_oauth_clients_client_id",
+     "unique": true,
+     "where": null
+    }
+   ],
+   "primary_key": [
+    "id"
+   ],
+   "unique_constraints": []
+  },
+  "skill_contributions": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "skill_id",
+     "nullable": true,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "contributor_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": "Version number this contribution was forked from. Null for new skills.",
+     "name": "base_version",
+     "nullable": true,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "status",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=20)"
+    },
+    {
+     "comment": null,
+     "name": "revision_round",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "last_returned_note",
+     "nullable": true,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": "Scope type for NEW skills: global or department",
+     "name": "scope_type",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=20)"
+    },
+    {
+     "comment": "List of Department IDs if scope_type is department",
+     "name": "scope_ids",
+     "nullable": true,
+     "server_default": null,
+     "type": "JSONB(astext_type=Text())"
+    },
+    {
+     "comment": null,
+     "name": "title",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=200)"
+    },
+    {
+     "comment": "MinIO prefix for this contribution's files, e.g. 'skill-contributions/{id}/'",
+     "name": "storage_path",
+     "nullable": true,
+     "server_default": null,
+     "type": "String(length=1000)"
+    },
+    {
+     "comment": null,
+     "name": "created_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    },
+    {
+     "comment": null,
+     "name": "updated_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [
+    {
+     "columns": [
+      "contributor_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "employees.id"
+     ]
+    },
+    {
+     "columns": [
+      "skill_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "skills.id"
+     ]
+    }
+   ],
+   "indexes": [
+    {
+     "columns": [
+      "contributor_id"
+     ],
+     "name": "ix_skill_contributions_contributor_id",
+     "unique": false,
+     "where": null
+    },
+    {
+     "columns": [
+      "status"
+     ],
+     "name": "ix_skill_contributions_status",
+     "unique": false,
+     "where": null
+    }
+   ],
+   "primary_key": [
+    "id"
+   ],
+   "unique_constraints": []
+  },
+  "skill_departments": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "skill_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "department_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    }
+   ],
+   "foreign_keys": [
+    {
+     "columns": [
+      "department_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "departments.id"
+     ]
+    },
+    {
+     "columns": [
+      "skill_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "skills.id"
+     ]
+    }
+   ],
+   "indexes": [],
+   "primary_key": [
+    "skill_id",
+    "department_id"
+   ],
+   "unique_constraints": []
+  },
+  "skill_versions": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "skill_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "version_number",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "version_hash",
+     "nullable": true,
+     "server_default": null,
+     "type": "String(length=64)"
+    },
+    {
+     "comment": null,
+     "name": "storage_path",
+     "nullable": true,
+     "server_default": null,
+     "type": "String(length=1000)"
+    },
+    {
+     "comment": null,
+     "name": "changelog",
+     "nullable": true,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "created_by",
+     "nullable": true,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "created_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [
+    {
+     "columns": [
+      "created_by"
+     ],
+     "ondelete": "SET NULL",
+     "targets": [
+      "employees.id"
+     ]
+    },
+    {
+     "columns": [
+      "skill_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "skills.id"
+     ]
+    }
+   ],
+   "indexes": [
+    {
+     "columns": [
+      "skill_id"
+     ],
+     "name": "ix_skill_versions_skill_id",
+     "unique": false,
+     "where": null
+    }
+   ],
+   "primary_key": [
+    "id"
+   ],
+   "unique_constraints": []
+  },
+  "skills": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "name",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=200)"
+    },
+    {
+     "comment": null,
+     "name": "slug",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=200)"
+    },
+    {
+     "comment": "Scope type: global, project, department, team",
+     "name": "scope_type",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=20)"
+    },
+    {
+     "comment": "Scope entity ID. Null for global scope.",
+     "name": "scope_id",
+     "nullable": true,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "current_version",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "version_hash",
+     "nullable": true,
+     "server_default": null,
+     "type": "String(length=64)"
+    },
+    {
+     "comment": null,
+     "name": "storage_path",
+     "nullable": true,
+     "server_default": null,
+     "type": "String(length=1000)"
+    },
+    {
+     "comment": null,
+     "name": "status",
+     "nullable": false,
+     "server_default": "active",
+     "type": "ENUM('active', 'processing', 'deleting', 'deprecated', 'archived', name='skill_status')"
+    },
+    {
+     "comment": "True for skills seeded from source code. Immutable via API.",
+     "name": "is_system",
+     "nullable": false,
+     "server_default": "false",
+     "type": "Boolean()"
+    },
+    {
+     "comment": null,
+     "name": "created_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    },
+    {
+     "comment": null,
+     "name": "updated_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [],
+   "indexes": [
+    {
+     "columns": [
+      "slug"
+     ],
+     "name": "ix_skills_slug",
+     "unique": true,
+     "where": null
+    }
+   ],
+   "primary_key": [
+    "id"
+   ],
+   "unique_constraints": [
+    {
+     "columns": [
+      "name"
+     ],
+     "name": null
+    }
+   ]
+  },
+  "source_chunk_embeddings_1024": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "embedding",
+     "nullable": false,
+     "server_default": null,
+     "type": "Vector(1024)"
+    },
+    {
+     "comment": null,
+     "name": "source_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "chunk_index",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "model_spec_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=128)"
+    },
+    {
+     "comment": null,
+     "name": "start_char",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "end_char",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "page_number",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "text",
+     "nullable": false,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "content_hash",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=64)"
+    },
+    {
+     "comment": null,
+     "name": "embedded_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [
+    {
+     "columns": [
+      "source_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "sources.id"
+     ]
+    }
+   ],
+   "indexes": [],
+   "primary_key": [
+    "source_id",
+    "chunk_index",
+    "model_spec_id"
+   ],
+   "unique_constraints": []
+  },
+  "source_chunk_embeddings_1536": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "embedding",
+     "nullable": false,
+     "server_default": null,
+     "type": "Vector(1536)"
+    },
+    {
+     "comment": null,
+     "name": "source_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "chunk_index",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "model_spec_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=128)"
+    },
+    {
+     "comment": null,
+     "name": "start_char",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "end_char",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "page_number",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "text",
+     "nullable": false,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "content_hash",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=64)"
+    },
+    {
+     "comment": null,
+     "name": "embedded_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [
+    {
+     "columns": [
+      "source_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "sources.id"
+     ]
+    }
+   ],
+   "indexes": [],
+   "primary_key": [
+    "source_id",
+    "chunk_index",
+    "model_spec_id"
+   ],
+   "unique_constraints": []
+  },
+  "source_chunk_embeddings_3072": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "embedding",
+     "nullable": false,
+     "server_default": null,
+     "type": "HALFVEC(3072)"
+    },
+    {
+     "comment": null,
+     "name": "source_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "chunk_index",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "model_spec_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=128)"
+    },
+    {
+     "comment": null,
+     "name": "start_char",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "end_char",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "page_number",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "text",
+     "nullable": false,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "content_hash",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=64)"
+    },
+    {
+     "comment": null,
+     "name": "embedded_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [
+    {
+     "columns": [
+      "source_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "sources.id"
+     ]
+    }
+   ],
+   "indexes": [],
+   "primary_key": [
+    "source_id",
+    "chunk_index",
+    "model_spec_id"
+   ],
+   "unique_constraints": []
+  },
+  "source_chunk_embeddings_768": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "embedding",
+     "nullable": false,
+     "server_default": null,
+     "type": "Vector(768)"
+    },
+    {
+     "comment": null,
+     "name": "source_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "chunk_index",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "model_spec_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=128)"
+    },
+    {
+     "comment": null,
+     "name": "start_char",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "end_char",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "page_number",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "text",
+     "nullable": false,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "content_hash",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=64)"
+    },
+    {
+     "comment": null,
+     "name": "embedded_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [
+    {
+     "columns": [
+      "source_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "sources.id"
+     ]
+    }
+   ],
+   "indexes": [],
+   "primary_key": [
+    "source_id",
+    "chunk_index",
+    "model_spec_id"
+   ],
+   "unique_constraints": []
+  },
+  "source_chunk_extracts": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "source_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "chunk_index",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "start_char",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "end_char",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "section_path",
+     "nullable": true,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "extract_json",
+     "nullable": true,
+     "server_default": null,
+     "type": "JSONB(astext_type=Text())"
+    },
+    {
+     "comment": null,
+     "name": "status",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=20)"
+    },
+    {
+     "comment": null,
+     "name": "error_message",
+     "nullable": true,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "created_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [
+    {
+     "columns": [
+      "source_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "sources.id"
+     ]
+    }
+   ],
+   "indexes": [
+    {
+     "columns": [
+      "source_id",
+      "status"
+     ],
+     "name": "ix_sce_source_status",
+     "unique": false,
+     "where": null
+    },
+    {
+     "columns": [
+      "source_id"
+     ],
+     "name": "ix_source_chunk_extracts_source_id",
+     "unique": false,
+     "where": null
+    }
+   ],
+   "primary_key": [
+    "id"
+   ],
+   "unique_constraints": [
+    {
+     "columns": [
+      "source_id",
+      "chunk_index"
+     ],
+     "name": "uq_sce_source_chunk"
+    }
+   ]
+  },
+  "source_compilation_plans": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "source_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "plan_json",
+     "nullable": false,
+     "server_default": null,
+     "type": "JSONB(astext_type=Text())"
+    },
+    {
+     "comment": null,
+     "name": "status",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=30)"
+    },
+    {
+     "comment": null,
+     "name": "reviewed_by",
+     "nullable": true,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "review_note",
+     "nullable": true,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "created_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    },
+    {
+     "comment": null,
+     "name": "reviewed_at",
+     "nullable": true,
+     "server_default": null,
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [
+    {
+     "columns": [
+      "reviewed_by"
+     ],
+     "ondelete": "SET NULL",
+     "targets": [
+      "employees.id"
+     ]
+    },
+    {
+     "columns": [
+      "source_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "sources.id"
+     ]
+    }
+   ],
+   "indexes": [
+    {
+     "columns": [
+      "status"
+     ],
+     "name": "ix_scp_status",
+     "unique": false,
+     "where": null
+    }
+   ],
+   "primary_key": [
+    "id"
+   ],
+   "unique_constraints": [
+    {
+     "columns": [
+      "source_id"
+     ],
+     "name": null
+    }
+   ]
+  },
+  "source_departments": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "source_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "department_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    }
+   ],
+   "foreign_keys": [
+    {
+     "columns": [
+      "department_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "departments.id"
+     ]
+    },
+    {
+     "columns": [
+      "source_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "sources.id"
+     ]
+    }
+   ],
+   "indexes": [],
+   "primary_key": [
+    "source_id",
+    "department_id"
+   ],
+   "unique_constraints": []
+  },
+  "source_images": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "source_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "minio_key",
+     "nullable": false,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "page_number",
+     "nullable": true,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "image_index",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "caption",
+     "nullable": true,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "content_type",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=64)"
+    },
+    {
+     "comment": null,
+     "name": "size_bytes",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "created_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [
+    {
+     "columns": [
+      "source_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "sources.id"
+     ]
+    }
+   ],
+   "indexes": [
+    {
+     "columns": [
+      "source_id"
+     ],
+     "name": "ix_source_images_source_id",
+     "unique": false,
+     "where": null
+    }
+   ],
+   "primary_key": [
+    "id"
+   ],
+   "unique_constraints": [
+    {
+     "columns": [
+      "source_id",
+      "image_index"
+     ],
+     "name": "uq_source_images_source_idx"
+    }
+   ]
+  },
+  "sources": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "title",
+     "nullable": true,
+     "server_default": null,
+     "type": "String(length=500)"
+    },
+    {
+     "comment": null,
+     "name": "full_text",
+     "nullable": true,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "source_type",
+     "nullable": true,
+     "server_default": null,
+     "type": "String(length=50)"
+    },
+    {
+     "comment": "Scope type: global or project",
+     "name": "scope_type",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=20)"
+    },
+    {
+     "comment": "Project/workspace ID when scope_type=project. Null for global.",
+     "name": "scope_id",
+     "nullable": true,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "knowledge_type_id",
+     "nullable": true,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "contributed_by_employee_id",
+     "nullable": true,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "file_path",
+     "nullable": true,
+     "server_default": null,
+     "type": "String(length=1000)"
+    },
+    {
+     "comment": null,
+     "name": "url",
+     "nullable": true,
+     "server_default": null,
+     "type": "String(length=2000)"
+    },
+    {
+     "comment": null,
+     "name": "minio_key",
+     "nullable": true,
+     "server_default": null,
+     "type": "String(length=500)"
+    },
+    {
+     "comment": null,
+     "name": "file_name",
+     "nullable": true,
+     "server_default": null,
+     "type": "String(length=500)"
+    },
+    {
+     "comment": null,
+     "name": "file_size",
+     "nullable": true,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "status",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=50)"
+    },
+    {
+     "comment": null,
+     "name": "error_message",
+     "nullable": true,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "progress",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "progress_message",
+     "nullable": true,
+     "server_default": null,
+     "type": "String(length=500)"
+    },
+    {
+     "comment": null,
+     "name": "job_id",
+     "nullable": true,
+     "server_default": null,
+     "type": "String(length=200)"
+    },
+    {
+     "comment": "tiktoken cl100k_base count of full_text. Used by upload gate.",
+     "name": "extracted_token_count",
+     "nullable": true,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": "Times sweep_stuck_processing_cron has flipped this source from 'processing' back to 'error'. Reset on successful plan_ready/ready. Gated by settings.max_auto_recover_attempts.",
+     "name": "auto_recover_count",
+     "nullable": false,
+     "server_default": "0",
+     "type": "Integer()"
+    },
+    {
+     "comment": "single_pass | standard | hierarchical \u2014 set by Phase 0 triage",
+     "name": "pipeline_strategy",
+     "nullable": true,
+     "server_default": null,
+     "type": "String(length=20)"
+    },
+    {
+     "comment": "Current MRP phase: map | reduce | plan_review | refine | verify | commit",
+     "name": "pipeline_phase",
+     "nullable": true,
+     "server_default": null,
+     "type": "String(length=30)"
+    },
+    {
+     "comment": "If True, skip the LLM wiki pipeline (MRP). The raw full_text is chunked + embedded as-is into source_chunk_embeddings_<dim> so it is searchable in the same semantic pool as wiki pages, but never rewritten. For high-fidelity docs (decrees, official gazettes).",
+     "name": "preserve_verbatim",
+     "nullable": false,
+     "server_default": "false",
+     "type": "Boolean()"
+    },
+    {
+     "comment": null,
+     "name": "outline_json",
+     "nullable": true,
+     "server_default": null,
+     "type": "JSONB(astext_type=Text())"
+    },
+    {
+     "comment": null,
+     "name": "page_offsets",
+     "nullable": true,
+     "server_default": null,
+     "type": "JSONB(astext_type=Text())"
+    },
+    {
+     "comment": null,
+     "name": "metadata",
+     "nullable": true,
+     "server_default": null,
+     "type": "JSONB(astext_type=Text())"
+    },
+    {
+     "comment": null,
+     "name": "created_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    },
+    {
+     "comment": null,
+     "name": "updated_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [
+    {
+     "columns": [
+      "contributed_by_employee_id"
+     ],
+     "ondelete": "SET NULL",
+     "targets": [
+      "employees.id"
+     ]
+    },
+    {
+     "columns": [
+      "knowledge_type_id"
+     ],
+     "ondelete": "SET NULL",
+     "targets": [
+      "knowledge_types.id"
+     ]
+    }
+   ],
+   "indexes": [],
+   "primary_key": [
+    "id"
+   ],
+   "unique_constraints": []
+  },
+  "stats_daily_rollup": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": "UTC date the metric covers (midnight UTC)",
+     "name": "date",
+     "nullable": false,
+     "server_default": null,
+     "type": "DateTime(timezone=True)"
+    },
+    {
+     "comment": "e.g. wiki.pages.total, mcp.queries.zero_result, draft.pending",
+     "name": "metric_key",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=80)"
+    },
+    {
+     "comment": "{department_id, project_id, tool_name, source}",
+     "name": "dimensions",
+     "nullable": true,
+     "server_default": null,
+     "type": "JSONB(astext_type=Text())"
+    },
+    {
+     "comment": "md5 of canonical-serialized dimensions; empty string when dimensions is NULL",
+     "name": "dimensions_hash",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=64)"
+    },
+    {
+     "comment": null,
+     "name": "value_numeric",
+     "nullable": true,
+     "server_default": null,
+     "type": "Float()"
+    },
+    {
+     "comment": null,
+     "name": "value_json",
+     "nullable": true,
+     "server_default": null,
+     "type": "JSONB(astext_type=Text())"
+    },
+    {
+     "comment": null,
+     "name": "computed_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [],
+   "indexes": [
+    {
+     "columns": [
+      "date"
+     ],
+     "name": "ix_stats_rollup_date",
+     "unique": false,
+     "where": null
+    },
+    {
+     "columns": [
+      "metric_key",
+      "date"
+     ],
+     "name": "ix_stats_rollup_metric",
+     "unique": false,
+     "where": null
+    }
+   ],
+   "primary_key": [
+    "id"
+   ],
+   "unique_constraints": [
+    {
+     "columns": [
+      "date",
+      "metric_key",
+      "dimensions_hash"
+     ],
+     "name": "uq_stats_rollup_keys"
+    }
+   ]
+  },
+  "wiki_branches": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "name",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=100)"
+    },
+    {
+     "comment": null,
+     "name": "description",
+     "nullable": true,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "scope_type",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=20)"
+    },
+    {
+     "comment": null,
+     "name": "scope_id",
+     "nullable": true,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "author_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "status",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=20)"
+    },
+    {
+     "comment": null,
+     "name": "has_conflict",
+     "nullable": false,
+     "server_default": null,
+     "type": "Boolean()"
+    },
+    {
+     "comment": null,
+     "name": "reviewer_id",
+     "nullable": true,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "reviewed_at",
+     "nullable": true,
+     "server_default": null,
+     "type": "DateTime(timezone=True)"
+    },
+    {
+     "comment": null,
+     "name": "reviewer_note",
+     "nullable": true,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "created_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    },
+    {
+     "comment": null,
+     "name": "updated_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [
+    {
+     "columns": [
+      "author_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "employees.id"
+     ]
+    },
+    {
+     "columns": [
+      "reviewer_id"
+     ],
+     "ondelete": "SET NULL",
+     "targets": [
+      "employees.id"
+     ]
+    }
+   ],
+   "indexes": [
+    {
+     "columns": [
+      "author_id"
+     ],
+     "name": "ix_wiki_branches_author_id",
+     "unique": false,
+     "where": null
+    },
+    {
+     "columns": [
+      "status"
+     ],
+     "name": "ix_wiki_branches_status",
+     "unique": false,
+     "where": null
+    }
+   ],
+   "primary_key": [
+    "id"
+   ],
+   "unique_constraints": []
+  },
+  "wiki_draft_rounds": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "draft_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "round_no",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "content_md",
+     "nullable": false,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "author_note",
+     "nullable": true,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "reviewer_return_note",
+     "nullable": true,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "ai_check_results",
+     "nullable": true,
+     "server_default": null,
+     "type": "JSONB(astext_type=Text())"
+    },
+    {
+     "comment": null,
+     "name": "submitted_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [
+    {
+     "columns": [
+      "draft_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "wiki_page_drafts.id"
+     ]
+    }
+   ],
+   "indexes": [
+    {
+     "columns": [
+      "draft_id",
+      "round_no"
+     ],
+     "name": "ix_wiki_draft_rounds_draft_id",
+     "unique": false,
+     "where": null
+    }
+   ],
+   "primary_key": [
+    "id"
+   ],
+   "unique_constraints": []
+  },
+  "wiki_links": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "from_page_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "to_slug",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=300)"
+    }
+   ],
+   "foreign_keys": [
+    {
+     "columns": [
+      "from_page_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "wiki_pages.id"
+     ]
+    }
+   ],
+   "indexes": [
+    {
+     "columns": [
+      "from_page_id"
+     ],
+     "name": "ix_wiki_links_from_page_id",
+     "unique": false,
+     "where": null
+    },
+    {
+     "columns": [
+      "to_slug"
+     ],
+     "name": "ix_wiki_links_to_slug",
+     "unique": false,
+     "where": null
+    }
+   ],
+   "primary_key": [
+    "from_page_id",
+    "to_slug"
+   ],
+   "unique_constraints": []
+  },
+  "wiki_page_drafts": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "page_id",
+     "nullable": true,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "draft_kind",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=20)"
+    },
+    {
+     "comment": null,
+     "name": "suggested_metadata",
+     "nullable": true,
+     "server_default": null,
+     "type": "JSONB(astext_type=Text())"
+    },
+    {
+     "comment": null,
+     "name": "author_id",
+     "nullable": true,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "content_md",
+     "nullable": false,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "note",
+     "nullable": true,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "base_version",
+     "nullable": true,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "revision_round",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "last_returned_note",
+     "nullable": true,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "ai_check_status",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=20)"
+    },
+    {
+     "comment": null,
+     "name": "ai_check_results",
+     "nullable": true,
+     "server_default": null,
+     "type": "JSONB(astext_type=Text())"
+    },
+    {
+     "comment": null,
+     "name": "ai_checked_at",
+     "nullable": true,
+     "server_default": null,
+     "type": "DateTime(timezone=True)"
+    },
+    {
+     "comment": null,
+     "name": "status",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=20)"
+    },
+    {
+     "comment": null,
+     "name": "source",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=40)"
+    },
+    {
+     "comment": null,
+     "name": "source_metadata",
+     "nullable": true,
+     "server_default": null,
+     "type": "JSONB(astext_type=Text())"
+    },
+    {
+     "comment": null,
+     "name": "branch_id",
+     "nullable": true,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "reviewed_by_id",
+     "nullable": true,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "reviewed_at",
+     "nullable": true,
+     "server_default": null,
+     "type": "DateTime(timezone=True)"
+    },
+    {
+     "comment": null,
+     "name": "reviewer_note",
+     "nullable": true,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "created_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    },
+    {
+     "comment": null,
+     "name": "updated_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [
+    {
+     "columns": [
+      "author_id"
+     ],
+     "ondelete": "SET NULL",
+     "targets": [
+      "employees.id"
+     ]
+    },
+    {
+     "columns": [
+      "branch_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "wiki_branches.id"
+     ]
+    },
+    {
+     "columns": [
+      "page_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "wiki_pages.id"
+     ]
+    },
+    {
+     "columns": [
+      "reviewed_by_id"
+     ],
+     "ondelete": "SET NULL",
+     "targets": [
+      "employees.id"
+     ]
+    }
+   ],
+   "indexes": [
+    {
+     "columns": [
+      "author_id"
+     ],
+     "name": "ix_wiki_drafts_author_id",
+     "unique": false,
+     "where": null
+    },
+    {
+     "columns": [
+      "branch_id"
+     ],
+     "name": "ix_wiki_drafts_branch_id",
+     "unique": false,
+     "where": null
+    },
+    {
+     "columns": [
+      "page_id"
+     ],
+     "name": "ix_wiki_drafts_page_id",
+     "unique": false,
+     "where": null
+    },
+    {
+     "columns": [
+      "status"
+     ],
+     "name": "ix_wiki_drafts_status",
+     "unique": false,
+     "where": null
+    }
+   ],
+   "primary_key": [
+    "id"
+   ],
+   "unique_constraints": []
+  },
+  "wiki_page_embeddings_1024": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "embedding",
+     "nullable": false,
+     "server_default": null,
+     "type": "Vector(1024)"
+    },
+    {
+     "comment": null,
+     "name": "page_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "model_spec_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=128)"
+    },
+    {
+     "comment": null,
+     "name": "content_hash",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=64)"
+    },
+    {
+     "comment": null,
+     "name": "embedded_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [
+    {
+     "columns": [
+      "page_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "wiki_pages.id"
+     ]
+    }
+   ],
+   "indexes": [],
+   "primary_key": [
+    "page_id",
+    "model_spec_id"
+   ],
+   "unique_constraints": []
+  },
+  "wiki_page_embeddings_1536": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "embedding",
+     "nullable": false,
+     "server_default": null,
+     "type": "Vector(1536)"
+    },
+    {
+     "comment": null,
+     "name": "page_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "model_spec_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=128)"
+    },
+    {
+     "comment": null,
+     "name": "content_hash",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=64)"
+    },
+    {
+     "comment": null,
+     "name": "embedded_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [
+    {
+     "columns": [
+      "page_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "wiki_pages.id"
+     ]
+    }
+   ],
+   "indexes": [],
+   "primary_key": [
+    "page_id",
+    "model_spec_id"
+   ],
+   "unique_constraints": []
+  },
+  "wiki_page_embeddings_3072": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "embedding",
+     "nullable": false,
+     "server_default": null,
+     "type": "HALFVEC(3072)"
+    },
+    {
+     "comment": null,
+     "name": "page_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "model_spec_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=128)"
+    },
+    {
+     "comment": null,
+     "name": "content_hash",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=64)"
+    },
+    {
+     "comment": null,
+     "name": "embedded_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [
+    {
+     "columns": [
+      "page_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "wiki_pages.id"
+     ]
+    }
+   ],
+   "indexes": [],
+   "primary_key": [
+    "page_id",
+    "model_spec_id"
+   ],
+   "unique_constraints": []
+  },
+  "wiki_page_embeddings_768": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "embedding",
+     "nullable": false,
+     "server_default": null,
+     "type": "Vector(768)"
+    },
+    {
+     "comment": null,
+     "name": "page_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "model_spec_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=128)"
+    },
+    {
+     "comment": null,
+     "name": "content_hash",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=64)"
+    },
+    {
+     "comment": null,
+     "name": "embedded_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [
+    {
+     "columns": [
+      "page_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "wiki_pages.id"
+     ]
+    }
+   ],
+   "indexes": [],
+   "primary_key": [
+    "page_id",
+    "model_spec_id"
+   ],
+   "unique_constraints": []
+  },
+  "wiki_page_revisions": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "page_id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "version",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "content_md",
+     "nullable": false,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "change_type",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=30)"
+    },
+    {
+     "comment": null,
+     "name": "draft_id",
+     "nullable": true,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "changed_by_id",
+     "nullable": true,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "change_note",
+     "nullable": true,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "created_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [
+    {
+     "columns": [
+      "changed_by_id"
+     ],
+     "ondelete": "SET NULL",
+     "targets": [
+      "employees.id"
+     ]
+    },
+    {
+     "columns": [
+      "draft_id"
+     ],
+     "ondelete": "SET NULL",
+     "targets": [
+      "wiki_page_drafts.id"
+     ]
+    },
+    {
+     "columns": [
+      "page_id"
+     ],
+     "ondelete": "CASCADE",
+     "targets": [
+      "wiki_pages.id"
+     ]
+    }
+   ],
+   "indexes": [
+    {
+     "columns": [
+      "page_id"
+     ],
+     "name": "ix_wiki_revisions_page_id",
+     "unique": false,
+     "where": null
+    },
+    {
+     "columns": [
+      "page_id",
+      "version"
+     ],
+     "name": "uq_wiki_revisions_page_version",
+     "unique": true,
+     "where": null
+    }
+   ],
+   "primary_key": [
+    "id"
+   ],
+   "unique_constraints": []
+  },
+  "wiki_pages": {
+   "columns": [
+    {
+     "comment": null,
+     "name": "id",
+     "nullable": false,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "slug",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=300)"
+    },
+    {
+     "comment": null,
+     "name": "title",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=500)"
+    },
+    {
+     "comment": "Lifecycle status: seed | developing | mature | evergreen",
+     "name": "status",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=20)"
+    },
+    {
+     "comment": null,
+     "name": "content_md",
+     "nullable": false,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": null,
+     "name": "summary",
+     "nullable": false,
+     "server_default": null,
+     "type": "Text()"
+    },
+    {
+     "comment": "Scope type: global or project",
+     "name": "scope_type",
+     "nullable": false,
+     "server_default": null,
+     "type": "String(length=20)"
+    },
+    {
+     "comment": "Project/workspace ID. Null for global scope.",
+     "name": "scope_id",
+     "nullable": true,
+     "server_default": null,
+     "type": "UUID(as_uuid=True)"
+    },
+    {
+     "comment": null,
+     "name": "knowledge_type_slugs",
+     "nullable": false,
+     "server_default": null,
+     "type": "ARRAY(String())"
+    },
+    {
+     "comment": null,
+     "name": "source_ids",
+     "nullable": false,
+     "server_default": null,
+     "type": "ARRAY(UUID(as_uuid=True))"
+    },
+    {
+     "comment": null,
+     "name": "version",
+     "nullable": false,
+     "server_default": null,
+     "type": "Integer()"
+    },
+    {
+     "comment": null,
+     "name": "orphaned",
+     "nullable": false,
+     "server_default": null,
+     "type": "Boolean()"
+    },
+    {
+     "comment": null,
+     "name": "created_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    },
+    {
+     "comment": null,
+     "name": "updated_at",
+     "nullable": false,
+     "server_default": "now()",
+     "type": "DateTime(timezone=True)"
+    }
+   ],
+   "foreign_keys": [],
+   "indexes": [
+    {
+     "columns": [
+      "status"
+     ],
+     "name": "ix_wiki_pages_status",
+     "unique": false,
+     "where": null
+    }
+   ],
+   "primary_key": [
+    "id"
+   ],
+   "unique_constraints": []
+  }
+ }
+}

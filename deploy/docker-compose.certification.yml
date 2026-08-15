@@ -1,7 +1,22 @@
 # Isolated self-hosted certification overlay. Never use without
 # deploy/docker-compose.prod.yml as the first Compose file.
 services:
+  postgres:
+    restart: "no"
+    ports:
+      - "127.0.0.1:${CYGNUS_CERTIFICATION_POSTGRES_PORT:-15432}:5432"
+  redis:
+    restart: "no"
+    ports:
+      - "127.0.0.1:${CYGNUS_CERTIFICATION_REDIS_PORT:-16379}:6379"
+  minio:
+    restart: "no"
+    ports:
+      - "127.0.0.1:${CYGNUS_CERTIFICATION_MINIO_PORT:-19000}:9000"
+  migrator:
+    restart: "no"
   api:
+    restart: "no"
     environment:
       CYGNUS_CERTIFICATION_MODE: "1"
       DELIVERY_TARGETS_JSON: "${CYGNUS_CERTIFICATION_DELIVERY_TARGETS_JSON:?certification delivery targets required}"
@@ -9,19 +24,17 @@ services:
       SSL_CERT_FILE: /run/secrets/cygnus_tls_cert
     secrets:
       - cygnus_tls_cert
+  delivery-consumer:
+    restart: "no"
   worker:
+    restart: "no"
     environment:
       DELIVERY_TARGETS_JSON: "${CYGNUS_CERTIFICATION_DELIVERY_TARGETS_JSON:?certification delivery targets required}"
       CYGNUS_DELIVERY_ALLOWED_HOSTS: "frontend"
       SSL_CERT_FILE: /run/secrets/cygnus_tls_cert
     secrets:
       - cygnus_tls_cert
-  postgres:
-    ports:
-      - "127.0.0.1:${CYGNUS_CERTIFICATION_POSTGRES_PORT:-15432}:5432"
-  redis:
-    ports:
-      - "127.0.0.1:${CYGNUS_CERTIFICATION_REDIS_PORT:-16379}:6379"
-  minio:
-    ports:
-      - "127.0.0.1:${CYGNUS_CERTIFICATION_MINIO_PORT:-19000}:9000"
+  worker-skills:
+    restart: "no"
+  frontend:
+    restart: "no"

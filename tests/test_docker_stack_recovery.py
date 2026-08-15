@@ -8,8 +8,11 @@ import re
 import tempfile
 import subprocess
 import sys
+from typing import cast
 import unittest
 from unittest import mock
+
+import yaml
 
 
 class DockerStackRecoveryTests(unittest.TestCase):
@@ -370,8 +373,30 @@ class DockerStackRecoveryTests(unittest.TestCase):
             certification_stack.index(certification_network_override),
         )
         self.assertNotIn(production_policy_validation, rollout_section)
-        self.assertNotIn("\n  delivery-consumer:", certification)
-        self.assertNotIn("\n  frontend:", certification)
+        certification_document = cast(
+            dict[str, object], cast(object, yaml.safe_load(certification))
+        )
+        certification_services = cast(
+            dict[str, dict[str, str]], certification_document["services"]
+        )
+        expected_ephemeral_services = {
+            "postgres",
+            "redis",
+            "minio",
+            "migrator",
+            "api",
+            "delivery-consumer",
+            "worker",
+            "worker-skills",
+            "frontend",
+        }
+        self.assertEqual(set(certification_services), expected_ephemeral_services)
+        for service_name in expected_ephemeral_services:
+            self.assertEqual(
+                certification_services[service_name]["restart"],
+                "no",
+                f"{service_name} must not restart after a runner or host failure",
+            )
         self.assertEqual(
             certification.count("CYGNUS_CERTIFICATION_DELIVERY_TARGETS_JSON"),
             2,
@@ -417,6 +442,14 @@ class DockerStackRecoveryTests(unittest.TestCase):
             '"${COMPOSE[@]}" stop api worker worker-skills delivery-consumer',
             certification_stack,
         )
+        self.assertIn(
+            '"${COMPOSE[@]}" config --format json | python3 "$REPO_ROOT/scripts/certification_host_capacity_gate.py"',
+            certification_stack,
+        )
+        self.assertIn(
+            "up|redeploy|recover|resume|restart) verify_certification_host_capacity ;;",
+            certification_stack,
+        )
         resume_order = (
             '"${COMPOSE[@]}" start "${PRODUCTION_INGRESS_BACKEND_SERVICES[@]}"',
             "compose_wait_for_delivery_consumer",
@@ -448,6 +481,98 @@ class DockerStackRecoveryTests(unittest.TestCase):
         for section in (recover_section, rollout_section):
             positions = [section.index(fragment) for fragment in gated_order]
             self.assertEqual(positions, sorted(positions))
+
+    def test_certification_host_capacity_gate_uses_rendered_limits(self) -> None:
+        compose_config = {
+            "services": {
+                "api": {
+                    "deploy": {
+                        "resources": {"limits": {"memory": "268435456", "cpus": "0.5"}}
+                    }
+                },
+                "postgres": {
+                    "deploy": {
+                        "resources": {"limits": {"memory": "402653184", "cpus": "0.75"}}
+                    }
+                },
+            }
+        }
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            meminfo = Path(temporary_directory, "meminfo")
+            command = [
+                sys.executable,
+                "scripts/certification_host_capacity_gate.py",
+                "--meminfo",
+                str(meminfo),
+            ]
+            _ = meminfo.write_text(
+                "MemTotal: 500000 kB\nMemAvailable: 200000 kB\nSwapFree: 4000000 kB\n",
+                encoding="utf-8",
+            )
+            blocked = subprocess.run(
+                command,
+                input=json.dumps(compose_config),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(blocked.returncode, 1)
+            self.assertIn("host has 512000000 physical memory bytes", blocked.stderr)
+            self.assertIn(
+                "currently has 204800000 available physical memory bytes",
+                blocked.stderr,
+            )
+
+            _ = meminfo.write_text(
+                "MemTotal: 800000 kB\nMemAvailable: 700000 kB\nSwapFree: 0 kB\n",
+                encoding="utf-8",
+            )
+            passed = subprocess.run(
+                command,
+                input=json.dumps(compose_config),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(passed.returncode, 0, passed.stderr)
+            self.assertIn(
+                "total=819200000 available=716800000 required=671088640",
+                passed.stdout,
+            )
+            cpu_blocked = subprocess.run(
+                command,
+                input=json.dumps(
+                    {
+                        "services": {
+                            "api": {
+                                "deploy": {
+                                    "resources": {
+                                        "limits": {"memory": "1", "cpus": "999"}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                ),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(cpu_blocked.returncode, 1)
+            self.assertIn(
+                "logical CPUs but rendered service limits require 999.0 CPUs",
+                cpu_blocked.stderr,
+            )
+
+            missing_limit = subprocess.run(
+                command,
+                input=json.dumps({"services": {"api": {}}}),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(missing_limit.returncode, 1)
+            self.assertIn("has no rendered numeric memory limit", missing_limit.stderr)
 
     def test_production_network_gate_accepts_bound_nonstandard_tls_origin(
         self,

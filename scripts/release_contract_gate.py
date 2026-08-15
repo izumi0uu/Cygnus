@@ -46,6 +46,15 @@ def _read(root: Path, relative: str) -> str:
     return (root / relative).read_text(encoding="utf-8")
 
 
+def _certification_restart_only(compose: str, service: str) -> bool:
+    return bool(
+        re.search(
+            rf'(?m)^  {re.escape(service)}:\n    restart: "no"\n(?=  [A-Za-z0-9-]+:|\Z)',
+            compose,
+        )
+    )
+
+
 def _image_refs(root: Path) -> set[str]:
     refs: set[str] = set()
     for relative in ("Dockerfile", "frontend/Dockerfile"):
@@ -67,6 +76,7 @@ def validate_repository(root: Path = REPO_ROOT) -> GateResult:
         "docker-compose.yml",
         "deploy/docker-compose.prod.yml",
         "deploy/docker-compose.certification.yml",
+        "scripts/certification_host_capacity_gate.py",
         "deploy/nginx/nginx.prod.conf.template",
         "deploy/image-lock.json",
         "config/observability/alert_rules.yml",
@@ -587,11 +597,20 @@ def validate_repository(root: Path = REPO_ROOT) -> GateResult:
         "uses_production_compose_first": (
             '-f "$COMPOSE_FILE" -f "$CERTIFICATION_COMPOSE_FILE"' in certification_stack
         ),
-        "does_not_override_consumer": not bool(
-            re.search(r"(?m)^  delivery-consumer:", certification_compose)
+        "consumer_override_is_restart_only": _certification_restart_only(
+            certification_compose, "delivery-consumer"
         ),
-        "does_not_override_frontend": not bool(
-            re.search(r"(?m)^  frontend:", certification_compose)
+        "frontend_override_is_restart_only": _certification_restart_only(
+            certification_compose, "frontend"
+        ),
+        "all_certification_services_disable_restart": (
+            certification_compose.count('restart: "no"') == 9
+        ),
+        "preflights_rendered_host_capacity": (
+            '"${COMPOSE[@]}" config --format json | python3 "$REPO_ROOT/scripts/certification_host_capacity_gate.py"'
+            in certification_stack
+            and "up|redeploy|recover|resume|restart) verify_certification_host_capacity ;;"
+            in certification_stack
         ),
         "uses_https_origin": (
             'CERTIFICATION_ORIGIN="https://127.0.0.1:$CYGNUS_HTTPS_BIND_PORT"'

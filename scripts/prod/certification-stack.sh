@@ -92,6 +92,19 @@ COMPOSE=(docker compose --project-name "$COMPOSE_PROJECT_NAME" --project-directo
 SMOKE_RECEIPT="${CYGNUS_CERTIFICATION_SMOKE_RECEIPT:-$OPERATOR_WORK_DIR/$RELEASE/certification/governance-smoke.json}"
 DOMAIN_STATE="${CYGNUS_CERTIFICATION_DOMAIN_STATE:-$OPERATOR_WORK_DIR/$RELEASE/certification/persisted-domain-state.json}"
 DOMAIN_RESULT="${CYGNUS_CERTIFICATION_DOMAIN_RESULT:-$OPERATOR_WORK_DIR/$RELEASE/certification/persisted-domain-result.json}"
+CERTIFICATION_HOST_CAPACITY_REPORT="${CYGNUS_CERTIFICATION_HOST_CAPACITY_REPORT:-${CYGNUS_CERTIFICATION_ARTIFACT_DIR:-$OPERATOR_WORK_DIR/$RELEASE/certification}/host-capacity.json}"
+
+verify_certification_host_capacity() {
+  mkdir -p "$(dirname "$CERTIFICATION_HOST_CAPACITY_REPORT")"
+  if ! "${COMPOSE[@]}" config --format json | python3 "$REPO_ROOT/scripts/certification_host_capacity_gate.py" --meminfo /proc/meminfo --report "$CERTIFICATION_HOST_CAPACITY_REPORT"; then
+    die "certification host cannot honor rendered service CPU and memory limits; see $CERTIFICATION_HOST_CAPACITY_REPORT"
+  fi
+}
+
+case "$ACTION" in
+  up|redeploy|recover|resume|restart) verify_certification_host_capacity ;;
+esac
+
 
 verify_certification_delivery_ingress() {
   local deadline body delivery_response delivery_status delivery_body delivery_signature readiness_status

@@ -41,6 +41,7 @@ from cygnus.runtime.database.models import (
     WikiPageDraft,
 )
 from cygnus.runtime.services.audit_service import log_audit
+from cygnus.observability import record_governance_route
 
 
 MAX_FEEDBACK_ROUTE_ATTEMPTS = 3
@@ -675,6 +676,10 @@ async def _append_terminal_audit(
         "governance_feedback_route",
         str(route.id),
         reason="; ".join(part for part in reason_parts if part is not None),
+    )
+    record_governance_route(
+        route_kind=route.route_kind,
+        reason=terminal_reason or outcome,
     )
 
 

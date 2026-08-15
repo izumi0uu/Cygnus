@@ -3,7 +3,11 @@ from __future__ import annotations
 import unittest
 
 from cygnus.domain import AudienceContext, Visibility
-from cygnus.retrieval import KnowledgeObjectIndex, sample_knowledge_objects, sample_support_evidence
+from cygnus.retrieval import (
+    KnowledgeObjectIndex,
+    sample_knowledge_objects,
+    sample_support_evidence,
+)
 
 
 class KnowledgeObjectIndexTests(unittest.TestCase):
@@ -75,7 +79,11 @@ class KnowledgeObjectIndexTests(unittest.TestCase):
         )
 
         self.assertEqual(len(results), 2)
-        answer = next(item for item in results if item.object_id == "ko-invoice-export-enterprise-eu")
+        answer = next(
+            item
+            for item in results
+            if item.object_id == "ko-invoice-export-enterprise-eu"
+        )
         self.assertEqual(answer.trace_ref, "trace:ko-invoice-export-enterprise-eu")
         self.assertEqual(answer.freshness.value, "stale")
 

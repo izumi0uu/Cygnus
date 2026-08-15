@@ -33,11 +33,13 @@ from typing import Any, Optional, Protocol
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cygnus.governance.approval_guards import approval_digest
 from cygnus.governance.ledger import (
     GovernanceEventType,
     GovernanceLedgerConflict,
     append_draft_event,
     lock_draft_aggregate,
+    lock_governance_command,
     record_created_draft,
     record_draft_proposal,
     record_draft_review_request,
@@ -50,6 +52,8 @@ from cygnus.runtime.database.models import (
     SkillContribution,
     SkillContributionStatus,
     GovernanceLedgerEvent,
+    Source,
+    SourceDepartment,
     WikiDraftRound,
     WikiPage,
     WikiPageDraft,
@@ -103,7 +107,7 @@ def build_initial_draft_content(title: str, summary: str) -> str:
 async def create_wiki_draft(
     session: AsyncSession,
     page_id: Optional[uuid.UUID],
-    author_id: uuid.UUID,
+    author_id: Optional[uuid.UUID],
     content_md: str,
     note: Optional[str] = None,
     source: str = "web_ui",
@@ -112,14 +116,20 @@ async def create_wiki_draft(
     draft_kind: str = "edit",
     suggested_metadata: Optional[dict[str, Any]] = None,
     submit_for_review: bool = True,
+    draft_id: Optional[uuid.UUID] = None,
 ) -> WikiPageDraft:
     """Persist a draft, optionally submitting it to the existing review queue.
 
     Legacy runtime callers retain the historical create-and-submit behavior.
     Session-facing adapters can persist a real ``draft`` first, then invoke
     :func:`submit_wiki_draft` when the author explicitly requests review.
+
+    ``author_id`` is nullable because compiler-originated content has source
+    provenance but no human author. A human reviewer/admin must still submit,
+    approve, and publish that staged draft through the normal state machine.
     """
     draft = WikiPageDraft(
+        id=draft_id or uuid.uuid4(),
         page_id=page_id,
         author_id=author_id,
         content_md=content_md,
@@ -139,6 +149,354 @@ async def create_wiki_draft(
     else:
         _ = await record_draft_proposal(session, draft)
     return draft
+
+
+class CompilationDraftConflict(Exception):
+    """Raised when a compiler retry would change an existing durable draft."""
+
+
+class CompilationDraftContextConflict(Exception):
+    """Raised when source truth changed after a compiler draft was staged."""
+
+
+def _compiler_draft_identity(
+    *,
+    source_id: uuid.UUID,
+    generation: int,
+    scope_type: str,
+    scope_id: uuid.UUID | None,
+    language: str,
+    slug: str,
+    page_id: uuid.UUID | None,
+) -> str:
+    """Return the stable identity for one source-generation compilation unit."""
+    return ":".join(
+        (
+            "compiler-draft",
+            str(source_id),
+            str(generation),
+            scope_type,
+            str(scope_id) if scope_id is not None else "global",
+            language,
+            slug,
+            str(page_id) if page_id is not None else "create",
+        )
+    )
+
+
+def _compiler_source_ids(page: WikiPage | None, source_id: uuid.UUID) -> list[str]:
+    """Union current page provenance with the exact compiling source once."""
+    source_ids = [str(item) for item in (page.source_ids or ())] if page else []
+    if str(source_id) not in source_ids:
+        source_ids.append(str(source_id))
+    return source_ids
+
+
+async def _resolved_source_scope_targets(
+    session: AsyncSession,
+    source: Source,
+) -> tuple[str, ...]:
+    """Canonical scope fan-out used to fence compiler drafts at approval."""
+    scope_type = (source.scope_type or "global").strip()
+    if scope_type in {"department", "project"}:
+        if source.scope_id is None:
+            return ()
+        return (f"{scope_type}:{source.scope_id}",)
+    if scope_type != "global" or source.scope_id is not None:
+        return ()
+    department_ids = tuple(
+        (
+            await session.execute(
+                select(SourceDepartment.department_id)
+                .where(SourceDepartment.source_id == source.id)
+                .order_by(SourceDepartment.department_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return (
+        tuple(f"department:{department_id}" for department_id in department_ids)
+        if department_ids
+        else ("global",)
+    )
+
+
+async def stage_compilation_wiki_draft(
+    session: AsyncSession,
+    *,
+    source: Any,
+    page: WikiPage | None,
+    slug: str,
+    title: str,
+    page_type: str,
+    content_md: str,
+    summary: str,
+    knowledge_type_slug: str | None,
+    scope_type: str,
+    scope_id: uuid.UUID | None,
+    language: str,
+    compiler: str,
+) -> tuple[WikiPageDraft, bool]:
+    """Stage one compiler result as an idempotent, human-reviewable draft.
+
+    A compiler generation is allowed to produce exactly one durable draft for
+    each source/scope/language/slug target. A retry returning the same bytes is
+    an exact replay; changed bytes or a different base version are rejected
+    rather than silently creating a second generated proposal.
+    """
+    normalized_slug = slug.strip().lower()
+    if not normalized_slug:
+        raise ValueError("compiler draft slug must not be blank")
+    normalized_language = language.strip().lower()
+    if not normalized_language:
+        raise ValueError("compiler draft language must not be blank")
+    body = content_md.strip()
+    if not body:
+        raise ValueError("compiler draft content must not be blank")
+
+    page_id = page.id if page is not None else None
+    base_version = page.version if page is not None else None
+    generation = int(getattr(source, "dispatch_generation", 0) or 0)
+    identity = _compiler_draft_identity(
+        source_id=source.id,
+        generation=generation,
+        scope_type=scope_type,
+        scope_id=scope_id,
+        language=normalized_language,
+        slug=normalized_slug,
+        page_id=page_id,
+    )
+    draft_id = uuid.uuid5(uuid.NAMESPACE_URL, f"cygnus:{identity}")
+    source_ids = _compiler_source_ids(page, source.id)
+    proposed_metadata = {
+        "title": title.strip(),
+        "summary": summary.strip(),
+        "knowledge_type_slugs": [knowledge_type_slug]
+        if knowledge_type_slug
+        else list(page.knowledge_type_slugs or ())
+        if page is not None
+        else [],
+        "language": normalized_language,
+    }
+    resolved_scope_targets = await _resolved_source_scope_targets(session, source)
+    source_metadata = {
+        "origin": "compiler",
+        "compiler": compiler,
+        "compilation_identity": identity,
+        "compiler_source_id": str(source.id),
+        "compiler_dispatch_generation": generation,
+        "compiler_scope_type": scope_type,
+        "compiler_scope_id": str(scope_id) if scope_id is not None else None,
+        "compiler_language": normalized_language,
+        "source_ids": source_ids,
+        "compiler_resolved_scope_targets": list(resolved_scope_targets),
+        "proposed_metadata": proposed_metadata,
+    }
+    suggested_metadata = {
+        "slug": normalized_slug,
+        "title": proposed_metadata["title"],
+        "summary": proposed_metadata["summary"],
+        "page_type": page_type.strip() or "concept",
+        "knowledge_type_slugs": proposed_metadata["knowledge_type_slugs"],
+        "scope_type": scope_type,
+        "scope_id": str(scope_id) if scope_id is not None else None,
+        "language": normalized_language,
+    }
+
+    await lock_governance_command(session, identity)
+    existing = await session.get(WikiPageDraft, draft_id)
+    if existing is not None:
+        exact_replay = (
+            existing.page_id == page_id
+            and existing.draft_kind == ("edit" if page is not None else "create")
+            and existing.base_version == base_version
+            and existing.content_md == body
+            and existing.source_metadata == source_metadata
+            and existing.suggested_metadata == suggested_metadata
+        )
+        if not exact_replay:
+            raise CompilationDraftConflict(
+                "compiler retry conflicts with the existing durable draft "
+                f"for {identity}"
+            )
+        return existing, False
+
+    draft = await create_wiki_draft(
+        session,
+        page_id=page_id,
+        author_id=getattr(source, "contributed_by_employee_id", None),
+        content_md=body,
+        source="compiler",
+        source_metadata=source_metadata,
+        base_version=base_version,
+        draft_kind="edit" if page is not None else "create",
+        suggested_metadata=suggested_metadata,
+        submit_for_review=False,
+        draft_id=draft_id,
+    )
+    return draft, True
+
+
+def _compiler_metadata_uuid(metadata: dict[str, Any], key: str) -> uuid.UUID:
+    raw = metadata.get(key)
+    if not isinstance(raw, str):
+        raise CompilationDraftContextConflict(
+            f"compiler draft is missing {key}; it cannot be approved"
+        )
+    try:
+        return uuid.UUID(raw)
+    except ValueError as exc:
+        raise CompilationDraftContextConflict(
+            f"compiler draft has an invalid {key}; it cannot be approved"
+        ) from exc
+
+
+async def validate_compiler_draft_context(
+    session: AsyncSession,
+    draft: WikiPageDraft,
+    *,
+    page: WikiPage | None,
+) -> None:
+    """Fence compiler drafts against source generation, scope, and language drift."""
+    metadata = draft.source_metadata or {}
+    if metadata.get("origin") != "compiler":
+        return
+
+    source_id = _compiler_metadata_uuid(metadata, "compiler_source_id")
+    expected_generation = metadata.get("compiler_dispatch_generation")
+    expected_scope_type = metadata.get("compiler_scope_type")
+    expected_scope_id_raw = metadata.get("compiler_scope_id")
+    expected_language = metadata.get("compiler_language")
+    if (
+        not isinstance(expected_generation, int)
+        or not isinstance(expected_scope_type, str)
+        or not isinstance(expected_language, str)
+        or not expected_scope_type.strip()
+        or not expected_language.strip()
+    ):
+        raise CompilationDraftContextConflict(
+            "compiler draft lacks its immutable source generation/scope/language fence"
+        )
+    if expected_scope_id_raw is None:
+        expected_scope_id = None
+    elif isinstance(expected_scope_id_raw, str):
+        try:
+            expected_scope_id = uuid.UUID(expected_scope_id_raw)
+        except ValueError as exc:
+            raise CompilationDraftContextConflict(
+                "compiler draft has an invalid compiler_scope_id"
+            ) from exc
+    else:
+        raise CompilationDraftContextConflict(
+            "compiler draft has an invalid compiler_scope_id"
+        )
+    expected_scope_targets = metadata.get("compiler_resolved_scope_targets")
+    if not isinstance(expected_scope_targets, list) or not all(
+        isinstance(value, str) and value for value in expected_scope_targets
+    ):
+        raise CompilationDraftContextConflict(
+            "compiler draft lacks its immutable resolved scope-target fence"
+        )
+
+    source = await session.get(Source, source_id)
+    if source is None:
+        raise CompilationDraftContextConflict(
+            "compiler source no longer exists; stage a new draft from current truth"
+        )
+    if source.dispatch_generation != expected_generation:
+        raise CompilationDraftContextConflict(
+            "compiler source generation changed; this draft was fenced by re-ingest"
+        )
+    if (source.language or "").strip().lower() != expected_language.strip().lower():
+        raise CompilationDraftContextConflict(
+            "compiler source language changed; this draft cannot recreate prior-language content"
+        )
+    if tuple(expected_scope_targets) != await _resolved_source_scope_targets(
+        session, source
+    ):
+        raise CompilationDraftContextConflict(
+            "compiler source scope targets changed; this draft cannot recreate prior audience truth"
+        )
+
+    source_scope_type = (source.scope_type or "global").strip()
+    if source_scope_type in {"department", "project"} and (
+        source_scope_type != expected_scope_type or source.scope_id != expected_scope_id
+    ):
+        raise CompilationDraftContextConflict(
+            "compiler source scope changed; this draft cannot recreate prior-scope content"
+        )
+    if page is not None and (
+        (page.scope_type or "global") != expected_scope_type
+        or page.scope_id != expected_scope_id
+        or (page.language or "").strip().lower() != expected_language.strip().lower()
+    ):
+        raise CompilationDraftContextConflict(
+            "compiler target page no longer has the staged scope/language identity"
+        )
+
+
+async def invalidate_stale_compiler_drafts(
+    session: AsyncSession,
+    *,
+    source_id: uuid.UUID,
+    current_generation: int,
+    reason: str,
+) -> tuple[uuid.UUID, ...]:
+    """Withdraw pre-reingest compiler drafts for a source in this transaction.
+
+    Call this immediately after advancing ``Source.dispatch_generation`` and
+    before committing the scope/language change. Old compiler drafts cannot be
+    resubmitted or approved; their source bytes and intended visibility are no
+    longer current truth.
+    """
+    if current_generation < 1:
+        raise ValueError("current_generation must be positive")
+    rows = (
+        (
+            await session.execute(
+                select(WikiPageDraft)
+                .where(
+                    WikiPageDraft.source_metadata["origin"].astext == "compiler",
+                    WikiPageDraft.source_metadata["compiler_source_id"].astext
+                    == str(source_id),
+                    WikiPageDraft.status.in_(("draft", "pending", "needs_revision")),
+                )
+                .order_by(WikiPageDraft.id)
+                .with_for_update()
+            )
+        )
+        .scalars()
+        .all()
+    )
+    invalidated: list[uuid.UUID] = []
+    for draft in rows:
+        metadata = draft.source_metadata or {}
+        generation = metadata.get("compiler_dispatch_generation")
+        if not isinstance(generation, int) or generation >= current_generation:
+            continue
+        previous_state = draft.status
+        draft.status = "withdrawn"
+        draft.reviewer_note = reason.strip()[:2000]
+        await session.flush()
+        await append_draft_event(
+            session,
+            draft_id=draft.id,
+            event_type=GovernanceEventType.WITHDRAWN,
+            from_state=("in_review" if previous_state == "pending" else previous_state),
+            to_state="withdrawn",
+            actor_id=None,
+            idempotency_key=f"compiler-source-fence:{draft.id}:{current_generation}",
+            reason=reason.strip()[:2000],
+            payload={
+                "compiler_source_id": str(source_id),
+                "previous_generation": generation,
+                "current_generation": current_generation,
+            },
+            lock=False,
+        )
+        invalidated.append(draft.id)
+    return tuple(invalidated)
 
 
 def _draft_source_ids(draft: WikiPageDraft) -> list[uuid.UUID]:
@@ -334,6 +692,29 @@ class CreateDraftSlugConflict(Exception):
         )
 
 
+def _compiler_proposed_metadata(draft: WikiPageDraft) -> dict[str, Any]:
+    """Return compiler-proposed page metadata only when it has the expected shape."""
+    metadata = draft.source_metadata or {}
+    proposed = metadata.get("proposed_metadata")
+    return dict(proposed) if isinstance(proposed, dict) else {}
+
+
+def _metadata_string(metadata: dict[str, Any], key: str) -> str | None:
+    value = metadata.get(key)
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _metadata_slug_list(metadata: dict[str, Any]) -> list[str] | None:
+    value = metadata.get("knowledge_type_slugs")
+    if not isinstance(value, list):
+        return None
+    return list(
+        dict.fromkeys(
+            item.strip() for item in value if isinstance(item, str) and item.strip()
+        )
+    )
+
+
 async def approve_wiki_draft(
     session: AsyncSession,
     draft: WikiPageDraft,
@@ -359,6 +740,11 @@ async def approve_wiki_draft(
     create draft's chosen slug already exists in the target scope.
     """
     final_content = edited_content_md.strip() if edited_content_md else draft.content_md
+    proposed_metadata = _compiler_proposed_metadata(draft)
+    if draft.status != "pending":
+        raise InvalidTransition(
+            "A draft must be explicitly submitted for review before approval."
+        )
 
     # Serialise concurrent approves on the same page. Without this, two
     # reviewers clicking Approve on different pending drafts of the same
@@ -394,11 +780,20 @@ async def approve_wiki_draft(
         page_type = (
             overrides.get("final_page_type") or meta.get("page_type") or "concept"
         )
-        kt_slugs = (
+        kt_raw = (
             overrides.get("final_knowledge_type_slugs")
             if overrides.get("final_knowledge_type_slugs") is not None
             else meta.get("knowledge_type_slugs") or []
         )
+        # Reviewer/draft metadata is external input: keep only string slugs so
+        # the downstream apply_create list[str] contract stays intact.
+        kt_slugs = (
+            [s for s in kt_raw if isinstance(s, str)]
+            if isinstance(kt_raw, list)
+            else []
+        )
+        summary = _metadata_string(meta, "summary") or ""
+        language = _metadata_string(meta, "language") or "en"
         scope_type = meta.get("scope_type") or "global"
         scope_id_raw = meta.get("scope_id")
         try:
@@ -413,6 +808,7 @@ async def approve_wiki_draft(
             # Hand-crafted metadata with a non-string non-UUID (e.g. int)
             # shouldn't propagate downstream. Treat as missing scope.
             scope_id = None
+        await validate_compiler_draft_context(session, draft, page=None)
 
         if not slug or slug in (
             wiki_service.INDEX_SLUG,
@@ -424,7 +820,11 @@ async def approve_wiki_draft(
             raise ValueError("Title is required to materialise a new page")
 
         existing = await wiki_service.get_page_by_slug(
-            session, slug, scope_type=scope_type, scope_id=scope_id
+            session,
+            slug,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            language=language,
         )
         if existing is not None:
             raise CreateDraftSlugConflict(slug, scope_type, scope_id)
@@ -435,11 +835,12 @@ async def approve_wiki_draft(
             title=title,
             page_type=page_type,
             content_md=final_content,
-            summary="",
-            knowledge_type_slugs=list(kt_slugs),
+            summary=summary,
+            knowledge_type_slugs=kt_slugs,
             source_ids=_draft_source_ids(draft),
             scope_type=scope_type,
             scope_id=scope_id,
+            language=language,
         )
         # apply_create already stages version 1; enrich that same revision
         # instead of violating the unique (page_id, version) invariant.
@@ -459,9 +860,13 @@ async def approve_wiki_draft(
         # Backfill draft.page_id so subsequent UI reads can join cleanly.
         draft.page_id = page.id
     else:
-        page = await session.get(WikiPage, draft.page_id) if draft.page_id else None
-        if page is None:
+        loaded_page = (
+            await session.get(WikiPage, draft.page_id) if draft.page_id else None
+        )
+        if loaded_page is None:
             raise ValueError(f"Wiki page {draft.page_id} not found")
+        page = loaded_page
+        await validate_compiler_draft_context(session, draft, page=page)
 
         if (
             not allow_conflict
@@ -472,28 +877,58 @@ async def approve_wiki_draft(
         ):
             raise DraftConflictError(page.version, draft.base_version)
 
-        page.content_md = final_content
-        page.version = (page.version or 1) + 1
-        await session.flush()
-        await wiki_service.refresh_links(session, page.id, page.slug, final_content)
-
-        session.add(
-            WikiPageRevision(
-                page_id=page.id,
-                version=page.version,
-                content_md=final_content,
-                change_type="draft_approved",
-                draft_id=draft.id,
-                changed_by_id=reviewer_id,
-                change_note=reviewer_note,
-            )
+        proposed_title = _metadata_string(proposed_metadata, "title") or page.title
+        proposed_summary = _metadata_string(proposed_metadata, "summary")
+        proposed_knowledge_types = _metadata_slug_list(proposed_metadata)
+        proposed_source_ids = _draft_source_ids(draft)
+        source_ids = list(
+            dict.fromkeys([*(page.source_ids or ()), *proposed_source_ids])
         )
+        knowledge_type_slugs = (
+            list(
+                dict.fromkeys(
+                    [*(page.knowledge_type_slugs or ()), *proposed_knowledge_types]
+                )
+            )
+            if proposed_knowledge_types is not None
+            else page.knowledge_type_slugs
+        )
+        outcome = await wiki_service.write_page(
+            session,
+            slug=page.slug,
+            title=proposed_title,
+            content_md=final_content,
+            summary=proposed_summary if proposed_summary is not None else page.summary,
+            knowledge_type_slugs=knowledge_type_slugs,
+            source_ids=source_ids,
+            scope_type=page.scope_type or "global",
+            scope_id=page.scope_id,
+            language=page.language,
+            status=page.status,
+            insert_if_missing=False,
+            change_type="draft_approved",
+            changed_by_id=reviewer_id,
+            change_note=reviewer_note,
+            draft_id=draft.id,
+        )
+        if outcome.page is None:
+            raise ValueError(f"Wiki page {draft.page_id} not found")
+        page = outcome.page
 
+    reviewed_at = datetime.now(timezone.utc)
     draft.status = "approved"
     draft.reviewed_by_id = reviewer_id
-    draft.reviewed_at = datetime.now(timezone.utc)
+    draft.reviewed_at = reviewed_at
     draft.reviewer_note = reviewer_note
     await session.flush()
+    canonical_digest = approval_digest(
+        draft=draft,
+        page=page,
+        final_content=final_content,
+        reviewer_id=reviewer_id,
+        reviewed_at=reviewed_at,
+        reviewer_note=reviewer_note,
+    )
     _ = await append_draft_event(
         session,
         draft_id=draft.id,
@@ -507,6 +942,7 @@ async def approve_wiki_draft(
             "page_id": str(page.id),
             "page_version": page.version,
             "revision_round": draft.revision_round,
+            "approval_digest": canonical_digest,
         },
     )
     return page

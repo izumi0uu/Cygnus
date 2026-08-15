@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from typing import cast
 
 from cygnus.domain import AnswerCard, AudienceFilter, AudienceVariant, Visibility
 from cygnus.publish import (
@@ -47,8 +48,9 @@ class PublishPreviewTests(unittest.TestCase):
             action_type=PublishActionType.PUBLISH,
         ).to_dict()
 
+        target_audiences = cast(list[dict[str, object]], candidate["target_audiences"])
         self.assertEqual(candidate["target_channels"], ["help_center", "copilot"])
-        self.assertEqual(len(candidate["target_audiences"]), 2)
+        self.assertEqual(len(target_audiences), 2)
 
     def test_preview_distinguishes_new_continue_stop_and_conflict(self) -> None:
         canonical = AudienceFilter(
@@ -96,7 +98,8 @@ class PublishPreviewTests(unittest.TestCase):
 
         preview = build_publish_blast_radius_preview(candidate).to_dict()
 
-        effects = {impact["effect"] for impact in preview["impacts"]}
+        impacts = cast(list[dict[str, object]], preview["impacts"])
+        effects: set[str] = {cast(str, impact["effect"]) for impact in impacts}
         self.assertEqual(
             effects,
             {
@@ -106,15 +109,18 @@ class PublishPreviewTests(unittest.TestCase):
                 BlastRadiusEffect.CONFLICT.value,
             },
         )
-        self.assertEqual(preview["audience_scope"]["total_audiences"], 2)
-        self.assertEqual(preview["channel_gate_matrix"][0]["channel"], "help_center")
+        audience_scope = cast(dict[str, object], preview["audience_scope"])
+        self.assertEqual(audience_scope["total_audiences"], 2)
+        gate_matrix = cast(list[dict[str, object]], preview["channel_gate_matrix"])
+        self.assertEqual(gate_matrix[0]["channel"], "help_center")
+        warnings = cast(list[str], preview["warnings"])
         self.assertIn(
             "At least one audience-channel path is blocked by a governance conflict.",
-            preview["warnings"],
+            warnings,
         )
         self.assertIn(
             "This command would remove at least one current exposure path.",
-            preview["warnings"],
+            warnings,
         )
 
 

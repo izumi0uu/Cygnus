@@ -6,7 +6,7 @@ Ownership:
 """
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, cast
 
 from loguru import logger
 from sqlalchemy import and_, delete, select
@@ -14,12 +14,28 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.runtime.ai.embedding_catalog import get_spec
 from cygnus.runtime.ai.registry import ProviderRegistry
-from cygnus.runtime.database.models import Source, get_source_chunk_embedding_model_for_dim
+from cygnus.runtime.database.models import (
+    Source,
+    SourceChunkEmbedding1024,
+    SourceChunkEmbedding1536,
+    SourceChunkEmbedding3072,
+    SourceChunkEmbedding768,
+    get_source_chunk_embedding_model_for_dim,
+)
 from cygnus.retrieval.embedding_storage import (
     chunk_content_hash,
     upsert_chunk_embedding,
 )
 from cygnus.substrate.source_outline import PAGE_JOIN_SEPARATOR
+
+# The registry lookup returns the bare class; bind the union of concrete
+# per-dimension tables so column access stays typed.
+_SourceChunkEmbeddingModel = (
+    type[SourceChunkEmbedding768]
+    | type[SourceChunkEmbedding1024]
+    | type[SourceChunkEmbedding1536]
+    | type[SourceChunkEmbedding3072]
+)
 
 # Retrieval-sized chunks (much smaller than the MAP chunker's 20k) for precision.
 CHUNK_TARGET_CHARS = 2_000
@@ -31,7 +47,7 @@ MIN_CHUNK_CHARS = 50
 class VerbatimChunk:
     index: int
     page_number: int  # 1-based
-    start_char: int   # absolute offset in full_text
+    start_char: int  # absolute offset in full_text
     end_char: int
     text: str
 
@@ -52,7 +68,9 @@ def _page_bounds(full_text: str, page_offsets: list[int]) -> list[tuple[int, int
     return out
 
 
-def build_verbatim_chunks(full_text: str, page_offsets: list[int]) -> list[VerbatimChunk]:
+def build_verbatim_chunks(
+    full_text: str, page_offsets: list[int]
+) -> list[VerbatimChunk]:
     """Split full_text into page-aligned, retrieval-sized chunks.
 
     Each chunk belongs to exactly one page. Pages longer than CHUNK_TARGET_CHARS
@@ -67,13 +85,15 @@ def build_verbatim_chunks(full_text: str, page_offsets: list[int]) -> list[Verba
             end = min(pos + CHUNK_TARGET_CHARS, p_end)
             text = full_text[pos:end]
             if len(text.strip()) >= MIN_CHUNK_CHARS:
-                chunks.append(VerbatimChunk(
-                    index=idx,
-                    page_number=page_number,
-                    start_char=pos,
-                    end_char=end,
-                    text=text,
-                ))
+                chunks.append(
+                    VerbatimChunk(
+                        index=idx,
+                        page_number=page_number,
+                        start_char=pos,
+                        end_char=end,
+                        text=text,
+                    )
+                )
                 idx += 1
             if end >= p_end:
                 break
@@ -126,7 +146,10 @@ async def index_verbatim_source(
     # shorter doc doesn't leave orphaned high-index chunks. Other specs' rows are
     # left intact (the re-embed migration relies on the old spec staying live
     # until the atomic flip; stale specs are pruned by cleanup afterwards).
-    Model = get_source_chunk_embedding_model_for_dim(spec.dimension)
+    Model = cast(
+        _SourceChunkEmbeddingModel,
+        get_source_chunk_embedding_model_for_dim(spec.dimension),
+    )
     await session.execute(
         delete(Model).where(
             Model.source_id == source.id, Model.model_spec_id == spec.id
@@ -148,7 +171,9 @@ async def index_verbatim_source(
             content_hash=chunk_content_hash(chunk.text),
         )
     await session.commit()
-    logger.info(f"index_verbatim_source: indexed {len(chunks)} chunks for source {source.id}")
+    logger.info(
+        f"index_verbatim_source: indexed {len(chunks)} chunks for source {source.id}"
+    )
     return len(chunks)
 
 
@@ -192,7 +217,10 @@ async def search_source_chunks_semantic(
         return []
 
     spec = get_spec(spec_id)
-    Emb = get_source_chunk_embedding_model_for_dim(spec.dimension)
+    Emb = cast(
+        _SourceChunkEmbeddingModel,
+        get_source_chunk_embedding_model_for_dim(spec.dimension),
+    )
 
     where_clauses = [
         Emb.model_spec_id == spec.id,
@@ -200,9 +228,7 @@ async def search_source_chunks_semantic(
         Source.status == "ready",
     ]
     if allowed_source_ids is not None:
-        where_clauses.append(
-            Source.id.in_([_uuid.UUID(s) for s in allowed_source_ids])
-        )
+        where_clauses.append(Source.id.in_([_uuid.UUID(s) for s in allowed_source_ids]))
 
     stmt = (
         select(

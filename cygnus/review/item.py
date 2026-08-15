@@ -10,7 +10,6 @@ from cygnus.review.briefing import OwnerState, ReviewRiskItem, ReviewRiskType
 from cygnus.substrate.compilation_plan import EvidenceSufficiency, UrgencyLevel
 
 
-
 def _normalize(values: Iterable[str] | None, *, label: str) -> tuple[str, ...]:
     if values is None:
         return ()
@@ -31,9 +30,15 @@ class EvidenceStrength:
     evidence_ids: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "freshness_mix", _normalize(self.freshness_mix, label="freshness mix"))
-        object.__setattr__(self, "source_refs", _normalize(self.source_refs, label="source ref"))
-        object.__setattr__(self, "evidence_ids", _normalize(self.evidence_ids, label="evidence id"))
+        object.__setattr__(
+            self, "freshness_mix", _normalize(self.freshness_mix, label="freshness mix")
+        )
+        object.__setattr__(
+            self, "source_refs", _normalize(self.source_refs, label="source ref")
+        )
+        object.__setattr__(
+            self, "evidence_ids", _normalize(self.evidence_ids, label="evidence id")
+        )
         if not self.source_refs:
             raise ValueError("source_refs must not be empty")
         if not self.evidence_ids:
@@ -56,14 +61,24 @@ class AudienceImpact:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "affected_audiences", tuple(self.affected_audiences))
-        object.__setattr__(self, "audience_labels", _normalize(self.audience_labels, label="audience label"))
-        object.__setattr__(self, "impacted_surfaces", _normalize(self.impacted_surfaces, label="impacted surface"))
+        object.__setattr__(
+            self,
+            "audience_labels",
+            _normalize(self.audience_labels, label="audience label"),
+        )
+        object.__setattr__(
+            self,
+            "impacted_surfaces",
+            _normalize(self.impacted_surfaces, label="impacted surface"),
+        )
         if not self.affected_audiences:
             raise ValueError("affected_audiences must not be empty")
 
     def to_dict(self) -> dict[str, object]:
         return {
-            "affected_audiences": [audience.to_dict() for audience in self.affected_audiences],
+            "affected_audiences": [
+                audience.to_dict() for audience in self.affected_audiences
+            ],
             "audience_labels": list(self.audience_labels),
             "impacted_surfaces": list(self.impacted_surfaces),
         }
@@ -120,8 +135,14 @@ class ReviewItemDetailSurface:
             raise ValueError("item_ref must not be blank")
         if not self.title.strip():
             raise ValueError("title must not be blank")
-        object.__setattr__(self, "command_actions", _normalize(self.command_actions, label="command action"))
-        object.__setattr__(self, "context_notes", _normalize(self.context_notes, label="context note"))
+        object.__setattr__(
+            self,
+            "command_actions",
+            _normalize(self.command_actions, label="command action"),
+        )
+        object.__setattr__(
+            self, "context_notes", _normalize(self.context_notes, label="context note")
+        )
         if not self.command_actions:
             raise ValueError("command_actions must not be empty")
 
@@ -167,11 +188,15 @@ def build_review_item_detail_surface(
         ),
         audience_impact=AudienceImpact(
             affected_audiences=item.affected_audiences,
-            audience_labels=tuple(_audience_label(audience) for audience in item.affected_audiences),
+            audience_labels=tuple(
+                _audience_label(audience) for audience in item.affected_audiences
+            ),
             impacted_surfaces=item.why_now.affected_surfaces,
         ),
         command_actions=item.recommended_actions,
-        context_notes=_context_notes(item=item, evidence=evidence, evidence_sufficiency=evidence_sufficiency),
+        context_notes=_context_notes(
+            item=item, evidence=evidence, evidence_sufficiency=evidence_sufficiency
+        ),
     )
 
 
@@ -228,7 +253,11 @@ def _context_notes(
         f"Evidence sufficiency is currently {evidence_sufficiency.value}.",
     ]
     if any(record.freshness_state is FreshnessState.STALE for record in evidence):
-        notes.append("At least one backing source is stale, increasing downstream answer contamination risk.")
+        notes.append(
+            "At least one backing source is stale, increasing downstream answer contamination risk."
+        )
     if item.owner_state is OwnerState.UNASSIGNED:
-        notes.append("No stable queue owner is assigned yet, so this governance package may stall without intervention.")
+        notes.append(
+            "No stable queue owner is assigned yet, so this governance package may stall without intervention."
+        )
     return tuple(notes)

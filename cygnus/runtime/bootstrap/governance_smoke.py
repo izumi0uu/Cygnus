@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from datetime import datetime, timedelta, timezone
 import json
 from dataclasses import dataclass
 import os
@@ -22,7 +23,7 @@ import httpx
 from sqlalchemy import select
 
 from cygnus.domain.audience import AudienceFilter, Visibility
-from cygnus.domain.objects import KnowledgeObjectType
+from cygnus.domain.objects import KnowledgeObjectType, governed_object_ref
 from cygnus.evidence.records import FreshnessState
 from cygnus.governance.audience_bindings import (
     AudienceBindingCreate,
@@ -88,7 +89,6 @@ def _read_receipt(path: Path) -> dict[str, object]:
 async def _seed_persisted_truth(admin_email: str) -> dict[str, object]:
     run_id = uuid.uuid4().hex[:12]
     slug = f"cyg111-durable-{run_id}"
-    object_ref = f"ko-{slug}"
     signal_ref = f"ticket:cyg111:{run_id}"
     session_factory = get_async_session_factory()
 
@@ -106,6 +106,11 @@ async def _seed_persisted_truth(admin_email: str) -> dict[str, object]:
             url=f"https://example.test/cyg111/{run_id}",
             status="ready",
             progress=100,
+            freshness_state="fresh",
+            freshness_actor_id=admin.id,
+            freshness_reason="Attested fresh for the durable golden-path smoke.",
+            freshness_attested_at=datetime.now(timezone.utc) + timedelta(seconds=2),
+            freshness_expires_at=datetime.now(timezone.utc) + timedelta(days=1),
         )
         session.add(source)
         await session.flush()
@@ -121,6 +126,7 @@ async def _seed_persisted_truth(admin_email: str) -> dict[str, object]:
             note="CYG-111 durable golden-path review",
             source="compose_smoke",
             draft_kind="create",
+            source_metadata={"source_ids": [str(source.id)]},
             suggested_metadata={
                 "slug": slug,
                 "title": f"CYG-111 Durable Billing Policy {run_id}",
@@ -136,7 +142,11 @@ async def _seed_persisted_truth(admin_email: str) -> dict[str, object]:
             reviewer_id=admin.id,
             reviewer_note="Evidence, scope, and audience binding verified by compose smoke.",
         )
-        page.source_ids = [source.id]
+        _require(
+            page.source_ids == [source.id],
+            "approved page did not carry the reviewed evidence source",
+        )
+        object_ref = governed_object_ref(page.id)
 
         audience = AudienceFilter(
             visibility=Visibility.INTERNAL,
@@ -426,6 +436,40 @@ def _exercise_api(
             summary.get("pending") == len(_TARGET_CHANNELS),
             "initial propagation is not pending on both target channels",
         )
+        # CYG-138 verification-only delivery receipt truth: publish must stage
+        # one pending delivery per surface with a canonical desired digest.
+        # Real Production V1 acceptance still requires an external
+        # internal-copilot endpoint; this smoke only proves persisted receipts.
+        records = _items(ledger.get("records"), "propagation records")
+        _require(len(records) == len(_TARGET_CHANNELS), "propagation record count")
+        delivery_ids: list[object] = []
+        for record in records:
+            desired_digest = record.get("desired_digest")
+            _require(
+                isinstance(desired_digest, str) and len(desired_digest) == 64,
+                "propagation record lacks a canonical desired digest",
+            )
+            int(cast(str, desired_digest), 16)
+            delivery = _mapping(record.get("delivery"), "delivery receipt")
+            _require(
+                delivery.get("status") == "pending",
+                "fresh delivery receipt is not pending",
+            )
+            _require(
+                delivery.get("desired_digest") == desired_digest,
+                "delivery receipt digest does not match the propagation digest",
+            )
+            _require(
+                isinstance(delivery.get("delivery_id"), str)
+                and delivery.get("delivery_id"),
+                "delivery receipt lacks a durable identity",
+            )
+            delivery_ids.append(delivery.get("delivery_id"))
+        if len(set(delivery_ids)) != len(_TARGET_CHANNELS):
+            raise GoldenPathSmokeError(
+                "delivery receipts are not one identity per surface"
+            )
+        delivery_ids.sort()
 
         recovery = _mapping(
             _request_json(
@@ -499,6 +543,7 @@ def _exercise_api(
         "publication_id": publication_id,
         "command_id": command_id,
         "marked_notification_id": marked_notification_id,
+        "delivery_ids": delivery_ids,
     }
 
 
@@ -570,6 +615,28 @@ def _verify_after_restart(
         _require(
             propagation.get("publication_record_id") == publication_id,
             "restart propagation selected another publication",
+        )
+        # CYG-138 verification-only: restart/retry preserves one delivery
+        # identity per surface with the same canonical desired digest.
+        restart_ledger = _mapping(
+            propagation.get("propagation_ledger"), "restart propagation ledger"
+        )
+        restart_records = _items(
+            restart_ledger.get("records"), "restart propagation records"
+        )
+        restart_delivery_ids: list[object] = []
+        for record in restart_records:
+            delivery = _mapping(record.get("delivery"), "restart delivery receipt")
+            _require(
+                isinstance(delivery.get("delivery_id"), str)
+                and delivery.get("delivery_id"),
+                "restart delivery receipt lost its durable identity",
+            )
+            restart_delivery_ids.append(delivery.get("delivery_id"))
+        restart_delivery_ids.sort()
+        _require(
+            restart_delivery_ids == cast(list[object], receipt["delivery_ids"]),
+            "restart created a second delivery identity for a surface",
         )
 
         recovery = _mapping(

@@ -21,7 +21,9 @@ from cygnus.runtime.database.models import Employee, Notification
 from cygnus.runtime.services.config_service import ConfigService
 
 
-async def dispatch_external(db: AsyncSession, notifications: list[Notification]) -> None:
+async def dispatch_external(
+    db: AsyncSession, notifications: list[Notification]
+) -> None:
     """Send each notification through configured external channels.
 
     Runs sequentially per channel; channels run concurrently. Each channel
@@ -36,7 +38,9 @@ async def dispatch_external(db: AsyncSession, notifications: list[Notification])
     if (await cfg.get("smtp_enabled") or "false").lower() == "true":
         tasks.append(asyncio.create_task(_dispatch_email_batch(db, cfg, notifications)))
     if (await cfg.get("webhook_enabled") or "false").lower() == "true":
-        tasks.append(asyncio.create_task(_dispatch_webhook_batch(db, cfg, notifications)))
+        tasks.append(
+            asyncio.create_task(_dispatch_webhook_batch(db, cfg, notifications))
+        )
 
     if not tasks:
         return
@@ -70,7 +74,11 @@ async def _dispatch_email_batch(
         employee = await db.get(Employee, recipient_id)
         if not employee or not employee.email:
             continue
-        subject = items[0].subject if len(items) == 1 else f"Cygnus — {len(items)} new notifications"
+        subject = (
+            items[0].subject
+            if len(items) == 1
+            else f"Cygnus — {len(items)} new notifications"
+        )
         body = _build_email_body(employee.name or employee.email, items)
         try:
             await _send_smtp(
@@ -167,8 +175,12 @@ async def _dispatch_webhook_batch(
                 "target_type": notification.target_type,
                 "target_id": notification.target_id,
                 "recipient_id": str(notification.recipient_id),
-                "actor_id": str(notification.actor_id) if notification.actor_id else None,
-                "created_at": notification.created_at.isoformat() if notification.created_at else None,
+                "actor_id": str(notification.actor_id)
+                if notification.actor_id
+                else None,
+                "created_at": notification.created_at.isoformat()
+                if notification.created_at
+                else None,
             }
             for notification in notifications
         ],
@@ -183,6 +195,8 @@ async def _dispatch_webhook_batch(
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.post(url, content=body_bytes, headers=headers)
             if response.status_code >= 400:
-                logger.warning(f"Webhook POST {url} returned {response.status_code}: {response.text[:200]}")
+                logger.warning(
+                    f"Webhook POST {url} returned {response.status_code}: {response.text[:200]}"
+                )
     except Exception as exc:
         logger.warning(f"Webhook POST {url} failed: {exc}")

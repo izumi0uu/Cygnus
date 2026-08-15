@@ -5,6 +5,7 @@ from typing import Iterable
 
 from cygnus.review.detail import ReviewItemQuery, get_review_item_detail
 from cygnus.review.home import ReviewHomeQuery, get_review_home_surface
+from cygnus.review.item import ReviewItemDetailSurface
 from cygnus.review.service import ProposalBundle
 from cygnus.review.surface import PriorityStackCard, ReviewCommandSurface
 
@@ -24,7 +25,7 @@ class ReviewQueueDrilldownSurface:
     surface_id: str
     queue_surface: ReviewCommandSurface
     selected_card: PriorityStackCard
-    selected_detail: object
+    selected_detail: ReviewItemDetailSurface
     selected_position: int
     total_items: int
     previous_object_ref: str | None = None
@@ -39,7 +40,10 @@ class ReviewQueueDrilldownSurface:
             raise ValueError("total_items must be positive")
         if self.selected_position >= self.total_items:
             raise ValueError("selected_position must be within total_items")
-        if self.previous_object_ref is not None and not self.previous_object_ref.strip():
+        if (
+            self.previous_object_ref is not None
+            and not self.previous_object_ref.strip()
+        ):
             raise ValueError("previous_object_ref must not be blank when provided")
         if self.next_object_ref is not None and not self.next_object_ref.strip():
             raise ValueError("next_object_ref must not be blank when provided")
@@ -63,14 +67,24 @@ def get_review_queue_drilldown(
     bundles: Iterable[ProposalBundle] | None = None,
 ) -> ReviewQueueDrilldownSurface:
     queue_surface = get_review_home_surface(query.home_query, bundles=bundles)
-    selected_index = _find_selected_index(queue_surface=queue_surface, object_ref=query.selected_object_ref)
+    selected_index = _find_selected_index(
+        queue_surface=queue_surface, object_ref=query.selected_object_ref
+    )
     selected_card = queue_surface.priority_stack[selected_index]
     selected_detail = get_review_item_detail(
         ReviewItemQuery(object_ref=query.selected_object_ref),
         bundles=bundles,
     )
-    previous_object_ref = None if selected_index == 0 else queue_surface.priority_stack[selected_index - 1].object_ref
-    next_object_ref = None if selected_index == len(queue_surface.priority_stack) - 1 else queue_surface.priority_stack[selected_index + 1].object_ref
+    previous_object_ref = (
+        None
+        if selected_index == 0
+        else queue_surface.priority_stack[selected_index - 1].object_ref
+    )
+    next_object_ref = (
+        None
+        if selected_index == len(queue_surface.priority_stack) - 1
+        else queue_surface.priority_stack[selected_index + 1].object_ref
+    )
     return ReviewQueueDrilldownSurface(
         surface_id="review-queue-drilldown",
         queue_surface=queue_surface,
@@ -83,8 +97,12 @@ def get_review_queue_drilldown(
     )
 
 
-def _find_selected_index(*, queue_surface: ReviewCommandSurface, object_ref: str) -> int:
+def _find_selected_index(
+    *, queue_surface: ReviewCommandSurface, object_ref: str
+) -> int:
     for index, card in enumerate(queue_surface.priority_stack):
         if card.object_ref == object_ref:
             return index
-    raise ValueError(f"selected object_ref={object_ref} is not present in the current review queue")
+    raise ValueError(
+        f"selected object_ref={object_ref} is not present in the current review queue"
+    )

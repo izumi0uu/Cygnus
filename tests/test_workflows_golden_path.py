@@ -14,7 +14,9 @@ from cygnus.workflows import (
 
 
 class GovernanceGoldenPathWorkflowTests(unittest.TestCase):
-    def test_golden_path_tracks_product_stage_and_substrate_phase_together(self) -> None:
+    def test_golden_path_tracks_product_stage_and_substrate_phase_together(
+        self,
+    ) -> None:
         workflow = GovernanceGoldenPathWorkflow.sample()
 
         self.assertEqual(workflow.current_stage, GoldenPathStage.INGEST)
@@ -63,7 +65,9 @@ class GovernanceGoldenPathWorkflowTests(unittest.TestCase):
         self.assertIsNone(restored.resume_phase)
         self.assertEqual(restored.workflow_name, "governance_golden_path")
         self.assertTrue(restored.workflow_payload["is_complete"])
-        restored_workflow = GovernanceGoldenPathWorkflow.from_dict(restored.workflow_payload)
+        restored_workflow = GovernanceGoldenPathWorkflow.from_dict(
+            restored.workflow_payload
+        )
         self.assertTrue(restored_workflow.is_complete)
         self.assertEqual(restored_workflow.current_stage, GoldenPathStage.RECOVERY)
         self.assertEqual(restored_workflow.current_phase, PipelinePhase.FEEDBACK)

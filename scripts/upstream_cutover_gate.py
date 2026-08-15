@@ -7,6 +7,7 @@ import re
 import sys
 import tomllib
 from pathlib import Path
+from typing import TypedDict
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CODE_ROOTS = ("cygnus", "frontend")
@@ -84,8 +85,8 @@ OWNER_TRUTH_FILES = {
     ],
     "cygnus/runtime/governance_router.py": [
         'router = APIRouter(tags=["governance"])',
-        "router.include_router(command_center_router, tags=[\"governance\"])",
-        "router.include_router(knowledge_graph_router, tags=[\"governance\"])",
+        'router.include_router(command_center_router, tags=["governance"])',
+        'router.include_router(knowledge_graph_router, tags=["governance"])',
     ],
     "cygnus/runtime/config.py": [
         "def get_settings() -> Settings:",
@@ -131,8 +132,23 @@ FORBIDDEN_LOCK_PACKAGES = (
 )
 
 
+class GateSectionDict(TypedDict):
+    name: str
+    description: str
+    failures: list[str]
+    ok: bool
+
+
+class GateReportDict(TypedDict):
+    gate_name: str
+    ok: bool
+    sections: list[GateSectionDict]
+
+
 class GateSectionResult:
-    def __init__(self, *, name: str, description: str, failures: tuple[str, ...]) -> None:
+    def __init__(
+        self, *, name: str, description: str, failures: tuple[str, ...]
+    ) -> None:
         self.name = name
         self.description = description
         self.failures = failures
@@ -141,7 +157,7 @@ class GateSectionResult:
     def ok(self) -> bool:
         return not self.failures
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> GateSectionDict:
         return {
             "name": self.name,
             "description": self.description,
@@ -171,7 +187,9 @@ def scan_forbidden_code_residue(repo_root: Path) -> list[str]:
             for pattern in FORBIDDEN_CODE_PATTERNS:
                 if pattern.search(line):
                     rel = path.relative_to(repo_root)
-                    failures.append(f"{rel}:{lineno}: forbidden upstream residue `{pattern.pattern}`")
+                    failures.append(
+                        f"{rel}:{lineno}: forbidden upstream residue `{pattern.pattern}`"
+                    )
                     break
     return failures
 
@@ -230,7 +248,9 @@ def check_external_checkout_dependencies(repo_root: Path) -> list[str]:
 
     gitmodules = repo_root / ".gitmodules"
     if gitmodules.exists() and gitmodules.read_text(encoding="utf-8").strip():
-        failures.append(".gitmodules: submodule configuration must be absent before upstream deletion")
+        failures.append(
+            ".gitmodules: submodule configuration must be absent before upstream deletion"
+        )
 
     for relative_path in MANIFEST_FILES:
         path = repo_root / relative_path
@@ -269,7 +289,9 @@ def check_owner_truth(repo_root: Path) -> list[str]:
         text = path.read_text(encoding="utf-8")
         for snippet in snippets:
             if snippet not in text:
-                failures.append(f"{relative_path}: missing owner-truth snippet `{snippet}`")
+                failures.append(
+                    f"{relative_path}: missing owner-truth snippet `{snippet}`"
+                )
     failures.extend(check_protocol_owner_convergence(repo_root))
     return failures
 
@@ -326,7 +348,10 @@ def check_internalized_dependencies(repo_root: Path) -> list[str]:
         ]
         for forbidden in FORBIDDEN_DIRECT_DEPENDENCIES:
             if any(
-                dependency == forbidden or dependency.startswith(f"{forbidden}>") or dependency.startswith(f"{forbidden}<") or dependency.startswith(f"{forbidden}=")
+                dependency == forbidden
+                or dependency.startswith(f"{forbidden}>")
+                or dependency.startswith(f"{forbidden}<")
+                or dependency.startswith(f"{forbidden}=")
                 for dependency in dependencies
             ):
                 failures.append(
@@ -391,7 +416,7 @@ def build_gate_suite(repo_root: Path | None = None) -> list[GateSectionResult]:
     ]
 
 
-def build_gate_report(repo_root: Path | None = None) -> dict[str, object]:
+def build_gate_report(repo_root: Path | None = None) -> GateReportDict:
     suite = build_gate_suite(repo_root)
     return {
         "gate_name": "upstream_cutover_gate",

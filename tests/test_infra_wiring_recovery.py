@@ -5,8 +5,10 @@ import hmac
 import unittest
 import uuid
 from datetime import datetime, timezone
+from typing import Callable, cast
 from unittest.mock import AsyncMock, patch
 
+from minio import Minio
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.runtime.config import Settings
@@ -14,7 +16,9 @@ from cygnus.runtime.database.models import Notification
 
 
 class DatabaseWiringRecoveryTests(unittest.IsolatedAsyncioTestCase):
-    async def test_database_runtime_provider_builds_engine_and_session_factory(self) -> None:
+    async def test_database_runtime_provider_builds_engine_and_session_factory(
+        self,
+    ) -> None:
         import cygnus.runtime.database as database_module
 
         runtime_settings = Settings(
@@ -30,7 +34,10 @@ class DatabaseWiringRecoveryTests(unittest.IsolatedAsyncioTestCase):
             session_factory = database_module.create_session_factory(runtime_engine)
             self.assertIs(session_factory.kw["bind"], runtime_engine)
             self.assertIs(session_factory.class_, AsyncSession)
-            self.assertIs(database_module.get_async_session_factory(), database_module.async_session_factory)
+            self.assertIs(
+                database_module.get_async_session_factory(),
+                database_module.async_session_factory,
+            )
         finally:
             await runtime_engine.dispose()
 
@@ -56,7 +63,9 @@ class RedisWiringRecoveryTests(unittest.IsolatedAsyncioTestCase):
 
 
 class StorageWiringRecoveryTests(unittest.TestCase):
-    def test_storage_service_rebuilds_clients_from_explicit_settings_provider(self) -> None:
+    def test_storage_service_rebuilds_clients_from_explicit_settings_provider(
+        self,
+    ) -> None:
         from cygnus.runtime.services.storage_service import StorageService
 
         class _FakeMinio:
@@ -75,11 +84,11 @@ class StorageWiringRecoveryTests(unittest.TestCase):
 
         service = StorageService(
             settings_provider=lambda: current_settings,
-            client_factory=_FakeMinio,
+            client_factory=cast(Callable[..., Minio], _FakeMinio),
         )
 
-        internal_client = service.client
-        presign_client = service.presign_client
+        internal_client = cast(_FakeMinio, service.client)
+        presign_client = cast(_FakeMinio, service.presign_client)
 
         self.assertEqual(internal_client.kwargs["endpoint"], "minio.internal:9000")
         self.assertFalse(internal_client.kwargs["secure"])
@@ -95,15 +104,62 @@ class StorageWiringRecoveryTests(unittest.TestCase):
             minio_secure=False,
         )
         service.reset_clients()
-        rebuilt_client = service.client
+        rebuilt_client = cast(_FakeMinio, service.client)
 
         self.assertIsNot(rebuilt_client, internal_client)
         self.assertEqual(rebuilt_client.kwargs["endpoint"], "localhost:9000")
         self.assertEqual(rebuilt_client.kwargs["access_key"], "rotated-key")
 
+    def test_bounded_storage_download_rejects_excess_without_read_all(self) -> None:
+        from cygnus.runtime.services.storage_service import (
+            StorageObjectTooLarge,
+            StorageService,
+        )
+
+        class _Response:
+            headers: dict[str, str] = {}
+
+            def __init__(self) -> None:
+                self.read_sizes: list[int | None] = []
+                self.closed = False
+                self.released = False
+
+            def read(self, size: int | None = None) -> bytes:
+                self.read_sizes.append(size)
+                return b"excess" if len(self.read_sizes) == 1 else b""
+
+            def close(self) -> None:
+                self.closed = True
+
+            def release_conn(self) -> None:
+                self.released = True
+
+        response = _Response()
+
+        class _FakeMinio:
+            def __init__(self, **_kwargs) -> None:
+                pass
+
+            def get_object(self, _bucket: str, _object_name: str) -> _Response:
+                return response
+
+        service = StorageService(
+            settings_provider=lambda: Settings(minio_bucket="cygnus-assets"),
+            client_factory=cast(Callable[..., Minio], _FakeMinio),
+        )
+
+        with self.assertRaises(StorageObjectTooLarge):
+            service.download_file("sources/one/original.txt", max_bytes=3)
+
+        self.assertEqual(response.read_sizes, [4])
+        self.assertTrue(response.closed)
+        self.assertTrue(response.released)
+
 
 class OAuthAndNotificationWiringRecoveryTests(unittest.IsolatedAsyncioTestCase):
-    async def test_notification_dispatch_pending_uses_database_session_provider(self) -> None:
+    async def test_notification_dispatch_pending_uses_database_session_provider(
+        self,
+    ) -> None:
         import cygnus.runtime.services.notification_service as notification_service
 
         notification_id = uuid.uuid4()
@@ -143,9 +199,17 @@ class OAuthAndNotificationWiringRecoveryTests(unittest.IsolatedAsyncioTestCase):
                 return _SessionScope()
 
         with (
-            patch.object(notification_service, "take_pending_dispatch", return_value=staged),
-            patch("cygnus.runtime.database.get_async_session_factory", return_value=_SessionFactory()),
-            patch("cygnus.integrations.notification_dispatch.dispatch_external", AsyncMock()) as dispatch_external,
+            patch.object(
+                notification_service, "take_pending_dispatch", return_value=staged
+            ),
+            patch(
+                "cygnus.runtime.database.get_async_session_factory",
+                return_value=_SessionFactory(),
+            ),
+            patch(
+                "cygnus.integrations.notification_dispatch.dispatch_external",
+                AsyncMock(),
+            ) as dispatch_external,
         ):
             await notification_service.dispatch_pending()
 
@@ -190,9 +254,17 @@ class OAuthAndNotificationWiringRecoveryTests(unittest.IsolatedAsyncioTestCase):
                 return _SessionScope()
 
         with (
-            patch.object(notification_service, "take_pending_dispatch", return_value=staged),
-            patch("cygnus.runtime.database.get_async_session_factory", return_value=_SessionFactory()),
-            patch("cygnus.integrations.notification_dispatch.dispatch_external", AsyncMock()) as dispatch_external,
+            patch.object(
+                notification_service, "take_pending_dispatch", return_value=staged
+            ),
+            patch(
+                "cygnus.runtime.database.get_async_session_factory",
+                return_value=_SessionFactory(),
+            ),
+            patch(
+                "cygnus.integrations.notification_dispatch.dispatch_external",
+                AsyncMock(),
+            ) as dispatch_external,
         ):
             await notification_service.dispatch_pending()
 
@@ -220,7 +292,9 @@ class OAuthAndNotificationWiringRecoveryTests(unittest.IsolatedAsyncioTestCase):
             hashlib.sha256,
         ).hexdigest()
 
-        with patch("cygnus.integrations.mcp_auth.get_settings", return_value=runtime_settings):
+        with patch(
+            "cygnus.integrations.mcp_auth.get_settings", return_value=runtime_settings
+        ):
             self.assertEqual(hash_token(token), expected)
 
 

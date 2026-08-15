@@ -14,14 +14,20 @@ class EvidenceIndexTests(unittest.TestCase):
 
         ids = {item.evidence_id for item in results}
         self.assertIn("ev-sop-refund-exception", ids)
-        matching = next(item for item in results if item.evidence_id == "ev-sop-refund-exception")
+        matching = next(
+            item for item in results if item.evidence_id == "ev-sop-refund-exception"
+        )
         self.assertEqual(matching.source_type, "internal_sop")
         self.assertTrue(matching.excerpt_ref.startswith("ev-sop-refund-exception:"))
 
     def test_evidence_search_respects_filters(self) -> None:
         results = self.index.search(
             query="invoice export",
-            filters={"source_type": "release_note", "region": "eu", "product_version": "2026.06"},
+            filters={
+                "source_type": "release_note",
+                "region": "eu",
+                "product_version": "2026.06",
+            },
         )
 
         self.assertEqual(len(results), 1)

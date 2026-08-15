@@ -25,7 +25,6 @@ class EvidenceSufficiency(str, Enum):
     SUFFICIENT = "sufficient"
 
 
-
 def _normalize(values: Iterable[str] | None, *, label: str) -> tuple[str, ...]:
     if values is None:
         return ()
@@ -63,10 +62,18 @@ class CompilationProposal:
             raise ValueError("review_owner must not be blank")
         if not self.why_now.strip():
             raise ValueError("why_now must not be blank")
-        object.__setattr__(self, "evidence_ids", _normalize(self.evidence_ids, label="evidence id"))
-        object.__setattr__(self, "audience_notes", _normalize(self.audience_notes, label="audience note"))
+        object.__setattr__(
+            self, "evidence_ids", _normalize(self.evidence_ids, label="evidence id")
+        )
+        object.__setattr__(
+            self,
+            "audience_notes",
+            _normalize(self.audience_notes, label="audience note"),
+        )
         if not self.evidence_ids:
-            raise ValueError("compilation proposal must reference at least one evidence id")
+            raise ValueError(
+                "compilation proposal must reference at least one evidence id"
+            )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -85,16 +92,24 @@ class CompilationProposal:
 
     @classmethod
     def from_dict(cls, payload: dict[str, object]) -> CompilationProposal:
+        raw_evidence_ids = payload.get("evidence_ids", ())
+        if not isinstance(raw_evidence_ids, Iterable):
+            raise ValueError("evidence_ids must be a sequence of strings")
+        raw_audience_notes = payload.get("audience_notes", ())
+        if not isinstance(raw_audience_notes, Iterable):
+            raise ValueError("audience_notes must be a sequence of strings")
         return cls(
             proposal_id=str(payload["proposal_id"]),
             object_type=KnowledgeObjectType(str(payload["object_type"])),
             action=PlanAction(str(payload["action"])),
             title=str(payload["title"]),
             summary=str(payload["summary"]),
-            evidence_ids=tuple(str(item) for item in payload.get("evidence_ids", ())),
+            evidence_ids=tuple(str(item) for item in raw_evidence_ids),
             urgency=UrgencyLevel(str(payload["urgency"])),
-            evidence_sufficiency=EvidenceSufficiency(str(payload["evidence_sufficiency"])),
+            evidence_sufficiency=EvidenceSufficiency(
+                str(payload["evidence_sufficiency"])
+            ),
             review_owner=str(payload["review_owner"]),
             why_now=str(payload["why_now"]),
-            audience_notes=tuple(str(item) for item in payload.get("audience_notes", ())),
+            audience_notes=tuple(str(item) for item in raw_audience_notes),
         )

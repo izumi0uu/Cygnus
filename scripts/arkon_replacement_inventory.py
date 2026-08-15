@@ -7,6 +7,7 @@ import re
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import TypedDict
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CODE_ROOTS = ("cygnus", "frontend")
@@ -132,7 +133,9 @@ def scan_forbidden_runtime_residue(repo_root: Path) -> list[str]:
     failures: list[str] = []
     for path in iter_code_files(repo_root):
         rel = path.relative_to(repo_root)
-        if rel.as_posix() in {item.path for item in SURFACE_MANIFEST if item.state == "removed"}:
+        if rel.as_posix() in {
+            item.path for item in SURFACE_MANIFEST if item.state == "removed"
+        }:
             continue
 
         text = path.read_text(encoding="utf-8")
@@ -144,9 +147,28 @@ def scan_forbidden_runtime_residue(repo_root: Path) -> list[str]:
     return failures
 
 
-def build_inventory(repo_root: Path | None = None) -> dict[str, object]:
+class InventorySummary(TypedDict):
+    kept_surfaces: int
+    removed_surfaces: int
+    guardrail_files: int
+
+
+class ArkonInventory(TypedDict):
+    summary: InventorySummary
+    kept_surfaces: list[dict[str, object]]
+    removed_surfaces: list[dict[str, object]]
+    guardrails: list[str]
+    unexpected_runtime_residue: list[str]
+    next_replacement_target: list[str]
+
+
+def build_inventory(repo_root: Path | None = None) -> ArkonInventory:
     resolved_root = repo_root or REPO_ROOT
-    kept = [asdict(item) for item in SURFACE_MANIFEST if item.state == "kept" and (resolved_root / item.path).exists()]
+    kept = [
+        asdict(item)
+        for item in SURFACE_MANIFEST
+        if item.state == "kept" and (resolved_root / item.path).exists()
+    ]
     removed = [
         {
             **asdict(item),

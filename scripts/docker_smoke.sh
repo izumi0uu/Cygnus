@@ -75,6 +75,28 @@ wait_for_url() {
   done
 }
 
+wait_for_readyz_status() {
+  expected=$1
+  name=$2
+  deadline=$(( $(date +%s) + START_TIMEOUT_SECONDS ))
+
+  while :; do
+    code=$(curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL/readyz" 2>/dev/null || true)
+    if [ "$code" = "$expected" ]; then
+      echo "[docker-smoke] $name (readyz $expected)"
+      return 0
+    fi
+
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      echo "[docker-smoke] timeout waiting for $name (want readyz $expected, got $code)" >&2
+      docker compose ps >&2 || true
+      return 1
+    fi
+
+    sleep "$SLEEP_SECONDS"
+  done
+}
+
 echo "[docker-smoke] starting compose stack..."
 if [ -n "${BUILD_FLAG:-}" ]; then
   docker compose up -d "$BUILD_FLAG"
@@ -85,15 +107,21 @@ fi
 wait_for_url "api health" "$BASE_URL/health"
 wait_for_url "api detailed health" "$BASE_URL/api/health"
 wait_for_url "frontend" "$FRONTEND_URL"
+wait_for_url "livez" "$BASE_URL/livez"
+wait_for_url "readyz" "$BASE_URL/readyz"
 
 echo "[docker-smoke] checking service health payloads..."
 health_json=$(curl -fsS "$BASE_URL/health")
 api_health_json=$(curl -fsS "$BASE_URL/api/health")
 frontend_html=$(curl -fsS "$FRONTEND_URL")
+livez_json=$(curl -fsS "$BASE_URL/livez")
+readyz_json=$(curl -fsS "$BASE_URL/readyz")
 
 printf '%s' "$health_json" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["status"]=="healthy", data; assert data["services"]["database"]=="healthy", data; assert data["services"]["redis"]=="healthy", data; assert data["services"]["minio"]=="healthy", data'
 printf '%s' "$api_health_json" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["api"]=="healthy", data; assert data["database"]=="healthy", data; assert data["worker"]=="healthy", data'
 printf '%s' "$frontend_html" | grep -qi "<!doctype html"
+printf '%s' "$livez_json" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["status"]=="alive", data'
+printf '%s' "$readyz_json" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["status"]=="ready", data; bad=[k for k,v in data["checks"].items() if v["status"]!="ready"]; assert not bad, (data, bad)'
 
 echo "[docker-smoke] logging in with seeded admin..."
 login_json=$(curl -fsS -X POST "$BASE_URL/api/auth/login" \
@@ -124,5 +152,20 @@ golden_verify_json=$(docker compose exec -T api \
   --admin-email "$ADMIN_EMAIL" \
   --admin-password "$ADMIN_PASSWORD")
 printf '%s\n' "$golden_verify_json"
+
+echo "[docker-smoke] injecting worker death: stopping worker-skills..."
+docker compose stop worker-skills >/dev/null
+wait_for_readyz_status 503 "worker-skills death fails readyz"
+
+livez_during=$(curl -fsS "$BASE_URL/livez")
+printf '%s' "$livez_during" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["status"]=="alive", data'
+readyz_failed=$(curl -sS "$BASE_URL/readyz")
+printf '%s' "$readyz_failed" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["status"]=="not_ready", data; assert data["checks"]["workers"]["status"]!="ready", data'
+
+echo "[docker-smoke] proving automatic recovery: starting worker-skills..."
+docker compose start worker-skills >/dev/null
+wait_for_readyz_status 200 "worker-skills recovery restores readyz"
+readyz_recovered=$(curl -fsS "$BASE_URL/readyz")
+printf '%s' "$readyz_recovered" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["status"]=="ready", data; bad=[k for k,v in data["checks"].items() if v["status"]!="ready"]; assert not bad, (data, bad)'
 
 echo "[docker-smoke] smoke gate passed"

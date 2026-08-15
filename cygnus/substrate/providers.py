@@ -31,7 +31,9 @@ class ProviderRegistry:
         try:
             return self._configs[capability]
         except KeyError as exc:
-            raise ValueError(f"no provider configured for capability={capability}") from exc
+            raise ValueError(
+                f"no provider configured for capability={capability}"
+            ) from exc
 
     def supported_capabilities(self) -> tuple[str, ...]:
         return tuple(sorted(self._configs))

@@ -98,16 +98,13 @@ async def can_access_document(
     source: Source,
     action: str = "read",
 ) -> bool:
-    """Check if user can perform action on a source document.
+    """Check whether the actor may access one source under current scope truth.
 
-    Logic:
-    1. Admin → always True
-    2. User has doc:{action}:all → True
-    3. User has doc:{action}:own_dept →
-       a. Source has no departments (Global doc) → True
-       b. Source has any department in user.department_ids → True
-       c. Otherwise → False
-    4. Otherwise → False
+    A source with no department links is global only when its stored scope is
+    explicitly ``global`` with no scope ID. A department-scoped source must
+    contain a link for its declared ``scope_id`` before any linked department
+    may grant access. This keeps malformed legacy rows from silently becoming
+    globally visible while preserving valid multi-department access.
     """
     if user.role == "admin":
         return True
@@ -122,18 +119,29 @@ async def can_access_document(
     if f"doc:{action}:own_dept" not in permissions:
         return False
 
-    # Check if source is global (no departments) or belongs to any of the
-    # user's departments.
-    dept_result = await db.execute(
+    department_result = await db.execute(
         select(SourceDepartment.department_id).where(
             SourceDepartment.source_id == source.id
         )
     )
-    source_dept_ids = {row[0] for row in dept_result.all()}
+    source_dept_ids = {row[0] for row in department_result.all()}
 
+    # A zero-link source is global only when its explicit scope agrees. A
+    # department-scoped row with missing links is malformed legacy data, not a
+    # global document. Likewise, a declared department must be among its links
+    # before any linked department can grant access.
+    source_scope_type = getattr(source, "scope_type", None)
+    source_scope_id = getattr(source, "scope_id", None)
     if not source_dept_ids:
-        # No departments = Global doc
-        return True
+        return source_scope_type == "global" and source_scope_id is None
+    if source_scope_type == "global":
+        if source_scope_id is not None:
+            return False
+    elif source_scope_type == "department":
+        if source_scope_id not in source_dept_ids:
+            return False
+    else:
+        return False
 
     user_dept_ids = set(user.department_ids)
     return bool(user_dept_ids & source_dept_ids)
@@ -221,10 +229,13 @@ def build_wiki_draft_scope_clause(user: Employee, action: str = "read"):
 
 
 def build_document_scope_clause(user: Employee, action: str = "read"):
-    """Return the SQL clause limiting source rows to the user's governed scope.
+    """Return the SQL clause limiting sources to current governed scope.
 
-    Sources without department links are global. ``None`` means unrestricted
-    access; a user with no matching permission receives an always-false clause.
+    An unlinked row is global only when it explicitly declares a global null
+    scope. Department-scoped rows must include a SourceDepartment link for
+    their declared scope ID; malformed legacy rows are excluded rather than
+    treated as global. Additional valid department links still grant the usual
+    multi-department visibility.
     """
     if user.role == "admin":
         return None
@@ -235,21 +246,45 @@ def build_document_scope_clause(user: Employee, action: str = "read"):
         return None
 
     if scope_level == "own_dept":
-        global_clause = ~exists(
+        has_department_links = exists(
             select(SourceDepartment.source_id).where(
                 SourceDepartment.source_id == Source.id,
             )
+        )
+        global_clause = and_(
+            Source.scope_type == "global",
+            Source.scope_id.is_(None),
+            ~has_department_links,
+        )
+        declared_department_link = exists(
+            select(SourceDepartment.source_id).where(
+                SourceDepartment.source_id == Source.id,
+                SourceDepartment.department_id == Source.scope_id,
+            )
+        )
+        valid_scope_clause = or_(
+            and_(
+                Source.scope_type == "global",
+                Source.scope_id.is_(None),
+            ),
+            and_(
+                Source.scope_type == "department",
+                declared_department_link,
+            ),
         )
         department_ids = list(user.department_ids)
         if not department_ids:
             return global_clause
         return or_(
             global_clause,
-            exists(
-                select(SourceDepartment.source_id).where(
-                    SourceDepartment.source_id == Source.id,
-                    SourceDepartment.department_id.in_(department_ids),
-                )
+            and_(
+                valid_scope_clause,
+                exists(
+                    select(SourceDepartment.source_id).where(
+                        SourceDepartment.source_id == Source.id,
+                        SourceDepartment.department_id.in_(department_ids),
+                    )
+                ),
             ),
         )
 

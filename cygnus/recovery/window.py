@@ -157,12 +157,16 @@ class BeforeAfterAlignmentView:
         object.__setattr__(
             self,
             "improved_truth_planes",
-            _normalize_strings(self.improved_truth_planes, label="improved truth plane"),
+            _normalize_strings(
+                self.improved_truth_planes, label="improved truth plane"
+            ),
         )
         object.__setattr__(
             self,
             "residual_truth_planes",
-            _normalize_strings(self.residual_truth_planes, label="residual truth plane"),
+            _normalize_strings(
+                self.residual_truth_planes, label="residual truth plane"
+            ),
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -254,7 +258,9 @@ class ClosureJudge:
         object.__setattr__(
             self,
             "residual_truth_planes",
-            _normalize_strings(self.residual_truth_planes, label="residual truth plane"),
+            _normalize_strings(
+                self.residual_truth_planes, label="residual truth plane"
+            ),
         )
         object.__setattr__(
             self,
@@ -367,7 +373,9 @@ def build_recovery_window_surface(
     before_map = {item.metric_key: item for item in before_metrics}
     after_map = {item.metric_key: item for item in after_metrics}
     if set(before_map) != set(after_map):
-        raise ValueError("before_metrics and after_metrics must contain the same metric keys")
+        raise ValueError(
+            "before_metrics and after_metrics must contain the same metric keys"
+        )
 
     metric_deltas = {
         key: _build_metric_delta(before=before_map[key], after=after_map[key])
@@ -382,12 +390,18 @@ def build_recovery_window_surface(
         before_score=round(sum(item.before_score for item in planes) / len(planes), 3),
         after_score=round(sum(item.after_score for item in planes) / len(planes), 3),
         plane_changes=planes,
-        improved_truth_planes=_dedupe(item.plane_key for item in planes if item.improved),
+        improved_truth_planes=_dedupe(
+            item.plane_key for item in planes if item.improved
+        ),
         residual_truth_planes=_dedupe(
-            item.plane_key for item in planes if item.residual_reasons or item.after_state is not TruthPlaneState.ALIGNED
+            item.plane_key
+            for item in planes
+            if item.residual_reasons or item.after_state is not TruthPlaneState.ALIGNED
         ),
     )
-    assessment = _determine_assessment(metric_deltas=metric_deltas, residual_risks=residuals)
+    assessment = _determine_assessment(
+        metric_deltas=metric_deltas, residual_risks=residuals
+    )
     closure_judge = _build_closure_judge(
         assessment=assessment,
         metric_deltas=metric_deltas,
@@ -410,7 +424,9 @@ def build_recovery_window_surface(
         drift_delta=_required_metric(metric_deltas, "drift_count"),
         escalation_delta=_required_metric(metric_deltas, "escalation_count"),
         coverage_gap_delta=_required_metric(metric_deltas, "coverage_gap_count"),
-        publish_conflict_delta=_required_metric(metric_deltas, "publish_conflict_count"),
+        publish_conflict_delta=_required_metric(
+            metric_deltas, "publish_conflict_count"
+        ),
         residual_risks=residuals,
         closure_judge=closure_judge,
         continue_commands=closure_judge.next_commands,
@@ -470,7 +486,9 @@ def _determine_assessment(
     residual_risks: tuple[ResidualRisk, ...],
 ) -> RecoveryAssessment:
     drift_delta = _required_metric(metric_deltas, "drift_count")
-    unacceptable_residuals = tuple(risk for risk in residual_risks if not risk.acceptable_residual)
+    unacceptable_residuals = tuple(
+        risk for risk in residual_risks if not risk.acceptable_residual
+    )
     improved_count = sum(1 for item in metric_deltas.values() if item.improved)
 
     if drift_delta.after_value > drift_delta.before_value:
@@ -492,8 +510,13 @@ def _build_closure_judge(
     improved_metrics = _dedupe(
         item.label for item in metric_deltas.values() if item.improved
     )
-    unacceptable_residuals = tuple(risk for risk in residual_risks if not risk.acceptable_residual)
-    residual_truth_planes = _dedupe(risk.truth_plane for risk in unacceptable_residuals) or alignment_view.residual_truth_planes
+    unacceptable_residuals = tuple(
+        risk for risk in residual_risks if not risk.acceptable_residual
+    )
+    residual_truth_planes = (
+        _dedupe(risk.truth_plane for risk in unacceptable_residuals)
+        or alignment_view.residual_truth_planes
+    )
     closure_blockers = _dedupe(risk.label for risk in unacceptable_residuals)
 
     if assessment is RecoveryAssessment.RECOVERY_CONFIRMED:
@@ -523,19 +546,18 @@ def _build_closure_judge(
             improved_metrics=improved_metrics,
             residual_truth_planes=residual_truth_planes,
             next_commands=_dedupe(
-                ("reopen_drift_route", *(risk.recommended_command for risk in residual_risks))
+                (
+                    "reopen_drift_route",
+                    *(risk.recommended_command for risk in residual_risks),
+                )
             ),
             monitor_targets=("drift_count", "publish_conflict_count"),
             closure_blockers=closure_blockers,
         )
     if assessment is RecoveryAssessment.FALSE_RECOVERY:
-        rationale = (
-            "Headline metrics improved, but audience and publish truth planes still show unresolved mismatch."
-        )
+        rationale = "Headline metrics improved, but audience and publish truth planes still show unresolved mismatch."
     else:
-        rationale = (
-            "Recovery signals improved only partially, so the command should continue with a lightweight follow-up."
-        )
+        rationale = "Recovery signals improved only partially, so the command should continue with a lightweight follow-up."
     return ClosureJudge(
         assessment=assessment,
         recommendation=RecoveryDecision.CONTINUE_WITH_LIGHTWEIGHT_FOLLOW_UP,
@@ -543,7 +565,9 @@ def _build_closure_judge(
         rationale=rationale,
         improved_metrics=improved_metrics,
         residual_truth_planes=residual_truth_planes,
-        next_commands=_dedupe(risk.recommended_command for risk in unacceptable_residuals),
+        next_commands=_dedupe(
+            risk.recommended_command for risk in unacceptable_residuals
+        ),
         monitor_targets=("rewrite_count", "escalation_count", "coverage_gap_count"),
         closure_blockers=closure_blockers,
     )
@@ -557,13 +581,17 @@ def _build_summary(
     residual_risks: tuple[ResidualRisk, ...],
 ) -> str:
     improved_count = sum(1 for item in metric_deltas.values() if item.improved)
-    unacceptable_count = sum(1 for risk in residual_risks if not risk.acceptable_residual)
+    unacceptable_count = sum(
+        1 for risk in residual_risks if not risk.acceptable_residual
+    )
     if assessment is RecoveryAssessment.RECOVERY_CONFIRMED:
         status_clause = "the system is consistent enough to close and monitor"
     elif assessment is RecoveryAssessment.DRIFT_REBOUND:
         status_clause = "drift rebounded and the route must be reopened"
     elif assessment is RecoveryAssessment.FALSE_RECOVERY:
-        status_clause = "headline improvements are real but the cycle is still not safe to close"
+        status_clause = (
+            "headline improvements are real but the cycle is still not safe to close"
+        )
     else:
         status_clause = "the system is improving but still lacks full recovery proof"
     return (

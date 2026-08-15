@@ -3,9 +3,10 @@ Generic async CRUD repository for SQLAlchemy models.
 """
 
 import uuid
-from typing import Any, Optional, Sequence, Type, TypeVar
+from typing import Any, Optional, Sequence, Type, TypeVar, cast
 
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.runtime.database.models import Base
@@ -64,7 +65,7 @@ class Repository:
     async def delete_by_id(self, model: Type[T], id: uuid.UUID) -> bool:
         stmt = delete(model).where(model.id == id)  # type: ignore[attr-defined]
         result = await self.session.execute(stmt)
-        return result.rowcount > 0  # type: ignore[union-attr]
+        return cast(CursorResult[Any], result).rowcount > 0
 
     async def count(self, model: Type[T]) -> int:
         stmt = select(func.count()).select_from(model)

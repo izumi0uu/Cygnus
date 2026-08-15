@@ -170,6 +170,7 @@ class RouterBaselineImportTests(unittest.TestCase):
                 self.assertIsNotNone(
                     router, f"{module_name} missing router symbol: {symbol}"
                 )
+                assert router is not None
                 self.assertTrue(
                     hasattr(router, "routes"),
                     f"{module_name}.{symbol} should expose a FastAPI router-like object",

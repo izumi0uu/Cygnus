@@ -17,7 +17,9 @@ PROTOCOL_BASELINE_FILES = [
 
 def test_protocol_baseline_files_exist() -> None:
     for relative_path in PROTOCOL_BASELINE_FILES:
-        assert Path(relative_path).is_file(), f"missing mirrored protocol file: {relative_path}"
+        assert Path(relative_path).is_file(), (
+            f"missing mirrored protocol file: {relative_path}"
+        )
 
 
 def test_protocol_baseline_files_are_syntax_valid() -> None:
@@ -29,8 +31,14 @@ def test_protocol_baseline_files_are_syntax_valid() -> None:
 def test_runtime_protocol_module_reexports_substrate_owner() -> None:
     assert runtime_protocol.AssistantTurn is substrate_protocol.AssistantTurn
     assert runtime_protocol.ToolCall is substrate_protocol.ToolCall
-    assert runtime_protocol.assistant_message_from_turn is substrate_protocol.assistant_message_from_turn
-    assert runtime_protocol.neutral_to_anthropic_messages is substrate_protocol.neutral_to_anthropic_messages
+    assert (
+        runtime_protocol.assistant_message_from_turn
+        is substrate_protocol.assistant_message_from_turn
+    )
+    assert (
+        runtime_protocol.neutral_to_anthropic_messages
+        is substrate_protocol.neutral_to_anthropic_messages
+    )
 
 
 def test_runtime_ai_code_prefers_substrate_protocol_owner() -> None:

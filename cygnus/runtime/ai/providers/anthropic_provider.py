@@ -4,7 +4,10 @@ Anthropic provider — LLM only (no embedding, no vision).
 Supports: Claude Sonnet, Claude Haiku, Claude Opus, etc.
 """
 
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Optional
+
+if TYPE_CHECKING:
+    from anthropic import AsyncAnthropic
 
 from cygnus.substrate.agent_protocol import (
     AssistantTurn,
@@ -12,7 +15,11 @@ from cygnus.substrate.agent_protocol import (
     neutral_to_anthropic_messages,
     openai_tools_to_anthropic,
 )
-from cygnus.runtime.ai.providers.base import LLMProvider, ProviderConfig
+from cygnus.runtime.ai.providers.base import (
+    LLMProvider,
+    ProviderConfig,
+    observe_provider_call,
+)
 
 
 class AnthropicLLM(LLMProvider):
@@ -20,12 +27,13 @@ class AnthropicLLM(LLMProvider):
 
     def __init__(self, config: ProviderConfig):
         super().__init__(config)
-        self._client = None
+        self._client: AsyncAnthropic | None = None
 
     @property
-    def client(self):
+    def client(self) -> "AsyncAnthropic":
         if self._client is None:
             import anthropic
+
             self._client = anthropic.AsyncAnthropic(
                 api_key=self.config.api_key,
                 base_url=self.config.base_url,
@@ -39,7 +47,7 @@ class AnthropicLLM(LLMProvider):
         max_tokens: Optional[int] = None,
         temperature: float = 0.7,
     ) -> str:
-        kwargs = {
+        kwargs: dict[str, Any] = {
             "model": self.config.model_id,
             "max_tokens": max_tokens or 16384,
             "temperature": temperature,
@@ -48,7 +56,13 @@ class AnthropicLLM(LLMProvider):
         if system:
             kwargs["system"] = system
 
-        response = await self.client.messages.create(**kwargs)
+        with observe_provider_call(
+            provider="anthropic",
+            model=self.config.model_id,
+            operation="generate",
+        ) as observation:
+            response = await self.client.messages.create(**kwargs)
+            observation.success(response)
         return response.content[0].text if response.content else ""
 
     async def generate_with_tools(
@@ -62,7 +76,7 @@ class AnthropicLLM(LLMProvider):
         anthropic_messages = neutral_to_anthropic_messages(messages)
         anthropic_tools = openai_tools_to_anthropic(tools)
 
-        kwargs: dict = {
+        kwargs: dict[str, Any] = {
             "model": self.config.model_id,
             "max_tokens": max_tokens or 16384,
             "temperature": temperature,
@@ -72,7 +86,13 @@ class AnthropicLLM(LLMProvider):
         if system:
             kwargs["system"] = system
 
-        response = await self.client.messages.create(**kwargs)
+        with observe_provider_call(
+            provider="anthropic",
+            model=self.config.model_id,
+            operation="generate_tools",
+        ) as observation:
+            response = await self.client.messages.create(**kwargs)
+            observation.success(response)
 
         text_parts: list[str] = []
         tool_calls: list[ToolCall] = []
@@ -81,14 +101,20 @@ class AnthropicLLM(LLMProvider):
                 text_parts.append(block.text)
             elif block.type == "tool_use":
                 args = block.input if isinstance(block.input, dict) else {}
-                tool_calls.append(ToolCall(id=block.id, name=block.name, arguments=args))
+                tool_calls.append(
+                    ToolCall(id=block.id, name=block.name, arguments=args)
+                )
 
-        reason_map = {"end_turn": "end_turn", "tool_use": "tool_use", "max_tokens": "max_tokens"}
+        reason_map = {
+            "end_turn": "end_turn",
+            "tool_use": "tool_use",
+            "max_tokens": "max_tokens",
+        }
         finish_reason = reason_map.get(response.stop_reason or "end_turn", "end_turn")
 
         return AssistantTurn(
             text="\n".join(text_parts) or None,
-            tool_calls=tool_calls,
+            tool_calls=tuple(tool_calls),
             finish_reason=finish_reason,
         )
 

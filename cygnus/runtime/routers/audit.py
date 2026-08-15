@@ -22,6 +22,7 @@ router = APIRouter(prefix="/audit", tags=["audit"])
 # DTOs
 # ---------------------------------------------------------------------------
 
+
 class AuditEntryOut(BaseModel):
     id: str
     timestamp: str
@@ -46,6 +47,7 @@ class AuditListResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.get("/log", response_model=AuditListResponse)
 async def get_audit_log(
@@ -79,12 +81,11 @@ async def get_audit_log(
 
     # Paginate
     stmt = (
-        stmt
-        .order_by(desc(AuditLog.timestamp))
+        stmt.order_by(desc(AuditLog.timestamp))
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
-    
+
     # Join with Employee to get names/emails
     join_stmt = (
         select(AuditLog, Employee)
@@ -93,7 +94,7 @@ async def get_audit_log(
         .outerjoin(Employee, AuditLog.principal_id == Employee.id)
         .order_by(desc(AuditLog.timestamp))
     )
-    
+
     result = await db.execute(join_stmt)
     rows = result.all()
 

@@ -4,7 +4,6 @@ from cygnus.review.briefing import ReviewCommandBrief, ReviewRiskItem, ReviewRis
 from cygnus.substrate.compilation_plan import UrgencyLevel
 
 
-
 def build_review_command_brief(
     *,
     brief_id: str,
@@ -12,14 +11,15 @@ def build_review_command_brief(
     items: tuple[ReviewRiskItem, ...],
     sort_items: bool = True,
 ) -> ReviewCommandBrief:
-    ordered = tuple(sorted(items, key=_priority_sort_key)) if sort_items else tuple(items)
+    ordered = (
+        tuple(sorted(items, key=_priority_sort_key)) if sort_items else tuple(items)
+    )
     return ReviewCommandBrief(
         brief_id=brief_id,
         headline=headline,
         priority_items=ordered,
         summary_counts=summarize_review_items(ordered),
     )
-
 
 
 def _priority_sort_key(item: ReviewRiskItem) -> tuple[int, int, str]:
@@ -38,7 +38,6 @@ def _priority_sort_key(item: ReviewRiskItem) -> tuple[int, int, str]:
         ReviewRiskType.OWNER_GAP: 5,
     }[item.risk_type]
     return (urgency_rank, risk_rank, item.title.lower())
-
 
 
 def summarize_review_items(items: tuple[ReviewRiskItem, ...]) -> dict[str, int]:

@@ -3,16 +3,26 @@ Cygnus — Support Knowledge Control Plane.
 FastAPI application entry point.
 """
 
+import time
+import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
 
+from cygnus.integrations.mcp_auth import parse_bearer_token
 from cygnus.runtime.governance_router import router as governance_router
 from cygnus.runtime.config import Settings, get_settings
 from cygnus.runtime.mcp.server import create_mcp_server
+from cygnus.substrate.agent_protocol import (
+    SESSION_CONTRACT_VERSION,
+    SESSION_CONTRACT_VERSION_HEADER,
+    SessionContractVersionError,
+    negotiate_session_contract_version,
+    session_contract_error_envelope,
+)
 
 
 async def seed_default_admin():
@@ -59,6 +69,7 @@ async def seed_default_admin():
 def create_app(*, app_settings: Settings | None = None) -> FastAPI:
     """Assemble the full-port FastAPI app around explicit backend settings."""
     resolved_settings = app_settings or get_settings()
+    resolved_settings.validate_runtime_security()
     from cygnus.runtime.database import get_async_session_factory
     from cygnus.runtime.services.storage_service import storage_service
     from cygnus.runtime.worker import get_arq_pool as get_worker_arq_pool
@@ -73,6 +84,7 @@ def create_app(*, app_settings: Settings | None = None) -> FastAPI:
         """Startup & shutdown logic (composed with FastMCP lifespan)."""
         async with mcp_http_app.lifespan(app):
             logger.info("Starting Cygnus API...")
+            app.state.startup_complete = False
 
             # Ensure MinIO bucket exists
             try:
@@ -107,10 +119,12 @@ def create_app(*, app_settings: Settings | None = None) -> FastAPI:
                 )
 
             # MCP server ready
+            app.state.startup_complete = True
             logger.success("Cygnus MCP Server ready at /mcp")
             logger.success("Cygnus API started successfully")
             yield
 
+            app.state.startup_complete = False
             logger.info("Cygnus API shutdown complete")
 
     app = FastAPI(
@@ -137,32 +151,225 @@ def create_app(*, app_settings: Settings | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
-    # --- MCP OAuth discovery gate ---
+    # --- Strict security headers (defense in depth behind nginx) ---
+    # The only backend-rendered HTML is the OAuth login form, which uses an
+    # inline <style> block and Google Fonts; everything else is JSON/SSE and
+    # gets the maximally restrictive policy.
+    _HTML_CSP = (
+        "default-src 'self'; "
+        "script-src 'none'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "object-src 'none'; base-uri 'self'; frame-ancestors 'none'; "
+        "form-action 'self'"
+    )
+    _DEFAULT_CSP = (
+        "default-src 'none'; object-src 'none'; base-uri 'none'; "
+        "frame-ancestors 'none'; form-action 'none'"
+    )
+    _PRODUCTION_HSTS = "max-age=31536000; includeSubDomains"
+
+    @app.middleware("http")
+    async def _security_headers_mw(request, call_next):
+        from cygnus.observability import (
+            current_traceparent,
+            emit_structured_log,
+            record_http_request,
+            request_correlation,
+            resolve_request_id_header,
+            start_span,
+        )
+
+        # Correlation ID: strict-UUID inbound values are trusted and echoed;
+        # anything else is replaced with a fresh ID (never trusted across
+        # proxy boundaries).
+        raw = request.headers.get("x-request-id")
+        request_id = resolve_request_id_header(raw) or str(uuid.uuid4())
+        traceparent: str | None = None
+        started = time.perf_counter()
+        response = None
+        failure: BaseException | None = None
+        route_hint = getattr(request.scope.get("route"), "path", None) or "unmatched"
+        try:
+            with request_correlation(request_id):
+                traceparent = current_traceparent()
+                with start_span(
+                    "http.request",
+                    {"http.method": request.method, "http.route": route_hint},
+                ) as span:
+                    span.set_attribute("http.request_id", request_id)
+                    response = await call_next(request)
+        except BaseException as exc:
+            # Preserve application exception semantics; finally below still
+            # records a bounded 500 RED sample and a sanitized error envelope.
+            failure = exc
+            raise
+        finally:
+            duration_ms = max((time.perf_counter() - started) * 1000.0, 0.0)
+            status = getattr(response, "status_code", 500)
+            route = getattr(request.scope.get("route"), "path", None) or route_hint
+            record_http_request(
+                route=route,
+                method=request.method,
+                status=status,
+                duration_ms=duration_ms,
+            )
+            # Only an actor class is logged; employee IDs, emails, bodies, and
+            # authorization headers never enter telemetry.
+            actor_class = "anonymous"
+            state = getattr(request, "state", None)
+            if state is not None and any(
+                getattr(state, name, None) is not None
+                for name in ("current_user", "user", "identity")
+            ):
+                actor_class = "authenticated"
+            emit_structured_log(
+                logger,
+                "error" if failure is not None or status >= 500 else "info",
+                event="http_request",
+                route=route,
+                status=status,
+                duration_ms=duration_ms,
+                actor_class=actor_class,
+                correlation_id=request_id,
+                traceparent=traceparent,
+                error=failure,
+                method=request.method,
+            )
+
+        # The response path below is reached only when call_next succeeded.
+        assert response is not None
+        response.headers.setdefault("X-Request-ID", request_id)
+
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault(
+            "Referrer-Policy", "strict-origin-when-cross-origin"
+        )
+        response.headers.setdefault(
+            "Permissions-Policy",
+            "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        )
+        response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+        response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
+        if resolved_settings.environment == "production":
+            response.headers.setdefault("Strict-Transport-Security", _PRODUCTION_HSTS)
+        content_type = response.headers.get("content-type", "")
+        if content_type.startswith("text/html"):
+            response.headers.setdefault("Content-Security-Policy", _HTML_CSP)
+        else:
+            response.headers.setdefault("Content-Security-Policy", _DEFAULT_CSP)
+        return response
+
+    # --- Bounded Prometheus metrics surface (CYG-142) ---
+    # The handler self-gates (204 when prometheus_metrics_enabled=false) and
+    # performs no auth. It is intentionally NOT proxied by the shipped
+    # frontend/nginx.conf — operators must keep the API port network-isolated
+    # from untrusted clients if /metrics is scraped.
+    from cygnus.observability import prometheus_metrics_endpoint
+
+    _metrics_asgi = prometheus_metrics_endpoint()
+
+    async def _metrics_route(request: Request) -> Response:
+        """Bridge the raw-ASGI metrics handler onto the FastAPI route.
+
+        Starlette's ``add_route`` wraps plain functions as request/response
+        endpoints, so the observability ASGI handler (scope/receive/send) is
+        driven here with the live scope and a synthetic receive/send pair;
+        its start/body messages are folded into a ``Response``. /metrics
+        never consumes a request body, and the handler only emits response
+        start/body messages.
+        """
+        messages: list[dict[str, object]] = []
+
+        async def _receive() -> dict[str, object]:
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def _send(message: dict[str, object]) -> None:
+            messages.append(message)
+
+        await _metrics_asgi(request.scope, _receive, _send)
+
+        status = 204
+        raw_headers: list[tuple[bytes, bytes]] = []
+        body = bytearray()
+        for message in messages:
+            kind = message.get("type")
+            if kind == "http.response.start":
+                raw_status = message.get("status", 204)
+                if isinstance(raw_status, (int, str)):
+                    status = int(raw_status)
+                raw = message.get("headers", [])
+                if isinstance(raw, list):
+                    raw_headers = [
+                        (name, value)
+                        for name, value in raw
+                        if isinstance(name, bytes) and isinstance(value, bytes)
+                    ]
+            elif kind == "http.response.body":
+                chunk = message.get("body", b"")
+                if isinstance(chunk, bytes):
+                    body.extend(chunk)
+        return Response(
+            status_code=status,
+            content=bytes(body),
+            headers={
+                name.decode("latin-1"): value.decode("latin-1")
+                for name, value in raw_headers
+            },
+        )
+
+    app.add_route("/metrics", _metrics_route)
+
+    # --- MCP OAuth and contract gate ---
     @app.middleware("http")
     async def _mcp_oauth_gate_mw(request, call_next):
         path = request.url.path
-        if path == "/mcp" or path.startswith("/mcp/"):
-            auth = request.headers.get("authorization", "")
-            if not auth.lower().startswith("bearer "):
-                base = str(request.base_url).rstrip("/")
-                resource_metadata_url = f"{base}/.well-known/oauth-protected-resource"
-                return JSONResponse(
-                    status_code=401,
-                    content={
-                        "error": "unauthorized",
-                        "error_description": (
-                            "This MCP endpoint requires OAuth 2.0 or a Bearer token. "
-                            "See the WWW-Authenticate header for OAuth discovery."
-                        ),
-                    },
-                    headers={
-                        "WWW-Authenticate": (
-                            f'Bearer realm="Cygnus MCP", '
-                            f'resource_metadata="{resource_metadata_url}"'
-                        ),
-                    },
-                )
-        return await call_next(request)
+        if path != "/mcp" and not path.startswith("/mcp/"):
+            return await call_next(request)
+
+        # Shared case-insensitive parser: same credential rules as the MCP
+        # tool auth path, so malformed bearer forms get a uniform 401 here
+        # instead of a different error inside the tool layer.
+        if parse_bearer_token(request.headers.get("authorization")) is None:
+            base = str(request.base_url).rstrip("/")
+            resource_metadata_url = f"{base}/.well-known/oauth-protected-resource"
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "error": "unauthorized",
+                    "error_description": (
+                        "This MCP endpoint requires OAuth 2.0 or a Bearer token. "
+                        "See the WWW-Authenticate header for OAuth discovery."
+                    ),
+                },
+                headers={
+                    "WWW-Authenticate": (
+                        f'Bearer realm="Cygnus MCP", '
+                        f'resource_metadata="{resource_metadata_url}"'
+                    ),
+                    SESSION_CONTRACT_VERSION_HEADER: SESSION_CONTRACT_VERSION,
+                },
+            )
+
+        try:
+            negotiated_contract_version = negotiate_session_contract_version(
+                request.headers.get(SESSION_CONTRACT_VERSION_HEADER)
+            )
+        except SessionContractVersionError as exc:
+            return JSONResponse(
+                status_code=400 if exc.code == "missing_contract_version" else 409,
+                content=session_contract_error_envelope(exc),
+                headers={SESSION_CONTRACT_VERSION_HEADER: SESSION_CONTRACT_VERSION},
+            )
+
+        response = await call_next(request)
+        response.headers.setdefault(
+            SESSION_CONTRACT_VERSION_HEADER, negotiated_contract_version
+        )
+        return response
 
     # --- Committed-only notification and durable AI review outbox accelerator ---
     @app.middleware("http")
@@ -234,12 +441,16 @@ def create_app(*, app_settings: Settings | None = None) -> FastAPI:
 
     @app.get("/")
     async def root():
+        from cygnus.observability import runtime_identity
+
+        identity = runtime_identity()
         return {
             "name": "Cygnus",
             "description": "Enterprise AI Control Center",
-            "version": "0.1.0",
+            "version": identity["release"],
             "mcp_endpoint": "/mcp",
             "docs": "/docs",
+            **identity,
         }
 
     @app.get("/health")
@@ -325,6 +536,36 @@ def create_app(*, app_settings: Settings | None = None) -> FastAPI:
             logger.warning(f"Health check: Redis error — {e}")
 
         return result
+
+    @app.get("/livez")
+    async def livez():
+        """Side-effect-free liveness: never probes database, Redis, or MinIO.
+
+        Stays 200 while this process serves requests even when dependencies or
+        workers fail; /readyz carries that truth as 503.
+        """
+        from cygnus.runtime.readiness import probe_liveness
+
+        report = probe_liveness(
+            startup_complete=bool(getattr(app.state, "startup_complete", False))
+        )
+        return JSONResponse(status_code=200, content=report.to_dict())
+
+    @app.get("/readyz")
+    async def readyz():
+        """503 readiness: DB reachability + exact Alembic head, Redis, MinIO,
+        configuration, and one fresh heartbeat per deployed worker role."""
+        from cygnus.runtime.readiness import probe_readiness
+
+        report = await probe_readiness(
+            settings=app.state.settings,
+            session_factory=app.state.session_factory,
+            startup_complete=bool(getattr(app.state, "startup_complete", False)),
+        )
+        return JSONResponse(
+            status_code=200 if report.ready else 503,
+            content=report.to_dict(),
+        )
 
     return app
 

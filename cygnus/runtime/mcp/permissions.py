@@ -82,28 +82,86 @@ CAN_CREATE_WIKI_DIRECT = CAN_REVIEW_WIKI
 
 
 # ---------------------------------------------------------------------------
+# Governed session profile — the ONLY tool surface /mcp advertises/dispatches
+# ---------------------------------------------------------------------------
+
+_GOVERNED_TOOL_NAMES: frozenset[str] | None = None
+
+
+def governed_tool_names() -> frozenset[str]:
+    """Names of the governed session tools — the only tools /mcp may list or call.
+
+    Derived from the governed session tool contract
+    (cygnus.integrations.governed_session_tools) so the allowlist stays in
+    lockstep with the tool definitions. Computed once per process.
+    """
+    global _GOVERNED_TOOL_NAMES
+    if _GOVERNED_TOOL_NAMES is None:
+        from cygnus.integrations.governed_session_tools import (
+            governed_session_tool_definitions,
+        )
+
+        _GOVERNED_TOOL_NAMES = frozenset(
+            definition.name for definition in governed_session_tool_definitions()
+        )
+    return _GOVERNED_TOOL_NAMES
+
+
+# ---------------------------------------------------------------------------
 # Decorator
 # ---------------------------------------------------------------------------
 
+# Registration-derived name → requirement map, populated by `kb_tool` so the
+# dispatch gate (middleware.on_call_tool) can role-check a tool by name
+# without reaching into FastMCP internals. Filled during register_tools().
+TOOL_REQUIREMENTS: dict[str, ToolRequirement] = {}
+
+
+def requirement_for_name(name: str) -> ToolRequirement | None:
+    """Requirement attached to the registered tool `name`, or None if no such tool."""
+    return TOOL_REQUIREMENTS.get(name)
+
 
 def kb_tool(mcp, *, requires: ToolRequirement = ANY_AUTHENTICATED, **fastmcp_kwargs):
-    """Replacement for `@mcp.tool()` that attaches a visibility requirement.
+    """Register an MCP tool with one governed permission and manifest contract.
 
-    Usage::
-
-        @kb_tool(mcp, requires=CAN_REVIEW_WIKI)
-        @logged_tool("approve_draft", query_arg="draft_id")
-        async def approve_draft(draft_id: str) -> str: ...
-
-    The requirement is stashed on the function via `REQUIRES_ATTR` so the
-    middleware can read it back off the FastMCP `Tool.fn` reference. We then
-    delegate to FastMCP's own `mcp.tool(...)` so all native behaviour
-    (schema generation, logging, name inference) keeps working.
+    Canonical tools receive their output schema, deadline, and policy metadata
+    from the immutable session manifest. Legacy registrations receive no
+    manifest projection and remain mechanically denied by middleware.
     """
 
     def decorator(fn):
+        name = fastmcp_kwargs.get("name") or fn.__name__
         setattr(fn, REQUIRES_ATTR, requires)
-        return mcp.tool(**fastmcp_kwargs)(fn)
+        TOOL_REQUIREMENTS[name] = requires
+
+        registration_kwargs = dict(fastmcp_kwargs)
+        try:
+            from cygnus.substrate.tool_runtime import session_tool_manifest
+
+            manifest = session_tool_manifest()
+            tool = manifest.tool(name)
+        except ValueError:
+            # This is a legacy registration. Middleware denies it before its
+            # handler body, and it must not gain governed metadata by name.
+            pass
+        else:
+            metadata = tool.metadata()
+            existing_meta = registration_kwargs.get("meta")
+            merged_meta = dict(existing_meta) if isinstance(existing_meta, dict) else {}
+            merged_meta["cygnus_contract"] = {
+                "contract_version": manifest.contract_version,
+                "schema_fingerprint": manifest.schema_fingerprint,
+                "permission_requirement": metadata["permission_requirement"],
+                "risk_class": metadata["risk_class"],
+                "side_effect_class": metadata["side_effect_class"],
+                "idempotency_class": metadata["idempotency_class"],
+                "retry_policy": metadata["retry_policy"],
+            }
+            registration_kwargs.setdefault("output_schema", metadata["output_schema"])
+            registration_kwargs.setdefault("timeout", metadata["timeout_seconds"])
+            registration_kwargs["meta"] = merged_meta
+        return mcp.tool(**registration_kwargs)(fn)
 
     return decorator
 

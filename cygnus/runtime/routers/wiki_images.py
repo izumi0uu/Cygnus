@@ -34,8 +34,8 @@ class ResolveRequest(BaseModel):
 
 
 class ResolveResponse(BaseModel):
-    resolved: dict[str, str]   # uuid -> presigned URL
-    denied: list[str]          # uuids the user can't see
+    resolved: dict[str, str]  # uuid -> presigned URL
+    denied: list[str]  # uuids the user can't see
     # Unknown / non-existent ids are simply absent from both lists.
 
 
@@ -56,11 +56,19 @@ async def resolve_wiki_images(
     # Dedupe
     unique_ids = list({i for i in body.ids})
 
-    rows = (await db.execute(
-        select(SourceImage)
-        .options(selectinload(SourceImage.source).selectinload(Source.departments))
-        .where(SourceImage.id.in_(unique_ids))
-    )).scalars().all()
+    rows = (
+        (
+            await db.execute(
+                select(SourceImage)
+                .options(
+                    selectinload(SourceImage.source).selectinload(Source.departments)
+                )
+                .where(SourceImage.id.in_(unique_ids))
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     resolved: dict[str, str] = {}
     denied: list[str] = []
@@ -73,12 +81,16 @@ async def resolve_wiki_images(
         if source is None:
             continue
         if source.id not in access_cache:
-            access_cache[source.id] = await can_access_document(db, user, source, "read")
+            access_cache[source.id] = await can_access_document(
+                db, user, source, "read"
+            )
         if not access_cache[source.id]:
             denied.append(str(img.id))
             continue
         try:
-            url = storage_service.get_presigned_url(img.minio_key, expiry_hours=PRESIGN_EXPIRY_HOURS)
+            url = storage_service.get_presigned_url(
+                img.minio_key, expiry_hours=PRESIGN_EXPIRY_HOURS
+            )
             resolved[str(img.id)] = url
         except Exception as e:
             logger.warning(f"Failed to presign image {img.id} ({img.minio_key}): {e}")

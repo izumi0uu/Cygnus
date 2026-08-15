@@ -332,8 +332,10 @@ class FeedbackRouteOperationsSummary:
         reason_counts: dict[str, dict[str, int]] = {
             state.value: {} for state in FeedbackRouteState
         }
-        for entry in self.terminal_reason_counts:
-            reason_counts[entry.route_state.value][entry.terminal_reason] = entry.count
+        for reason_entry in self.terminal_reason_counts:
+            reason_counts[reason_entry.route_state.value][
+                reason_entry.terminal_reason
+            ] = reason_entry.count
         oldest_age = _age_seconds(self.oldest_due_at, now=self.now)
         return {
             "total": self.total,
@@ -500,6 +502,7 @@ def feedback_route_scope_clause(
     if page_scope is None and draft_scope is None:
         return None
 
+    visible_page: ColumnElement[bool]
     if page_scope is None:
         visible_page = GovernanceFeedbackSignal.page_id.is_not(None)
     else:
@@ -511,6 +514,7 @@ def feedback_route_scope_clause(
             )
             .correlate(GovernanceFeedbackSignal)
         )
+    visible_draft: ColumnElement[bool]
     if draft_scope is None:
         visible_draft = GovernanceFeedbackSignal.draft_id.is_not(None)
     else:

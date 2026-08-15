@@ -470,6 +470,7 @@ Nanobot 只消费结果，不拥有检索真相。
 }
 ```
 - `command_id` 必填、去除首尾空白后不得为空，长度最多 220 个字符。
+- 提供 `object_id` 时，它必须是 governed retrieval 返回的精确、规范、不可变 governed object ref：`ko-page-<WikiPage UUID>`。resolver 解析该 UUID，并将当前 actor 的 SQL read scope 应用于 `WikiPage.id`；绝不回退到可变 slug。
 
 ### 输出与真相边界
 
@@ -482,7 +483,7 @@ Nanobot 只消费结果，不拥有检索真相。
 - Non-routed response 暴露 `route_id:null`、`route_ref:null`、`route_kind:null`、`route_state:null`、`routing_state:"recorded_only"`、`review_queued:false` 与 `refresh_queued:false`。
 - `actor_id` 及已解析的 `page_id` / `draft_id` 是 `RESTRICT` 外键；`object_id` 与 `source_context_ref` 是持久化上下文而非数据库外键，`source_context_ref` 不会解析为 `Source` row。
 - `persisted:true`、`rehearsal:false`；`trace_ref` 只标识 durable feedback row，route fields 标识 durable route row；两者都不表示下游工作已完成。
-- 隐藏、缺失或有歧义的 object/draft ref 统一返回结构化 `not_found`；冲突的 object/draft ref 返回结构化 `conflict`，不泄露资源且不写入记录。
+- 隐藏或缺失的 object/draft ref，以及非规范的 object ref，统一返回结构化 `not_found`；冲突的 object/draft ref 返回结构化 `conflict`，不泄露资源且不写入记录。
 
 #### Route 执行生命周期（CYG-119）
 - 上面的 replay-safe queue-intent seam 由 CYG-118 冻结；CYG-119 在其上增加有界执行。`GovernanceFeedbackRoute.lifecycle_state` 沿 `queued / running / completed / blocked / failed` 推进：worker 以 60 秒 lease 认领到期 route（最多 `limit=25` 条），可重试失败把 route 退回 `queued`（最多 3 次尝试、30 秒基础重试），目标对象缺失、仅 draft 或不符合 governed review 条件的 route 以 `blocked` 结束，且不猜测目标。

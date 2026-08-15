@@ -11,11 +11,13 @@ import uuid
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from cygnus.domain.objects import governed_object_ref
 from cygnus.governance.ledger import GovernanceEventType
 from cygnus.governance.ticket_pilot import (
     TicketPilotFunnelQuery,
     get_ticket_pilot_funnel,
 )
+from cygnus.runtime.services import wiki_service
 from cygnus.runtime.database.models import (
     Employee,
     GovernanceLedgerEvent,
@@ -34,6 +36,28 @@ def _mapping(value: object) -> Mapping[str, object]:
     if not isinstance(value, dict):
         raise AssertionError(f"expected mapping, got {type(value).__name__}")
     return cast(Mapping[str, object], value)
+
+
+def _page(*, page_id: uuid.UUID, slug: str, now: datetime) -> WikiPage:
+    """Build a page that satisfies the canonical Postgres identity contract."""
+    return WikiPage(
+        id=page_id,
+        slug=slug,
+        title="CYG-124 published pilot object",
+        status="mature",
+        content_md="# Published pilot object",
+        summary="Published pilot object.",
+        scope_type="global",
+        scope_id=None,
+        language="en",
+        normalized_path=wiki_service.normalize_page_path(slug),
+        knowledge_type_slugs=["troubleshooting_flow"],
+        source_ids=[],
+        version=1,
+        orphaned=False,
+        created_at=now,
+        updated_at=now,
+    )
 
 
 def _signal(
@@ -239,21 +263,10 @@ class TicketPilotFunnelPostgresTests(unittest.TestCase):
                     global_role="admin",
                     is_active=True,
                 )
-                page = WikiPage(
-                    id=page_id,
+                page = _page(
+                    page_id=page_id,
                     slug=f"cyg-124-{unique}",
-                    title="CYG-124 published pilot object",
-                    status="mature",
-                    content_md="# Published pilot object",
-                    summary="Published pilot object.",
-                    scope_type="global",
-                    scope_id=None,
-                    knowledge_type_slugs=["troubleshooting_flow"],
-                    source_ids=[],
-                    version=1,
-                    orphaned=False,
-                    created_at=now,
-                    updated_at=now,
+                    now=now,
                 )
                 signals = {
                     "unpromoted": _signal(
@@ -399,7 +412,9 @@ class TicketPilotFunnelPostgresTests(unittest.TestCase):
                     publish_event_id=event_ids["published_publish"],
                     command_id=f"cyg124-publish:{unique}",
                     request_fingerprint=uuid.uuid4().hex * 2,
-                    object_ref=f"wiki-page:{page_id}",
+                    approval_digest="a" * 64,
+                    scope_digest="b" * 64,
+                    object_ref=governed_object_ref(page_id),
                     object_type="troubleshooting_flow",
                     object_version=1,
                     action_key="publish",

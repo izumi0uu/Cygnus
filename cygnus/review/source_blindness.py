@@ -5,7 +5,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Iterable
 
 from cygnus.domain.audience import AudienceFilter, Visibility
-from cygnus.domain.objects import KnowledgeObjectType
+from cygnus.domain.objects import KnowledgeObjectType, governed_object_ref
 from cygnus.evidence.records import FreshnessState, SupportEvidence
 from cygnus.retrieval.substrate_provider import resolve_object_type
 from cygnus.publish.actions import (
@@ -14,7 +14,11 @@ from cygnus.publish.actions import (
     PublishGovernanceResult,
     apply_publish_governance_actions,
 )
-from cygnus.publish.preview import PublishActionType, PublishBinding, PublishPreviewCandidate
+from cygnus.publish.preview import (
+    PublishActionType,
+    PublishBinding,
+    PublishPreviewCandidate,
+)
 from cygnus.publish.propagation import (
     PropagationStatus,
     PublishPropagationLedger,
@@ -152,7 +156,9 @@ class SourceFailureObservation:
     linked_wiki_refs: tuple[str, ...] = field(default_factory=tuple)
     linked_object_refs: tuple[str, ...] = field(default_factory=tuple)
     audience_impacts: tuple[SourceAudienceImpact, ...] = field(default_factory=tuple)
-    propagation_impacts: tuple[SourcePropagationImpact, ...] = field(default_factory=tuple)
+    propagation_impacts: tuple[SourcePropagationImpact, ...] = field(
+        default_factory=tuple
+    )
     observed_at: str | None = None
 
     def __post_init__(self) -> None:
@@ -172,12 +178,20 @@ class SourceFailureObservation:
         object.__setattr__(
             self,
             "linked_wiki_refs",
-            tuple(dict.fromkeys(_normalize(self.linked_wiki_refs, label="linked wiki ref"))),
+            tuple(
+                dict.fromkeys(
+                    _normalize(self.linked_wiki_refs, label="linked wiki ref")
+                )
+            ),
         )
         object.__setattr__(
             self,
             "linked_object_refs",
-            tuple(dict.fromkeys(_normalize(self.linked_object_refs, label="linked object ref"))),
+            tuple(
+                dict.fromkeys(
+                    _normalize(self.linked_object_refs, label="linked object ref")
+                )
+            ),
         )
         object.__setattr__(self, "audience_impacts", tuple(self.audience_impacts))
         object.__setattr__(self, "propagation_impacts", tuple(self.propagation_impacts))
@@ -189,11 +203,15 @@ class SourceFailureObservation:
             or self.audience_impacts
             or self.propagation_impacts
         ):
-            raise ValueError("unmapped source impact cannot contain governed impact records")
+            raise ValueError(
+                "unmapped source impact cannot contain governed impact records"
+            )
         linked_objects = set(self.linked_object_refs)
         if any(item.object_ref not in linked_objects for item in self.audience_impacts):
             raise ValueError("audience impact must reference a linked object")
-        if any(item.object_ref not in linked_objects for item in self.propagation_impacts):
+        if any(
+            item.object_ref not in linked_objects for item in self.propagation_impacts
+        ):
             raise ValueError("propagation impact must reference a linked object")
 
     def to_dict(self) -> dict[str, object]:
@@ -206,7 +224,9 @@ class SourceFailureObservation:
             "linked_wiki_refs": list(self.linked_wiki_refs),
             "linked_object_refs": list(self.linked_object_refs),
             "audience_impacts": [item.to_dict() for item in self.audience_impacts],
-            "propagation_impacts": [item.to_dict() for item in self.propagation_impacts],
+            "propagation_impacts": [
+                item.to_dict() for item in self.propagation_impacts
+            ],
             "observed_at": self.observed_at,
             "impact_state": self.impact_state.value,
         }
@@ -223,7 +243,7 @@ def build_source_failure_observations(
     page_refs_by_source: dict[object, list[tuple[object, str, str | None]]] = {}
     for page in linked_pages:
         object_ref = (
-            f"ko-{page.slug}"
+            governed_object_ref(page.id)
             if resolve_object_type(page.knowledge_type_slugs) is not None
             else None
         )
@@ -307,7 +327,11 @@ def build_source_failure_observations(
                     for impact in propagation_impacts_by_page.get(page_id, ())
                     if impact.object_ref in linked_object_refs
                 ),
-                key=lambda item: (item.object_ref, item.surface_id, item.propagation_ref),
+                key=lambda item: (
+                    item.object_ref,
+                    item.surface_id,
+                    item.propagation_ref,
+                ),
             )
         )
         observations.append(
@@ -331,7 +355,9 @@ def build_source_failure_observations(
                 linked_object_refs=linked_object_refs,
                 audience_impacts=audience_impacts,
                 propagation_impacts=propagation_impacts,
-                observed_at=source.updated_at.isoformat() if source.updated_at else None,
+                observed_at=source.updated_at.isoformat()
+                if source.updated_at
+                else None,
             )
         )
     return tuple(observations)
@@ -370,12 +396,30 @@ class SourceBlindnessContext:
             raise ValueError("propagation_risk_summary must not be blank")
         if not self.signal_loss_summary.strip():
             raise ValueError("signal_loss_summary must not be blank")
-        object.__setattr__(self, "evidence_ids", _normalize(self.evidence_ids, label="evidence id"))
-        object.__setattr__(self, "source_refs", _normalize(self.source_refs, label="source ref"))
-        object.__setattr__(self, "source_types", _normalize(self.source_types, label="source type"))
-        object.__setattr__(self, "freshness_states", _normalize(self.freshness_states, label="freshness state"))
-        object.__setattr__(self, "affected_audience_labels", _normalize(self.affected_audience_labels, label="audience label"))
-        object.__setattr__(self, "affected_surfaces", _normalize(self.affected_surfaces, label="affected surface"))
+        object.__setattr__(
+            self, "evidence_ids", _normalize(self.evidence_ids, label="evidence id")
+        )
+        object.__setattr__(
+            self, "source_refs", _normalize(self.source_refs, label="source ref")
+        )
+        object.__setattr__(
+            self, "source_types", _normalize(self.source_types, label="source type")
+        )
+        object.__setattr__(
+            self,
+            "freshness_states",
+            _normalize(self.freshness_states, label="freshness state"),
+        )
+        object.__setattr__(
+            self,
+            "affected_audience_labels",
+            _normalize(self.affected_audience_labels, label="audience label"),
+        )
+        object.__setattr__(
+            self,
+            "affected_surfaces",
+            _normalize(self.affected_surfaces, label="affected surface"),
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -402,10 +446,14 @@ class SourceBlindnessSurface:
     summary: str
     observation: SurfaceObservation
     contexts: tuple[SourceBlindnessContext, ...]
-    source_observations: tuple[SourceFailureObservation, ...] = field(default_factory=tuple)
+    source_observations: tuple[SourceFailureObservation, ...] = field(
+        default_factory=tuple
+    )
     available_commands: tuple[str, ...] = field(default_factory=tuple)
     proposal_lane: tuple[str, ...] = field(default_factory=tuple)
-    bundles: tuple[ProposalBundle, ...] = field(default_factory=tuple, repr=False, compare=False)
+    bundles: tuple[ProposalBundle, ...] = field(
+        default_factory=tuple, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         if not self.surface_id.strip():
@@ -416,8 +464,14 @@ class SourceBlindnessSurface:
             raise ValueError("summary must not be blank")
         object.__setattr__(self, "contexts", tuple(self.contexts))
         object.__setattr__(self, "source_observations", tuple(self.source_observations))
-        object.__setattr__(self, "available_commands", _normalize(self.available_commands, label="available command"))
-        object.__setattr__(self, "proposal_lane", _normalize(self.proposal_lane, label="proposal lane"))
+        object.__setattr__(
+            self,
+            "available_commands",
+            _normalize(self.available_commands, label="available command"),
+        )
+        object.__setattr__(
+            self, "proposal_lane", _normalize(self.proposal_lane, label="proposal lane")
+        )
         object.__setattr__(self, "bundles", tuple(self.bundles))
 
     def to_dict(self) -> dict[str, object]:
@@ -427,7 +481,9 @@ class SourceBlindnessSurface:
             "summary": self.summary,
             "observation": self.observation.to_dict(),
             "contexts": [context.to_dict() for context in self.contexts],
-            "source_observations": [item.to_dict() for item in self.source_observations],
+            "source_observations": [
+                item.to_dict() for item in self.source_observations
+            ],
             "available_commands": list(self.available_commands),
             "proposal_lane": list(self.proposal_lane),
         }
@@ -460,10 +516,22 @@ class SourceRepairDirective:
             raise ValueError("proposal_ref must not be blank")
         if not self.reason.strip():
             raise ValueError("reason must not be blank")
-        object.__setattr__(self, "source_refs", _normalize(self.source_refs, label="source ref"))
-        object.__setattr__(self, "source_types", _normalize(self.source_types, label="source type"))
-        object.__setattr__(self, "affected_audience_labels", _normalize(self.affected_audience_labels, label="audience label"))
-        object.__setattr__(self, "affected_surfaces", _normalize(self.affected_surfaces, label="affected surface"))
+        object.__setattr__(
+            self, "source_refs", _normalize(self.source_refs, label="source ref")
+        )
+        object.__setattr__(
+            self, "source_types", _normalize(self.source_types, label="source type")
+        )
+        object.__setattr__(
+            self,
+            "affected_audience_labels",
+            _normalize(self.affected_audience_labels, label="audience label"),
+        )
+        object.__setattr__(
+            self,
+            "affected_surfaces",
+            _normalize(self.affected_surfaces, label="affected surface"),
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -488,15 +556,25 @@ class SourceBlindnessResult:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "repair_directives", tuple(self.repair_directives))
-        object.__setattr__(self, "command_log", _normalize(self.command_log, label="command log"))
+        object.__setattr__(
+            self, "command_log", _normalize(self.command_log, label="command log")
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {
             "source_surface": self.source_surface.to_dict(),
-            "repair_directives": [directive.to_dict() for directive in self.repair_directives],
-            "publish_restriction_result": self.publish_restriction_result.to_dict() if self.publish_restriction_result is not None else None,
-            "propagation_ledger": self.propagation_ledger.to_dict() if self.propagation_ledger is not None else None,
-            "human_review_queue": self.human_review_queue.to_dict() if self.human_review_queue is not None else None,
+            "repair_directives": [
+                directive.to_dict() for directive in self.repair_directives
+            ],
+            "publish_restriction_result": self.publish_restriction_result.to_dict()
+            if self.publish_restriction_result is not None
+            else None,
+            "propagation_ledger": self.propagation_ledger.to_dict()
+            if self.propagation_ledger is not None
+            else None,
+            "human_review_queue": self.human_review_queue.to_dict()
+            if self.human_review_queue is not None
+            else None,
             "context_trail": list(self.context_trail),
             "command_log": list(self.command_log),
         }
@@ -523,9 +601,13 @@ def build_source_blindness_surface(
     source_observations: Iterable[SourceFailureObservation] = (),
 ) -> SourceBlindnessSurface:
     source_facts = tuple(source_observations)
-    blindness_bundles = tuple(bundle for bundle in bundles if _is_source_blindness_bundle(bundle))
+    blindness_bundles = tuple(
+        bundle for bundle in bundles if _is_source_blindness_bundle(bundle)
+    )
     if not blindness_bundles and observation is None:
-        raise ValueError("empty source blindness surfaces require an explicit observation")
+        raise ValueError(
+            "empty source blindness surfaces require an explicit observation"
+        )
     contexts = tuple(_context_from_bundle(bundle) for bundle in blindness_bundles)
     resolved_observation = observation or SurfaceObservation(
         state=ObservationState.READY,
@@ -599,7 +681,11 @@ def apply_source_blindness_commands(
                 reason=command.reason,
             )
             repair_directives.append(directive)
-            context_trail.append(_phase_context(phase="source_repair", context=context, reason=command.reason))
+            context_trail.append(
+                _phase_context(
+                    phase="source_repair", context=context, reason=command.reason
+                )
+            )
             command_log.append(f"repair_source:{command.target_ref}:{command.reason}")
             continue
 
@@ -623,8 +709,14 @@ def apply_source_blindness_commands(
                 publish_restriction_result,
                 supporting_surfaces=("review_queue", "source_health"),
             )
-            context_trail.append(_phase_context(phase="restrict_propagation", context=context, reason=command.reason))
-            command_log.append(f"restrict_propagation:{command.target_ref}:{command.reason}")
+            context_trail.append(
+                _phase_context(
+                    phase="restrict_propagation", context=context, reason=command.reason
+                )
+            )
+            command_log.append(
+                f"restrict_propagation:{command.target_ref}:{command.reason}"
+            )
             continue
 
         if command.command_type is SourceBlindnessCommandType.ROUTE_TO_HUMAN_REVIEW:
@@ -642,11 +734,19 @@ def apply_source_blindness_commands(
                     bundles=(updated_bundle,),
                 )
             )
-            context_trail.append(_phase_context(phase="human_review", context=context, reason=command.reason))
-            command_log.append(f"route_to_human_review:{command.target_ref}:{command.reason}")
+            context_trail.append(
+                _phase_context(
+                    phase="human_review", context=context, reason=command.reason
+                )
+            )
+            command_log.append(
+                f"route_to_human_review:{command.target_ref}:{command.reason}"
+            )
             continue
 
-        raise ValueError(f"unsupported source blindness command: {command.command_type.value}")
+        raise ValueError(
+            f"unsupported source blindness command: {command.command_type.value}"
+        )
 
     next_surface = build_source_blindness_surface(current_bundles)
     return SourceBlindnessResult(
@@ -669,7 +769,9 @@ def _context_from_bundle(bundle: ProposalBundle) -> SourceBlindnessContext:
     source_refs = _dedupe(record.source_ref for record in evidence)
     source_types = _dedupe(record.source_type.value for record in evidence)
     freshness_states = _dedupe(record.freshness_state.value for record in evidence)
-    audience_labels = tuple(_audience_label(audience) for audience in bundle.signal.affected_audiences)
+    audience_labels = tuple(
+        _audience_label(audience) for audience in bundle.signal.affected_audiences
+    )
     affected_surfaces = _dedupe(bundle.signal.affected_surfaces)
     business_consequence = _business_consequence(
         object_type=bundle.proposal.object_type,
@@ -705,7 +807,9 @@ def _build_summary(contexts: tuple[SourceBlindnessContext, ...]) -> str:
     external_paths = sum(
         1
         for context in contexts
-        if any(label.startswith("external") for label in context.affected_audience_labels)
+        if any(
+            label.startswith("external") for label in context.affected_audience_labels
+        )
     )
     return (
         f"{len(contexts)} source-blind governance path(s) are active; "
@@ -749,12 +853,16 @@ def _request_source_repair(
                 ),
                 signal=replace(
                     bundle.signal,
-                    trigger_signals=_dedupe((*bundle.signal.trigger_signals, "source_repair_requested")),
+                    trigger_signals=_dedupe(
+                        (*bundle.signal.trigger_signals, "source_repair_requested")
+                    ),
                 ),
             )
         )
     if not found or directive is None:
-        raise ValueError(f"proposal_ref={proposal_ref} is not present in source blindness")
+        raise ValueError(
+            f"proposal_ref={proposal_ref} is not present in source blindness"
+        )
     return tuple(updated), directive
 
 
@@ -786,13 +894,17 @@ def _route_to_human_review(
                 signal=replace(
                     bundle.signal,
                     queue_owner="human-review",
-                    trigger_signals=_dedupe((*bundle.signal.trigger_signals, "human_review_routed")),
+                    trigger_signals=_dedupe(
+                        (*bundle.signal.trigger_signals, "human_review_routed")
+                    ),
                 ),
                 owner_state=OwnerState.ESCALATED,
             )
         )
     if not found:
-        raise ValueError(f"proposal_ref={proposal_ref} is not present in source blindness")
+        raise ValueError(
+            f"proposal_ref={proposal_ref} is not present in source blindness"
+        )
     return tuple(updated)
 
 
@@ -814,7 +926,9 @@ def _build_restriction_candidate(bundle: ProposalBundle) -> PublishPreviewCandid
     )
 
 
-def _phase_context(*, phase: str, context: SourceBlindnessContext, reason: str) -> dict[str, object]:
+def _phase_context(
+    *, phase: str, context: SourceBlindnessContext, reason: str
+) -> dict[str, object]:
     return {
         "phase": phase,
         "proposal_ref": context.proposal_ref,
@@ -826,7 +940,9 @@ def _phase_context(*, phase: str, context: SourceBlindnessContext, reason: str) 
     }
 
 
-def _require_bundle(bundles: tuple[ProposalBundle, ...], proposal_ref: str) -> ProposalBundle:
+def _require_bundle(
+    bundles: tuple[ProposalBundle, ...], proposal_ref: str
+) -> ProposalBundle:
     for bundle in bundles:
         if bundle.proposal.proposal_id == proposal_ref:
             return bundle
@@ -868,8 +984,14 @@ def _propagation_risk_summary(
     surfaces: tuple[str, ...],
     audiences: tuple[AudienceFilter, ...],
 ) -> str:
-    stale_count = sum(1 for record in evidence if record.freshness_state is FreshnessState.STALE)
-    external_labels = [_audience_label(audience) for audience in audiences if audience.visibility is Visibility.EXTERNAL]
+    stale_count = sum(
+        1 for record in evidence if record.freshness_state is FreshnessState.STALE
+    )
+    external_labels = [
+        _audience_label(audience)
+        for audience in audiences
+        if audience.visibility is Visibility.EXTERNAL
+    ]
     if external_labels:
         return (
             f"{stale_count or len(evidence)} degraded source signal(s) currently threaten external propagation on "

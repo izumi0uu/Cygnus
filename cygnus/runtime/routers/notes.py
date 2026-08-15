@@ -35,12 +35,16 @@ class NoteResponse(BaseModel):
 
 
 @router.get("/notes", response_model=list[NoteResponse])
-async def list_notes(db: AsyncSession = Depends(get_db), _user: Employee = Depends(get_current_user)):
+async def list_notes(
+    db: AsyncSession = Depends(get_db), _user: Employee = Depends(get_current_user)
+):
     repo = Repository(db)
     notes = await repo.get_all(Note, order_by=Note.created_at.desc())
     return [
         NoteResponse(
-            id=n.id, title=n.title, content=n.content,
+            id=n.id,
+            title=n.title,
+            content=n.content,
             note_type=n.note_type,
             created_at=n.created_at.isoformat(),
             updated_at=n.updated_at.isoformat(),
@@ -50,12 +54,18 @@ async def list_notes(db: AsyncSession = Depends(get_db), _user: Employee = Depen
 
 
 @router.post("/notes", response_model=NoteResponse)
-async def create_note(req: NoteCreate, db: AsyncSession = Depends(get_db), _user: Employee = require_permission("kb.create")):
+async def create_note(
+    req: NoteCreate,
+    db: AsyncSession = Depends(get_db),
+    _user: Employee = require_permission("kb.create"),
+):
     repo = Repository(db)
     note = Note(**req.model_dump())
     note = await repo.create(note)
     return NoteResponse(
-        id=note.id, title=note.title, content=note.content,
+        id=note.id,
+        title=note.title,
+        content=note.content,
         note_type=note.note_type,
         created_at=note.created_at.isoformat(),
         updated_at=note.updated_at.isoformat(),
@@ -63,7 +73,11 @@ async def create_note(req: NoteCreate, db: AsyncSession = Depends(get_db), _user
 
 
 @router.delete("/notes/{note_id}")
-async def delete_note(note_id: uuid.UUID, db: AsyncSession = Depends(get_db), _user: Employee = require_permission("kb.delete")):
+async def delete_note(
+    note_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: Employee = require_permission("kb.delete"),
+):
     repo = Repository(db)
     deleted = await repo.delete_by_id(Note, note_id)
     if not deleted:

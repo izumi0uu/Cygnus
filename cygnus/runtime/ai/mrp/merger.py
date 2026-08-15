@@ -55,6 +55,7 @@ Return ONLY the merged markdown content, no other text.
 # Public API
 # ---------------------------------------------------------------------------
 
+
 async def merge_page_content(
     llm: LLMProvider,
     existing_content: str,
@@ -110,5 +111,7 @@ async def merge_page_content(
         return merged
 
     except Exception as exc:
-        logger.warning(f"MRP MERGE failed for '{slug}': {exc}. Falling back to new content.")
+        logger.warning(
+            f"MRP MERGE failed for '{slug}': {exc}. Falling back to new content."
+        )
         return new_content

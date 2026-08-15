@@ -9,6 +9,7 @@ import uuid
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from cygnus.domain import governed_object_ref
 from cygnus.governance.feedback import FeedbackSignalInput, create_feedback_signal
 from cygnus.governance.feedback_execution import (
     FeedbackRouteClaim,
@@ -17,12 +18,14 @@ from cygnus.governance.feedback_execution import (
     record_feedback_route_failure,
 )
 from cygnus.governance.feedback_routing import route_feedback_signal
+from cygnus.runtime.services import wiki_service
 from cygnus.runtime.database.models import (
     AuditLog,
     Employee,
     GovernanceFeedbackRoute,
     GovernanceFeedbackSignal,
     GovernanceReviewAssignment,
+    GovernanceReviewAssignmentEvent,
     GovernanceSignal,
     WikiPage,
 )
@@ -41,6 +44,8 @@ def _page(*, page_id: uuid.UUID, slug: str) -> WikiPage:
         summary="Governed support guidance.",
         scope_type="global",
         scope_id=None,
+        language="en",
+        normalized_path=wiki_service.normalize_page_path(slug),
         knowledge_type_slugs=["answer_card"],
         source_ids=[],
         version=1,
@@ -65,7 +70,7 @@ async def _create_route(
             command_id=command_id,
             signal_type=signal_type,
             audience_context={"visibility": "internal"},
-            object_id=f"ko-{page.slug}" if page is not None else None,
+            object_id=governed_object_ref(page.id) if page is not None else None,
             page_id=page.id if page is not None else None,
         ),
         actor_id=actor_id,
@@ -309,7 +314,35 @@ class FeedbackRoutePostgresTests(unittest.TestCase):
         finally:
             async with sessions() as session:
                 _ = await session.execute(
-                    delete(AuditLog).where(AuditLog.principal_id == actor_id)
+                    delete(GovernanceReviewAssignmentEvent).where(
+                        GovernanceReviewAssignmentEvent.assignment_id.in_(
+                            select(GovernanceReviewAssignment.id).where(
+                                GovernanceReviewAssignment.signal_id.in_(
+                                    select(GovernanceSignal.id).where(
+                                        GovernanceSignal.created_by_id == actor_id
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+                _ = await session.execute(
+                    delete(GovernanceReviewAssignment).where(
+                        GovernanceReviewAssignment.signal_id.in_(
+                            select(GovernanceSignal.id).where(
+                                GovernanceSignal.created_by_id == actor_id
+                            )
+                        )
+                    )
+                )
+                _ = await session.execute(
+                    delete(GovernanceFeedbackRoute).where(
+                        GovernanceFeedbackRoute.feedback_signal_id.in_(
+                            select(GovernanceFeedbackSignal.id).where(
+                                GovernanceFeedbackSignal.command_id.in_(command_ids)
+                            )
+                        )
+                    )
                 )
                 _ = await session.execute(
                     delete(GovernanceFeedbackSignal).where(

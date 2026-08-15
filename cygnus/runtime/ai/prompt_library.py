@@ -9,7 +9,9 @@ from __future__ import annotations
 
 def join_prompt_sections(*sections: str) -> str:
     """Join non-empty prompt sections with a blank line between them."""
-    return "\n\n".join(section.strip() for section in sections if section and section.strip())
+    return "\n\n".join(
+        section.strip() for section in sections if section and section.strip()
+    )
 
 
 WIKI_COMPILE_MINDSET = """\
@@ -45,9 +47,31 @@ WIKI_DROP_RULES = """\
 - Prose that just rephrases what was already said.
 """
 
-def build_language_rule(*, include_slug_note: bool = True) -> str:
-    """Build the shared language rule with an optional slug note."""
-    slug_note = " (Slugs are always in Latin characters — see slug rules.)" if include_slug_note else ""
+
+def build_language_rule(
+    *,
+    include_slug_note: bool = True,
+    language: str | None = None,
+) -> str:
+    """Build the shared language rule with an optional slug note.
+
+    ``language`` is the persisted, normalized source language tag (en|zh).
+    When given, the rule declares it explicitly so the writer never infers
+    the language from the document; ``None`` keeps the generic same-language
+    rule for callers without a declared tag (e.g. the wiki agent).
+    """
+    slug_note = (
+        " (Slugs are always in Latin characters — see slug rules.)"
+        if include_slug_note
+        else ""
+    )
+    if language:
+        return (
+            "# Language rule\n"
+            f"The source document's declared language tag is `{language}`. Write every page "
+            "in that exact language. Never detect, guess, or switch languages, and never "
+            f"translate body content.{slug_note}"
+        )
     return (
         "# Language rule\n"
         "Write every page in the SAME LANGUAGE as the source document. Never translate body\n"
@@ -415,10 +439,16 @@ def build_wiki_agent_system_prompt() -> str:
     )
 
 
-def build_wiki_writer_system_prompt() -> str:
+def build_wiki_writer_system_prompt(language: str | None = None) -> str:
+    """Build the single-page writer system prompt.
+
+    ``language`` (optional) is the source's persisted, normalized language tag
+    — when given, the language rule declares it explicitly instead of asking
+    the writer to infer it from the document.
+    """
     return _build_wiki_base_prompt(
         intro=_WIKI_WRITER_INTRO,
-        language_rule=build_language_rule(include_slug_note=False),
+        language_rule=build_language_rule(include_slug_note=False, language=language),
         wikilink_rules="",
         concept_words=150,
         source_words=150,

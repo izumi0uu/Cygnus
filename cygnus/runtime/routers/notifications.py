@@ -107,7 +107,9 @@ async def unread_count(
     }
 
 
-@router.post("/notifications/{notification_id}/read", response_model=NotificationResponse)
+@router.post(
+    "/notifications/{notification_id}/read", response_model=NotificationResponse
+)
 async def mark_notification_read(
     notification_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],

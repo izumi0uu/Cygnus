@@ -12,12 +12,15 @@ from cygnus.substrate.agent_protocol import ToolDefinition
 
 _GOVERNED_SESSION_TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     *knowledge_tool_definitions(),
-    *draft_review_tool_definitions(),
-    *publish_tool_definitions(),
-    *feedback_tool_definitions(),
     *drift_tool_definitions(),
+    *draft_review_tool_definitions(),
+    *feedback_tool_definitions(),
+    *publish_tool_definitions(),
 )
-if len({definition.name for definition in _GOVERNED_SESSION_TOOL_DEFINITIONS}) != len(
+_GOVERNED_SESSION_TOOL_DEFINITIONS_BY_NAME = {
+    definition.name: definition for definition in _GOVERNED_SESSION_TOOL_DEFINITIONS
+}
+if len(_GOVERNED_SESSION_TOOL_DEFINITIONS_BY_NAME) != len(
     _GOVERNED_SESSION_TOOL_DEFINITIONS
 ):
     raise RuntimeError("governed session tool definitions must have unique names")
@@ -29,8 +32,8 @@ def governed_session_tool_definitions() -> tuple[ToolDefinition, ...]:
 
 
 def governed_session_tool_definition(name: str) -> ToolDefinition:
-    """Resolve one ready governed tool definition by its stable external name."""
-    for definition in _GOVERNED_SESSION_TOOL_DEFINITIONS:
-        if definition.name == name:
-            return definition
-    raise ValueError(f"unknown governed session tool: {name}")
+    """Return the exact canonical definition singleton for one governed tool."""
+    try:
+        return _GOVERNED_SESSION_TOOL_DEFINITIONS_BY_NAME[name]
+    except KeyError as exc:
+        raise ValueError(f"unknown governed session tool: {name}") from exc

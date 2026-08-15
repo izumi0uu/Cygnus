@@ -40,16 +40,23 @@ PROVIDER_BASELINE_MODULES = {
 class ProviderBaselineImportTests(unittest.TestCase):
     def test_provider_baseline_files_exist(self) -> None:
         for relative_path in PROVIDER_BASELINE_FILES:
-            self.assertTrue(Path(relative_path).is_file(), f"missing mirrored provider file: {relative_path}")
+            self.assertTrue(
+                Path(relative_path).is_file(),
+                f"missing mirrored provider file: {relative_path}",
+            )
 
     def test_provider_baseline_files_are_syntax_valid(self) -> None:
         for relative_path in PROVIDER_BASELINE_FILES:
             source = Path(relative_path).read_text(encoding="utf-8")
             compile(source, relative_path, "exec")
 
-    def test_provider_baseline_topology_is_exactly_the_upstream_module_family(self) -> None:
+    def test_provider_baseline_topology_is_exactly_the_upstream_module_family(
+        self,
+    ) -> None:
         expected = {Path(path).name for path in PROVIDER_BASELINE_FILES}
-        actual = {path.name for path in Path("cygnus/runtime/ai/providers").glob("*.py")}
+        actual = {
+            path.name for path in Path("cygnus/runtime/ai/providers").glob("*.py")
+        }
 
         self.assertEqual(expected, actual)
 
@@ -59,7 +66,9 @@ class ProviderBaselineImportTests(unittest.TestCase):
 
             for symbol in symbols:
                 value = getattr(module, symbol, None)
-                self.assertIsNotNone(value, f"{module_name} missing upstream provider symbol: {symbol}")
+                self.assertIsNotNone(
+                    value, f"{module_name} missing upstream provider symbol: {symbol}"
+                )
                 self.assertTrue(
                     inspect.isclass(value) or callable(value),
                     f"{module_name}.{symbol} should remain an importable provider entrypoint",
@@ -68,7 +77,13 @@ class ProviderBaselineImportTests(unittest.TestCase):
     def test_provider_base_defines_neutral_provider_contracts(self) -> None:
         source = Path("cygnus/runtime/ai/providers/base.py").read_text(encoding="utf-8")
 
-        for token in ["ProviderType", "ProviderConfig", "EmbeddingProvider", "LLMProvider", "VisionProvider"]:
+        for token in [
+            "ProviderType",
+            "ProviderConfig",
+            "EmbeddingProvider",
+            "LLMProvider",
+            "VisionProvider",
+        ]:
             self.assertIn(token, source, f"provider base lost contract token: {token}")
 
         self.assertIn("async def generate_with_tools", source)

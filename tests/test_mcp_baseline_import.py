@@ -45,7 +45,7 @@ REQUIRED_MCP_SURFACE_TOKENS = {
         "register_resources(mcp)",
         "ScopedToolsMiddleware",
     ],
-    "cygnus/runtime/mcp/resources.py": ["cygnus://about", "cygnus://knowledge-index"],
+    "cygnus/runtime/mcp/resources.py": ["cygnus://about", "governed profile"],
     "cygnus/runtime/mcp/permissions.py": [
         "ToolRequirement",
         "ANY_AUTHENTICATED",

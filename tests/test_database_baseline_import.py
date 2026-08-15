@@ -12,7 +12,9 @@ DATABASE_BASELINE_FILES = [
 
 def test_database_baseline_files_exist() -> None:
     for relative_path in DATABASE_BASELINE_FILES:
-        assert Path(relative_path).is_file(), f"missing mirrored database file: {relative_path}"
+        assert Path(relative_path).is_file(), (
+            f"missing mirrored database file: {relative_path}"
+        )
 
 
 def test_database_baseline_files_are_syntax_valid() -> None:

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import cast, final
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cygnus.domain import governed_object_ref
 from cygnus.governance import GovernanceEventType
 from cygnus.integrations.governed_publish_tools import GovernedPublishTools
 from cygnus.runtime.database.models import (
@@ -25,7 +27,7 @@ _DRAFT_ID = uuid.UUID("00000000-0000-4000-8000-000000000317")
 _SOURCE_ID = uuid.UUID("00000000-0000-4000-8000-000000000417")
 _APPROVAL_ID = uuid.UUID("00000000-0000-4000-8000-000000000517")
 _BINDING_ID = uuid.UUID("00000000-0000-4000-8000-000000000617")
-_OBJECT_REF = "ko-domain-eval-policy"
+_OBJECT_REF = governed_object_ref(_PAGE_ID)
 _TARGET_CHANNEL = "internal-copilot"
 
 
@@ -70,7 +72,15 @@ class _OfflinePolicySession:
     def __init__(self, *, page: WikiPage, draft: WikiPageDraft) -> None:
         self._page = page
         self._draft = draft
-        self._source = Source(id=_SOURCE_ID, status="ready")
+        self._source = Source(
+            id=_SOURCE_ID,
+            status="ready",
+            freshness_state="fresh",
+            freshness_actor_id=_ACTOR_ID,
+            freshness_reason="Offline policy fixture attests the source as fresh.",
+            freshness_attested_at=datetime.now(timezone.utc),
+            freshness_expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
         self._approval = GovernanceLedgerEvent(
             id=_APPROVAL_ID,
             draft_id=draft.id,
@@ -117,7 +127,7 @@ class _OfflinePolicySession:
         if GovernanceLedgerEvent in entities:
             return _OfflineResult((self._approval,))
         if Source in entities:
-            return _OfflineResult(((self._source.id, self._source.status),))
+            return _OfflineResult((self._source,))
         if GovernanceAudienceBinding in entities:
             return _OfflineResult((self._binding,))
         if GovernancePublication in entities:

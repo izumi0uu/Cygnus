@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from typing import cast
 
 from cygnus.recovery import (
     GovernanceOverviewQuery,
@@ -26,21 +27,26 @@ class RecoveryOverviewTests(unittest.TestCase):
             recovery_windows=windows,
             residual_risks=sample_all_recovery_residual_risks(),
         ).to_dict()
+        open_loops = cast(list[dict[str, object]], surface["open_loops"])
 
         self.assertEqual(surface["surface_id"], "governance-overview")
-        self.assertEqual(len(surface["open_loops"]), 2)
+        self.assertEqual(len(open_loops), 2)
         self.assertEqual(surface["highest_leverage_command"], "cmd-restrict-2")
-        self.assertEqual(surface["open_loops"][0]["command_id"], "cmd-restrict-2")
-        self.assertEqual(surface["open_loops"][0]["pending_propagation_count"], 2)
-        self.assertIn("split_refund_contract_variant", surface["next_command_ribbon"])
+        self.assertEqual(open_loops[0]["command_id"], "cmd-restrict-2")
+        self.assertEqual(open_loops[0]["pending_propagation_count"], 2)
+        self.assertIn(
+            "split_refund_contract_variant",
+            cast(list[str], surface["next_command_ribbon"]),
+        )
 
     def test_query_returns_surface_for_known_command_ids(self) -> None:
         payload = get_governance_overview_surface(
             GovernanceOverviewQuery(command_ids=("cmd-publish-1", "cmd-restrict-2"))
         ).to_dict()
-        self.assertEqual(payload["open_loop_ranks"][0]["command_id"], "cmd-restrict-2")
-        self.assertEqual(payload["open_loop_ranks"][1]["command_id"], "cmd-publish-1")
-        self.assertEqual(payload["open_loop_ranks"][0]["pending_propagation_count"], 2)
+        open_loop_ranks = cast(list[dict[str, object]], payload["open_loop_ranks"])
+        self.assertEqual(open_loop_ranks[0]["command_id"], "cmd-restrict-2")
+        self.assertEqual(open_loop_ranks[1]["command_id"], "cmd-publish-1")
+        self.assertEqual(open_loop_ranks[0]["pending_propagation_count"], 2)
 
     def test_query_raises_when_command_ids_missing(self) -> None:
         with self.assertRaises(ValueError):

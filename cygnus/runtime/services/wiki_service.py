@@ -21,11 +21,12 @@ materialization, CRUD, and wikilink graph maintenance.
 
 import re
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
 from loguru import logger
-from sqlalchemy import and_, delete, func, or_, select, text
+from sqlalchemy import and_, case, delete, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,6 +42,65 @@ PAGE_TYPES = {"entity", "concept", "source", "topic", "index", "log", "hot"}
 
 # `[[slug]]` or `[[slug|display text]]` — captures the slug only.
 _WIKILINK_RE = re.compile(r"\[\[([^\]\|]+)(?:\|[^\]]*)?]]")
+
+# Default page language when a caller does not specify one. Part of the
+# canonical identity (scope_type, scope_id, language, normalized_path).
+DEFAULT_PAGE_LANGUAGE = "en"
+
+
+def normalize_page_path(slug: str) -> str:
+    """Canonical identity path for a page slug.
+
+    The DB-enforced identity is keyed on this value, so every write path must
+    derive it the same way. The migration backfill uses the SQL equivalent
+    ``lower(btrim(slug, E' \\t\\n\\r\\f\\v'))`` — keep both in sync.
+    """
+    return (slug or "").strip().lower()
+
+
+def normalize_page_language(language: Optional[str]) -> str:
+    """Normalize a page language to its canonical identity form."""
+    normalized = (language or DEFAULT_PAGE_LANGUAGE).strip().lower()
+    return normalized or DEFAULT_PAGE_LANGUAGE
+
+
+class PageWriteConflict(Exception):
+    """A version-guarded page write found the row at a different version."""
+
+    def __init__(
+        self,
+        slug: str,
+        scope_type: str,
+        scope_id: Optional[uuid.UUID],
+        expected_version: int,
+        actual_version: int,
+    ) -> None:
+        self.slug = slug
+        self.scope_type = scope_type
+        self.scope_id = scope_id
+        self.expected_version = expected_version
+        self.actual_version = actual_version
+        scope_label = scope_type if scope_id is None else f"{scope_type}:{scope_id}"
+        super().__init__(
+            f"Page '{slug}' in {scope_label} is at version {actual_version}, "
+            f"not expected version {expected_version}; refresh and retry"
+        )
+
+
+@dataclass(frozen=True)
+class PageWriteOutcome:
+    """Result of the canonical insert-or-lock-and-version-update write path.
+
+    ``page`` is the materialized row (None when the identity did not exist and
+    ``insert_if_missing=False``). ``inserted`` is True when the row was
+    created. ``applied`` is False for an exact retry — a write whose payload
+    is identical to the committed row — which never bumps the version or
+    creates a revision.
+    """
+
+    page: Optional[WikiPage]
+    inserted: bool = False
+    applied: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -223,7 +283,7 @@ async def get_neighborhood(
     session: AsyncSession,
     slug: str,
     depth: int = 1,
-) -> dict:
+) -> dict[str, list[dict[str, str]]]:
     """
     Return nodes (slug, title, page_type) and edges within `depth` hops of `slug`.
     Uses an undirected recursive CTE — useful for Obsidian-style graph view.
@@ -291,14 +351,23 @@ async def get_page_by_slug(
     allowed_kt_slugs: Optional[list[str]] = None,
     scope_type: str = "global",
     scope_id: Optional[uuid.UUID] = None,
+    language: Optional[str] = None,
 ) -> Optional[WikiPage]:
     """
     Fetch a page by slug within a specific scope. If `allowed_kt_slugs` is
     given (RBAC), only return the page when it overlaps the allowed set or is
     a reserved slug.
+
+    The canonical identity includes language and en/zh pages may legally
+    coexist under one scope/path, so the lookup ALWAYS filters a normalized
+    language: ``None`` resolves to the page default (``en``) for legacy
+    non-source callers. Compiler/source paths MUST pass the source's explicit
+    language tag so a zh source never reads/updates an en page (or vice
+    versa) under the same scope/path.
     """
     stmt = select(WikiPage).where(
         WikiPage.slug == slug,
+        WikiPage.language == normalize_page_language(language),
         _scope_filter(scope_type, scope_id),
     )
     result = await session.execute(stmt)
@@ -317,13 +386,26 @@ async def get_page_by_slug(
 async def get_page_by_slug_any_scope(
     session: AsyncSession,
     slug: str,
+    language: Optional[str] = None,
 ) -> Optional[WikiPage]:
     """
     Fetch a page by slug across ALL scopes (no scope filtering).
     Used as a fallback when no explicit scope is specified, e.g. global graph view
     clicking on a workspace-scoped wiki page.
+
+    The canonical identity includes language, so the fallback ALWAYS filters a
+    normalized language: ``None`` resolves to the page default (``en``) so
+    legacy callers keep pre-migration behavior and en/zh pages under one slug
+    never resolve nondeterministically.
     """
-    stmt = select(WikiPage).where(WikiPage.slug == slug).limit(1)
+    stmt = (
+        select(WikiPage)
+        .where(
+            WikiPage.slug == slug,
+            WikiPage.language == normalize_page_language(language),
+        )
+        .limit(1)
+    )
     result = await session.execute(stmt)
     return result.scalars().first()
 
@@ -369,7 +451,7 @@ async def list_pages(
     if page_type:
         stmt = stmt.where(WikiPage.page_type == page_type)
     if knowledge_type_slug:
-        stmt = stmt.where(WikiPage.knowledge_type_slugs.any(knowledge_type_slug))  # type: ignore[arg-type]
+        stmt = stmt.where(WikiPage.knowledge_type_slugs.contains([knowledge_type_slug]))
     if allowed_kt_slugs:
         stmt = stmt.where(
             or_(
@@ -390,6 +472,262 @@ async def list_pages(
 
 
 # ---------------------------------------------------------------------------
+# Canonical write path
+# ---------------------------------------------------------------------------
+#
+# Every page write — compiler ops, direct edits, rollbacks, reserved pages —
+# funnels through write_page(), the single transaction-safe
+# insert-or-lock-and-version-update path keyed on the DB-enforced canonical
+# identity (scope_type, scope_id, language, normalized_path). See the partial
+# unique indexes uq_wiki_pages_canonical_identity_* in the WikiPage model.
+
+
+async def _lock_page_by_identity(
+    session: AsyncSession,
+    *,
+    slug: str,
+    scope_type: str,
+    scope_id: Optional[uuid.UUID],
+    language: Optional[str],
+) -> Optional[WikiPage]:
+    """SELECT ... FOR UPDATE on the row owning the canonical identity.
+
+    Serializes concurrent writers on the same (scope, language, path): the
+    second writer blocks here until the first commits, then observes the
+    committed row. ``populate_existing`` refreshes the ORM object even when a
+    caller already holds a (possibly stale) copy in the identity map.
+    """
+    stmt = (
+        select(WikiPage)
+        .where(
+            WikiPage.scope_type == scope_type,
+            WikiPage.language == normalize_page_language(language),
+            WikiPage.normalized_path == normalize_page_path(slug),
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if scope_id is None:
+        stmt = stmt.where(WikiPage.scope_id.is_(None))
+    else:
+        stmt = stmt.where(WikiPage.scope_id == scope_id)
+    result = await session.execute(stmt)
+    return result.scalars().first()
+
+
+def _is_exact_retry(
+    page: WikiPage,
+    *,
+    content_md: str,
+    title: Optional[str],
+    summary: Optional[str],
+    status: Optional[str],
+    knowledge_type_slugs: Optional[list[str]],
+    source_ids: Optional[list[uuid.UUID]],
+) -> bool:
+    """True when the write payload is identical to the committed row.
+
+    Only caller-provided fields are compared (None means "preserve" for the
+    update branch), so re-delivering the exact same write is a no-op instead
+    of a spurious version bump / revision.
+    """
+    if page.content_md != content_md:
+        return False
+    if title is not None and page.title != title:
+        return False
+    if summary is not None and (page.summary or "") != (summary or ""):
+        return False
+    if status is not None and page.status != status:
+        return False
+    if knowledge_type_slugs is not None and list(
+        page.knowledge_type_slugs or []
+    ) != list(knowledge_type_slugs):
+        return False
+    if source_ids is not None and list(page.source_ids or []) != list(source_ids):
+        return False
+    return True
+
+
+async def write_page(
+    session: AsyncSession,
+    *,
+    slug: str,
+    title: Optional[str],
+    content_md: str,
+    summary: Optional[str] = None,
+    knowledge_type_slugs: Optional[list[str]] = None,
+    source_ids: Optional[list[uuid.UUID]] = None,
+    scope_type: str = "global",
+    scope_id: Optional[uuid.UUID] = None,
+    language: Optional[str] = None,
+    status: Optional[str] = None,
+    expected_version: Optional[int] = None,
+    insert_if_missing: bool = True,
+    change_type: str = "agent_compile",
+    changed_by_id: Optional[uuid.UUID] = None,
+    change_note: Optional[str] = None,
+    draft_id: Optional[uuid.UUID] = None,
+) -> PageWriteOutcome:
+    """The single transaction-safe insert-or-lock-and-version-update path.
+
+    Identity is the DB-enforced ``(scope_type, scope_id, language,
+    normalized_path)`` triple. The flow:
+
+    1. Try INSERT ... ON CONFLICT DO NOTHING keyed on that identity.
+       Concurrent writers block on the unique index, so only one row can ever
+       exist per identity.
+    2. On conflict, SELECT ... FOR UPDATE the owning row — divergent writes
+       serialize here instead of racing read-modify-write.
+    3. Under the lock: an exact retry (byte-identical payload) is a no-op; any
+       divergence bumps ``version``, writes ``content_md``, refreshes the
+       wikilink graph, and appends a ``WikiPageRevision``.
+
+    ``expected_version`` guards the update and raises :class:`PageWriteConflict`
+    on mismatch. ``insert_if_missing=False`` runs the lock-and-version-update
+    half only and returns ``page=None`` when the identity does not exist.
+    ``slug`` is the display/link form; the identity is the normalized path, so
+    a casing-only slug change locks the same row without renaming it.
+    """
+    slug = (slug or "").strip()
+    if not slug:
+        raise ValueError("slug is required to materialize a wiki page")
+    if insert_if_missing and title is None:
+        raise ValueError(f"title is required to create page '{slug}'")
+    normalized_path = normalize_page_path(slug)
+    language = normalize_page_language(language)
+
+    async def _finalize_insert(inserted_id: uuid.UUID) -> WikiPage:
+        page = await session.get(WikiPage, inserted_id)
+        if page is None:  # pragma: no cover — the row was just inserted
+            raise RuntimeError(f"inserted wiki page {inserted_id} disappeared")
+        session.add(
+            WikiPageRevision(
+                page_id=page.id,
+                version=1,
+                content_md=content_md,
+                change_type=change_type,
+                draft_id=draft_id,
+                changed_by_id=changed_by_id,
+                change_note=change_note,
+            )
+        )
+        return page
+
+    page: Optional[WikiPage] = None
+    if insert_if_missing:
+        insert_stmt = pg_insert(WikiPage).values(
+            slug=slug,
+            title=title,
+            status=status or "seed",
+            content_md=content_md,
+            summary=summary or "",
+            knowledge_type_slugs=list(knowledge_type_slugs or []),
+            source_ids=list(source_ids or []),
+            scope_type=scope_type,
+            scope_id=scope_id,
+            language=language,
+            normalized_path=normalized_path,
+            version=1,
+        )
+        if scope_id is None:
+            insert_stmt = insert_stmt.on_conflict_do_nothing(
+                index_elements=["scope_type", "language", "normalized_path"],
+                index_where=text("scope_id IS NULL"),
+            )
+        else:
+            insert_stmt = insert_stmt.on_conflict_do_nothing(
+                index_elements=[
+                    "scope_type",
+                    "scope_id",
+                    "language",
+                    "normalized_path",
+                ],
+                index_where=text("scope_id IS NOT NULL"),
+            )
+        returning_stmt = insert_stmt.returning(WikiPage.id)
+        inserted_id = (await session.execute(returning_stmt)).scalar_one_or_none()
+        if inserted_id is not None:
+            page = await _finalize_insert(inserted_id)
+            await refresh_links(session, page.id, slug, content_md)
+            await session.flush()
+            return PageWriteOutcome(page=page, inserted=True, applied=True)
+
+        page = await _lock_page_by_identity(
+            session,
+            slug=slug,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            language=language,
+        )
+        if page is None:
+            # The conflicted row was deleted concurrently; retry the insert once.
+            inserted_id = (await session.execute(returning_stmt)).scalar_one_or_none()
+            if inserted_id is not None:
+                page = await _finalize_insert(inserted_id)
+                await refresh_links(session, page.id, slug, content_md)
+                await session.flush()
+                return PageWriteOutcome(page=page, inserted=True, applied=True)
+            raise RuntimeError(
+                f"canonical identity {scope_type}/{scope_id}/{language}/{normalized_path} "
+                "vanished during upsert"
+            )
+    else:
+        page = await _lock_page_by_identity(
+            session,
+            slug=slug,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            language=language,
+        )
+        if page is None:
+            return PageWriteOutcome(page=None, inserted=False, applied=False)
+
+    if expected_version is not None and page.version != expected_version:
+        raise PageWriteConflict(
+            slug, scope_type, scope_id, expected_version, page.version or 0
+        )
+
+    if _is_exact_retry(
+        page,
+        content_md=content_md,
+        title=title,
+        summary=summary,
+        status=status,
+        knowledge_type_slugs=knowledge_type_slugs,
+        source_ids=source_ids,
+    ):
+        return PageWriteOutcome(page=page, inserted=False, applied=False)
+
+    page.content_md = content_md
+    if title is not None:
+        page.title = title
+    if summary is not None:
+        page.summary = summary
+    if status is not None:
+        page.status = status
+    if knowledge_type_slugs is not None:
+        page.knowledge_type_slugs = list(knowledge_type_slugs)
+    if source_ids is not None:
+        page.source_ids = list(source_ids)
+    page.version = (page.version or 1) + 1
+    await session.flush()
+    await refresh_links(session, page.id, slug, content_md)
+    session.add(
+        WikiPageRevision(
+            page_id=page.id,
+            version=page.version,
+            content_md=content_md,
+            change_type=change_type,
+            draft_id=draft_id,
+            changed_by_id=changed_by_id,
+            change_note=change_note,
+        )
+    )
+    await session.flush()
+    return PageWriteOutcome(page=page, inserted=False, applied=True)
+
+
+# ---------------------------------------------------------------------------
 # Compiler ops application
 # ---------------------------------------------------------------------------
 
@@ -407,34 +745,35 @@ async def apply_create(
     scope_type: str = "global",
     scope_id: Optional[uuid.UUID] = None,
     status: str = "seed",
+    language: Optional[str] = None,
 ) -> WikiPage:
-    """Insert a new page in the given scope. Conflicts raise — caller should use update."""
-    page = WikiPage(
+    """Insert a new page in the given scope through the canonical write path.
+
+    The canonical identity (scope_type, scope_id, language, normalized_path)
+    is DB-enforced: if a concurrent writer already materialized the same
+    identity, this locks that row and applies a versioned update instead of
+    raising (an exact retry is a no-op). ``page_type`` and ``embedding`` are
+    accepted for backward compatibility and ignored. ``language`` defaults to
+    the page default (``en``) for backward compatibility; compiler writes pass
+    the source's explicit language tag.
+    """
+    _ = page_type, embedding
+    outcome = await write_page(
+        session,
         slug=slug,
         title=title,
-        status=status,
         content_md=content_md,
         summary=summary,
-        knowledge_type_slugs=list(knowledge_type_slugs or []),
-        source_ids=list(source_ids or []),
-        # embedding intentionally omitted: stored in wiki_page_embeddings_<dim>
+        knowledge_type_slugs=knowledge_type_slugs,
+        source_ids=source_ids,
         scope_type=scope_type,
         scope_id=scope_id,
-        version=1,
+        language=language,
+        status=status,
     )
-    _ = embedding  # backward-compat parameter, ignored
-    session.add(page)
-    await session.flush()
-    await refresh_links(session, page.id, slug, content_md)
-    session.add(
-        WikiPageRevision(
-            page_id=page.id,
-            version=page.version,
-            content_md=content_md,
-            change_type="agent_compile",
-        )
-    )
-    return page
+    if outcome.page is None:  # pragma: no cover — write_page always returns a page here
+        raise RuntimeError(f"apply_create failed to materialize page '{slug}'")
+    return outcome.page
 
 
 async def apply_update(
@@ -449,59 +788,50 @@ async def apply_update(
     scope_type: str = "global",
     scope_id: Optional[uuid.UUID] = None,
     status: Optional[str] = None,
+    language: Optional[str] = None,
 ) -> Optional[WikiPage]:
     """
-    Update an existing page atomically within the given scope:
+    Update an existing page atomically within the given scope through the
+    canonical write path:
       - Replace content_md with new_content_md.
-      - Optionally update title/summary.
+      - Optionally update title/summary/lifecycle status.
       - Union add_knowledge_type_slug into knowledge_type_slugs.
       - Append add_source_id to source_ids if not present.
-      - Optionally update lifecycle status.
-      - Bump version, refresh updated_at, refresh embedding if supplied.
-    Returns None if the page does not exist.
+      - Bump version and append a revision; an exact retry (identical payload)
+        is a no-op instead of a spurious version bump.
+    Returns None if the page does not exist. ``language`` (default ``en``)
+    selects the canonical identity the update applies to; compiler writes pass
+    the source's explicit language so zh pages are never confused with en
+    pages under the same scope/path.
     """
-    page = await get_page_by_slug(
-        session, slug, scope_type=scope_type, scope_id=scope_id
+    _ = embedding  # backward-compat parameter, ignored (see write_page)
+    existing = await get_page_by_slug(
+        session, slug, scope_type=scope_type, scope_id=scope_id, language=language
     )
-    if page is None:
-        return None
-
-    page.content_md = new_content_md
-    if title is not None:
-        page.title = title
-    if summary is not None:
-        page.summary = summary
-    if status is not None:
-        page.status = status
-    if add_knowledge_type_slug and add_knowledge_type_slug not in (
-        page.knowledge_type_slugs or []
-    ):
-        page.knowledge_type_slugs = [
-            *(page.knowledge_type_slugs or []),
-            add_knowledge_type_slug,
-        ]
-    if add_source_id and add_source_id not in (page.source_ids or []):
-        page.source_ids = [
-            *(source_id for source_id in (page.source_ids or [])),
-            add_source_id,
-        ]
-    # Embeddings are no longer stored on WikiPage; the compiler calls
-    # _reembed_pages after this returns, which writes into the active
-    # wiki_page_embeddings_<dim> table. The `embedding` parameter is accepted
-    # only for backward compatibility and ignored here.
-    _ = embedding
-    page.version = (page.version or 1) + 1
-    await session.flush()
-    await refresh_links(session, page.id, slug, new_content_md)
-    session.add(
-        WikiPageRevision(
-            page_id=page.id,
-            version=page.version,
-            content_md=new_content_md,
-            change_type="agent_compile",
-        )
+    kt_slugs: Optional[list[str]] = None
+    source_uuids: Optional[list[uuid.UUID]] = None
+    if existing is not None:
+        kt_slugs = list(existing.knowledge_type_slugs or [])
+        if add_knowledge_type_slug and add_knowledge_type_slug not in kt_slugs:
+            kt_slugs.append(add_knowledge_type_slug)
+        source_uuids = list(existing.source_ids or [])
+        if add_source_id and add_source_id not in source_uuids:
+            source_uuids.append(add_source_id)
+    outcome = await write_page(
+        session,
+        slug=slug,
+        title=title,
+        content_md=new_content_md,
+        summary=summary,
+        knowledge_type_slugs=kt_slugs,
+        source_ids=source_uuids,
+        scope_type=scope_type,
+        scope_id=scope_id,
+        language=language,
+        status=status,
+        insert_if_missing=False,
     )
-    return page
+    return outcome.page
 
 
 async def upsert_page(
@@ -517,49 +847,30 @@ async def upsert_page(
     scope_type: str = "global",
     scope_id: Optional[uuid.UUID] = None,
     status: Optional[str] = None,
+    language: Optional[str] = None,
 ) -> WikiPage:
-    """Create-or-update by slug within a scope."""
-    # Acquire a transaction-level advisory lock based on the hash of the slug
-    # to serialize concurrent upserts for the exact same page.
-    lock_query = select(func.pg_advisory_xact_lock(func.hashtext(slug)))
-    await session.execute(lock_query)
+    """Create-or-update by canonical identity within a scope.
 
-    existing = await get_page_by_slug(
-        session, slug, scope_type=scope_type, scope_id=scope_id
+    Delegates to the canonical write path; concurrent divergent writers
+    serialize on the identity row lock.
+    """
+    _ = page_type, embedding
+    outcome = await write_page(
+        session,
+        slug=slug,
+        title=title,
+        content_md=content_md,
+        summary=summary,
+        knowledge_type_slugs=knowledge_type_slugs,
+        source_ids=source_ids,
+        scope_type=scope_type,
+        scope_id=scope_id,
+        language=language,
+        status=status,
     )
-    if existing is None:
-        return await apply_create(
-            session,
-            slug,
-            title,
-            page_type,
-            content_md,
-            summary,
-            knowledge_type_slugs,
-            source_ids,
-            embedding,
-            scope_type=scope_type,
-            scope_id=scope_id,
-            status=status or "seed",
-        )
-    return (
-        await apply_update(
-            session,
-            slug=slug,
-            new_content_md=content_md,
-            summary=summary,
-            title=title,
-            add_knowledge_type_slug=knowledge_type_slugs[0]
-            if knowledge_type_slugs
-            else None,
-            add_source_id=source_ids[0] if source_ids else None,
-            embedding=embedding,
-            scope_type=scope_type,
-            scope_id=scope_id,
-            status=status,
-        )
-        or existing
-    )
+    if outcome.page is None:  # pragma: no cover — write_page always returns a page here
+        raise RuntimeError(f"upsert_page failed to materialize page '{slug}'")
+    return outcome.page
 
 
 # ---------------------------------------------------------------------------
@@ -603,26 +914,21 @@ async def regenerate_index(
             lines.append("")
 
     new_md = "\n".join(lines).rstrip() + "\n"
-    page = await get_page_by_slug(
-        session, INDEX_SLUG, scope_type=scope_type, scope_id=scope_id
+    outcome = await write_page(
+        session,
+        slug=INDEX_SLUG,
+        title="Wiki Index",
+        content_md=new_md,
+        summary="Catalog of all wiki pages",
+        knowledge_type_slugs=[],
+        source_ids=[],
+        scope_type=scope_type,
+        scope_id=scope_id,
+        status=None,
     )
-    if page is None:
-        page = WikiPage(
-            slug=INDEX_SLUG,
-            title="Wiki Index",
-            content_md=new_md,
-            summary="Catalog of all wiki pages",
-            knowledge_type_slugs=[],
-            source_ids=[],
-            scope_type=scope_type,
-            scope_id=scope_id,
-        )
-        session.add(page)
-    else:
-        page.content_md = new_md
-        page.version = (page.version or 1) + 1
-    await session.flush()
-    return page
+    if outcome.page is None:  # pragma: no cover — write_page always returns a page here
+        raise RuntimeError(f"regenerate_index failed to materialize '{INDEX_SLUG}'")
+    return outcome.page
 
 
 async def append_log(
@@ -633,30 +939,81 @@ async def append_log(
 ) -> WikiPage:
     """
     Append a timestamped line to the `_log` page within the given scope.
+
+    The append is a single atomic INSERT ... ON CONFLICT DO UPDATE on the
+    canonical identity, so concurrent appends serialize at the statement level
+    and every line lands on the latest committed content (no read-modify-write
+    races that drop lines). A fresh log page starts at version 1; each append
+    bumps the version and records a revision.
     """
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
     line = f"## [{ts}] {entry.strip()}"
-    page = await get_page_by_slug(
-        session, LOG_SLUG, scope_type=scope_type, scope_id=scope_id
-    )
-    if page is None:
-        page = WikiPage(
+    language = normalize_page_language(None)
+    normalized_path = normalize_page_path(LOG_SLUG)
+    suffix = f"\n\n{line}\n"
+    if scope_id is None:
+        conflict_index_elements: list[str] = [
+            "scope_type",
+            "language",
+            "normalized_path",
+        ]
+        conflict_index_where = text("scope_id IS NULL")
+    else:
+        conflict_index_elements = [
+            "scope_type",
+            "scope_id",
+            "language",
+            "normalized_path",
+        ]
+        conflict_index_where = text("scope_id IS NOT NULL")
+    stmt = (
+        pg_insert(WikiPage)
+        .values(
             slug=LOG_SLUG,
             title="Wiki Log",
+            status="seed",
             content_md=f"# Wiki Log\n\n{line}\n",
             summary="Chronological activity log",
             knowledge_type_slugs=[],
             source_ids=[],
             scope_type=scope_type,
             scope_id=scope_id,
+            language=language,
+            normalized_path=normalized_path,
+            version=1,
         )
-        session.add(page)
-    else:
-        existing = page.content_md or "# Wiki Log\n"
-        if "_(empty" in existing:
-            existing = "# Wiki Log\n"
-        page.content_md = existing.rstrip() + f"\n\n{line}\n"
-        page.version = (page.version or 1) + 1
+        .on_conflict_do_update(
+            index_elements=conflict_index_elements,
+            index_where=conflict_index_where,
+            set_={
+                # Legacy log rows may carry an empty marker; reset before
+                # appending, matching the historical behavior.
+                "content_md": case(
+                    (
+                        WikiPage.content_md.contains("_(empty"),
+                        f"# Wiki Log\n\n{line}\n",
+                    ),
+                    else_=WikiPage.content_md + suffix,
+                ),
+                "version": WikiPage.version + 1,
+                "updated_at": func.now(),
+            },
+        )
+        .returning(WikiPage.id)
+    )
+    page_id = (await session.execute(stmt)).scalar_one()
+    page = await session.get(WikiPage, page_id)
+    if page is None:  # pragma: no cover — the row was just written
+        raise RuntimeError(f"append_log failed to load '{LOG_SLUG}' page {page_id}")
+    await refresh_links(session, page.id, LOG_SLUG, page.content_md or "")
+    session.add(
+        WikiPageRevision(
+            page_id=page.id,
+            version=page.version,
+            content_md=page.content_md or "",
+            change_type="agent_compile",
+        )
+    )
     await session.flush()
     return page
 
@@ -758,7 +1115,7 @@ async def detach_source_from_wiki(
 
     Returns the number of pages deleted.
     """
-    stmt = select(WikiPage).where(WikiPage.source_ids.any(source_id))  # type: ignore[arg-type]
+    stmt = select(WikiPage).where(WikiPage.source_ids.contains([source_id]))
     pages = list((await session.execute(stmt)).scalars().all())
     deleted_count = 0
     for page in pages:
@@ -784,26 +1141,31 @@ async def direct_edit_page(
     change_note: Optional[str] = None,
 ) -> WikiPage:
     """
-    Sync write by an editor/admin — no review step.
-    Creates a revision immediately.
+    Sync write by an editor/admin — no review step. Routes through the
+    canonical write path: the identity row is locked, the version is bumped,
+    and a revision is recorded. Saving the same content is an exact-retry
+    no-op instead of a spurious version bump.
     """
-    page.content_md = content_md
-    page.version = (page.version or 1) + 1
-    await session.flush()
-    await refresh_links(session, page.id, page.slug, content_md)
-
-    session.add(
-        WikiPageRevision(
-            page_id=page.id,
-            version=page.version,
-            content_md=content_md,
-            change_type="editor_edit",
-            changed_by_id=editor_id,
-            change_note=change_note,
-        )
+    outcome = await write_page(
+        session,
+        slug=page.slug,
+        title=page.title,
+        content_md=content_md,
+        summary=page.summary,
+        knowledge_type_slugs=page.knowledge_type_slugs,
+        source_ids=page.source_ids,
+        scope_type=page.scope_type or "global",
+        scope_id=page.scope_id,
+        language=page.language,
+        status=page.status,
+        insert_if_missing=False,
+        change_type="editor_edit",
+        changed_by_id=editor_id,
+        change_note=change_note,
     )
-    await session.flush()
-    return page
+    if outcome.page is None:
+        raise RuntimeError(f"wiki page '{page.slug}' disappeared before direct edit")
+    return outcome.page
 
 
 async def rollback_to_revision(
@@ -813,8 +1175,9 @@ async def rollback_to_revision(
     actor_id: uuid.UUID,
 ) -> WikiPage:
     """
-    Restore a page to a previous revision snapshot.
-    Creates a new revision recording the rollback.
+    Restore a page to a previous revision snapshot through the canonical
+    write path, recording a rollback revision. Rolling back to content that
+    already matches is an exact-retry no-op.
     """
     revision = (
         await session.execute(
@@ -827,23 +1190,26 @@ async def rollback_to_revision(
     if revision is None:
         raise ValueError(f"Revision v{target_version} not found for page {page.slug}")
 
-    page.content_md = revision.content_md
-    page.version = (page.version or 1) + 1
-    await session.flush()
-    await refresh_links(session, page.id, page.slug, revision.content_md)
-
-    session.add(
-        WikiPageRevision(
-            page_id=page.id,
-            version=page.version,
-            content_md=revision.content_md,
-            change_type="rollback",
-            changed_by_id=actor_id,
-            change_note=f"rollback to v{target_version}",
-        )
+    outcome = await write_page(
+        session,
+        slug=page.slug,
+        title=page.title,
+        content_md=revision.content_md,
+        summary=page.summary,
+        knowledge_type_slugs=page.knowledge_type_slugs,
+        source_ids=page.source_ids,
+        scope_type=page.scope_type or "global",
+        scope_id=page.scope_id,
+        language=page.language,
+        status=page.status,
+        insert_if_missing=False,
+        change_type="rollback",
+        changed_by_id=actor_id,
+        change_note=f"rollback to v{target_version}",
     )
-    await session.flush()
-    return page
+    if outcome.page is None:
+        raise ValueError(f"Wiki page {page.slug} not found")
+    return outcome.page
 
 
 async def regenerate_hot_cache(
@@ -945,35 +1311,28 @@ async def regenerate_hot_cache(
 {seed_prose}
 """
 
-    page = await get_page_by_slug(
-        session, HOT_SLUG, scope_type=scope_type, scope_id=scope_id
+    outcome = await write_page(
+        session,
+        slug=HOT_SLUG,
+        title="Hot Knowledge Briefing",
+        content_md=new_md,
+        summary="Auto-generated briefing of knowledge updates and contradictions to resolve",
+        knowledge_type_slugs=[],
+        source_ids=[],
+        scope_type=scope_type,
+        scope_id=scope_id,
+        status="evergreen",
     )
-    if page is None:
-        page = WikiPage(
-            slug=HOT_SLUG,
-            title="Hot Knowledge Briefing",
-            status="evergreen",
-            content_md=new_md,
-            summary="Auto-generated briefing of knowledge updates and contradictions to resolve",
-            knowledge_type_slugs=[],
-            source_ids=[],
-            scope_type=scope_type,
-            scope_id=scope_id,
-        )
-        session.add(page)
-    else:
-        page.content_md = new_md
-        page.status = "evergreen"
-        page.version = (page.version or 1) + 1
-    await session.flush()
-    return page
+    if outcome.page is None:  # pragma: no cover — write_page always returns a page here
+        raise RuntimeError(f"regenerate_hot_cache failed to materialize '{HOT_SLUG}'")
+    return outcome.page
 
 
 async def lint_wiki(
     session: AsyncSession,
     scope_type: str = "global",
     scope_id: Optional[uuid.UUID] = None,
-) -> dict:
+) -> dict[str, object]:
     """
     Diagnose structural health issues in the wiki:
       - Dead links: wikilinks pointing to non-existent pages in this scope.

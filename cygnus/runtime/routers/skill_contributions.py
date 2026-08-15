@@ -57,12 +57,14 @@ def _assert_editable(contribution: SkillContribution) -> None:
             "Withdraw it (or ask a reviewer to request changes) before editing.",
         )
 
+
 class SkillContributionCreate(BaseModel):
     skill_id: Optional[uuid.UUID] = None
     base_version: Optional[int] = None
     title: str
     scope_type: str = "global"
     scope_ids: Optional[List[uuid.UUID]] = None
+
 
 class SkillContributionResponse(BaseModel):
     id: uuid.UUID
@@ -77,18 +79,22 @@ class SkillContributionResponse(BaseModel):
     contributor_name: Optional[str] = None
     created_at: datetime
     updated_at: datetime
-    
+
     model_config = {"from_attributes": True}
+
 
 class PutFileRequest(BaseModel):
     path: str
     content: str
 
+
 class SkillContributionApprove(BaseModel):
     final_scope_type: Optional[str] = None
     final_scope_ids: Optional[List[uuid.UUID]] = None
 
+
 # --- Routes ---
+
 
 @router.get("/skill-contributions/check")
 async def check_existing_draft(
@@ -100,16 +106,17 @@ async def check_existing_draft(
     """Check if the user already has a draft for this skill/title."""
     stmt = select(SkillContribution).where(
         SkillContribution.contributor_id == user.id,
-        SkillContribution.status == SkillContributionStatus.DRAFT.value
+        SkillContribution.status == SkillContributionStatus.DRAFT.value,
     )
     if skill_id:
         stmt = stmt.where(SkillContribution.skill_id == skill_id)
     else:
         stmt = stmt.where(SkillContribution.title == title)
-        
+
     res = await db.execute(stmt)
     draft = res.scalars().first()
     return draft
+
 
 @router.post("/skill-contributions", response_model=SkillContributionResponse)
 async def create_skill_contribution(
@@ -126,14 +133,25 @@ async def create_skill_contribution(
     if req.skill_id:
         base_skill = await db.get(Skill, req.skill_id)
         if base_skill and base_skill.is_system:
-            raise HTTPException(403, "System skills cannot be modified via contributions")
+            raise HTTPException(
+                403, "System skills cannot be modified via contributions"
+            )
 
     contribution = await SkillService.create_contribution(
-        db, req.skill_id, req.base_version, user.id, req.title, req.scope_type, req.scope_ids
+        db,
+        req.skill_id,
+        req.base_version,
+        user.id,
+        req.title,
+        req.scope_type,
+        req.scope_ids,
     )
     return contribution
 
-@router.get("/admin/skill-contributions", response_model=List[SkillContributionResponse])
+
+@router.get(
+    "/admin/skill-contributions", response_model=List[SkillContributionResponse]
+)
 async def list_pending_skill_contributions(
     skill_id: Optional[uuid.UUID] = Query(None),
     db: AsyncSession = Depends(get_db),
@@ -142,7 +160,7 @@ async def list_pending_skill_contributions(
     """List skill contribution requests for admin review."""
     from sqlalchemy import select
     from sqlalchemy.orm import joinedload
-    
+
     stmt = select(SkillContribution).options(joinedload(SkillContribution.contributor))
     stmt = stmt.where(SkillContribution.status == SkillContributionStatus.PENDING.value)
     if skill_id:
@@ -150,14 +168,15 @@ async def list_pending_skill_contributions(
     stmt = stmt.order_by(SkillContribution.created_at.desc())
     res = await db.execute(stmt)
     contributions = res.scalars().unique().all()
-    
+
     results = []
     for c in contributions:
         resp = SkillContributionResponse.model_validate(c)
         resp.contributor_name = c.contributor.name if c.contributor else "Unknown"
         results.append(resp)
-        
+
     return results
+
 
 @router.get("/skill-contributions", response_model=List[SkillContributionResponse])
 async def list_skill_contributions(
@@ -168,28 +187,31 @@ async def list_skill_contributions(
     """List only the current user's skill contributions."""
     from sqlalchemy import select
     from sqlalchemy.orm import joinedload
-    
+
     stmt = select(SkillContribution).options(joinedload(SkillContribution.contributor))
-    
+
     if status:
         stmt = stmt.where(SkillContribution.status == status)
-    
+
     # Always filter by current user's ID (even for admins in this personal view)
     stmt = stmt.where(SkillContribution.contributor_id == user.id)
-    
+
     stmt = stmt.order_by(SkillContribution.created_at.desc())
     res = await db.execute(stmt)
     contributions = res.scalars().unique().all()
-    
+
     results = []
     for c in contributions:
         resp = SkillContributionResponse.model_validate(c)
         resp.contributor_name = c.contributor.name if c.contributor else "Unknown"
         results.append(resp)
-        
+
     return results
 
-@router.get("/skill-contributions/{contribution_id}", response_model=SkillContributionResponse)
+
+@router.get(
+    "/skill-contributions/{contribution_id}", response_model=SkillContributionResponse
+)
 async def get_skill_contribution(
     contribution_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
@@ -197,21 +219,31 @@ async def get_skill_contribution(
 ):
     """Get details of a specific skill contribution."""
     from sqlalchemy.orm import joinedload
+
     contribution = await db.get(
-        SkillContribution, 
+        SkillContribution,
         contribution_id,
-        options=[joinedload(SkillContribution.contributor)]
+        options=[joinedload(SkillContribution.contributor)],
     )
     if not contribution:
         raise HTTPException(404, "Contribution not found")
-    
-    if user.role != "admin" and str(contribution.contributor_id) != str(user.id) and "skill:contribution:review" not in _get_user_permissions(user):
-        logger.warning(f"[Auth] Access Denied for contribution {contribution_id}. Contributor: {contribution.contributor_id}, User: {user.id}")
+
+    if (
+        user.role != "admin"
+        and str(contribution.contributor_id) != str(user.id)
+        and "skill:contribution:review" not in _get_user_permissions(user)
+    ):
+        logger.warning(
+            f"[Auth] Access Denied for contribution {contribution_id}. Contributor: {contribution.contributor_id}, User: {user.id}"
+        )
         raise HTTPException(403, "Access denied")
-    
+
     resp = SkillContributionResponse.model_validate(contribution)
-    resp.contributor_name = contribution.contributor.name if contribution.contributor else "Unknown"
+    resp.contributor_name = (
+        contribution.contributor.name if contribution.contributor else "Unknown"
+    )
     return resp
+
 
 @router.delete("/skill-contributions/{contribution_id}")
 async def delete_skill_contribution(
@@ -221,22 +253,27 @@ async def delete_skill_contribution(
 ):
     """Delete a skill contribution request and its storage."""
     from cygnus.runtime.services.storage_service import storage_service
+
     contribution = await db.get(SkillContribution, contribution_id)
     if not contribution:
         raise HTTPException(404, "Contribution not found")
-    
+
     if user.role != "admin" and str(contribution.contributor_id) != str(user.id):
         raise HTTPException(403, "Access denied")
-    
-    if user.role != "admin" and contribution.status == SkillContributionStatus.APPROVED.value:
+
+    if (
+        user.role != "admin"
+        and contribution.status == SkillContributionStatus.APPROVED.value
+    ):
         raise HTTPException(400, "Cannot delete an approved contribution")
 
     if contribution.storage_path:
         storage_service.delete_prefix(contribution.storage_path)
-    
+
     await db.delete(contribution)
     await db.commit()
     return {"status": "ok"}
+
 
 @router.get("/skill-contributions/{contribution_id}/files")
 async def list_skill_contribution_files(
@@ -246,34 +283,43 @@ async def list_skill_contribution_files(
 ):
     """List files in the temporary storage of a skill contribution."""
     from cygnus.runtime.services.storage_service import storage_service
+
     contribution = await db.get(SkillContribution, contribution_id)
     if not contribution:
         raise HTTPException(404, "Contribution not found")
-    
-    if user.role != "admin" and str(contribution.contributor_id) != str(user.id) and "skill:contribution:review" not in _get_user_permissions(user):
+
+    if (
+        user.role != "admin"
+        and str(contribution.contributor_id) != str(user.id)
+        and "skill:contribution:review" not in _get_user_permissions(user)
+    ):
         raise HTTPException(403, "Access denied")
 
     if contribution.status == SkillContributionStatus.APPROVED.value:
-        raise HTTPException(400, f"Cannot access contribution files in status: {contribution.status}")
-    
+        raise HTTPException(
+            400, f"Cannot access contribution files in status: {contribution.status}"
+        )
+
     prefix = contribution.storage_path
     if not prefix:
         return []
 
     from cygnus.runtime.config import settings
-    objects = storage_service.client.list_objects(settings.minio_bucket, prefix=prefix, recursive=True)
-    
+
+    objects = storage_service.client.list_objects(
+        settings.minio_bucket, prefix=prefix, recursive=True
+    )
+
     files = []
     for obj in objects:
         rel_path = obj.object_name.replace(prefix, "", 1)
-        if not rel_path: 
+        if not rel_path:
             continue
-        files.append({
-            "path": rel_path,
-            "size": obj.size,
-            "is_text": is_text_file(rel_path)
-        })
+        files.append(
+            {"path": rel_path, "size": obj.size, "is_text": is_text_file(rel_path)}
+        )
     return sorted(files, key=lambda x: x["path"])
+
 
 @router.get("/skill-contributions/{contribution_id}/files/content")
 async def get_skill_contribution_file_content(
@@ -284,19 +330,25 @@ async def get_skill_contribution_file_content(
 ):
     """Read content of a file in a skill contribution."""
     from cygnus.runtime.services.storage_service import storage_service
+
     contribution = await db.get(SkillContribution, contribution_id)
     if not contribution:
         raise HTTPException(404, "Contribution not found")
-    
-    if user.role != "admin" and str(contribution.contributor_id) != str(user.id) and "skill:contribution:review" not in _get_user_permissions(user):
+
+    if (
+        user.role != "admin"
+        and str(contribution.contributor_id) != str(user.id)
+        and "skill:contribution:review" not in _get_user_permissions(user)
+    ):
         raise HTTPException(403, "Access denied")
-        
+
     full_path = f"{contribution.storage_path}{path.lstrip('/')}"
     try:
         content_bytes = storage_service.download_file(full_path)
         return {"content": content_bytes.decode("utf-8", errors="ignore")}
     except Exception as e:
         raise HTTPException(500, f"Failed to read file: {str(e)}")
+
 
 @router.post("/skill-contributions/{contribution_id}/rename")
 async def rename_skill_contribution_file(
@@ -308,10 +360,11 @@ async def rename_skill_contribution_file(
 ):
     """Rename a file or folder in a skill contribution."""
     from cygnus.runtime.services.storage_service import storage_service
+
     contribution = await db.get(SkillContribution, contribution_id)
     if not contribution:
         raise HTTPException(404, "Contribution not found")
-    
+
     if user.role != "admin" and str(contribution.contributor_id) != str(user.id):
         raise HTTPException(403, "Access denied")
 
@@ -329,7 +382,13 @@ async def rename_skill_contribution_file(
 
     storage_service.move_prefix(full_old_path, full_new_path)
     await db.commit()
-    return {"status": "ok", "old_path": old_path, "new_path": new_path, "contribution_status": contribution.status}
+    return {
+        "status": "ok",
+        "old_path": old_path,
+        "new_path": new_path,
+        "contribution_status": contribution.status,
+    }
+
 
 @router.delete("/skill-contributions/{contribution_id}/files")
 async def delete_skill_contribution_file(
@@ -340,10 +399,11 @@ async def delete_skill_contribution_file(
 ):
     """Delete a file or folder (prefix) from a skill contribution."""
     from cygnus.runtime.services.storage_service import storage_service
+
     contribution = await db.get(SkillContribution, contribution_id)
     if not contribution:
         raise HTTPException(404, "Contribution not found")
-    
+
     if user.role != "admin" and str(contribution.contributor_id) != str(user.id):
         raise HTTPException(403, "Access denied")
 
@@ -355,6 +415,7 @@ async def delete_skill_contribution_file(
     await db.commit()
     return {"status": "ok", "path": path, "contribution_status": contribution.status}
 
+
 @router.post("/skill-contributions/{contribution_id}/upload")
 async def upload_skill_contribution_file(
     contribution_id: uuid.UUID,
@@ -365,41 +426,53 @@ async def upload_skill_contribution_file(
 ):
     """Upload a binary file to a skill contribution."""
     from cygnus.runtime.services.storage_service import storage_service
+
     contribution = await db.get(SkillContribution, contribution_id)
     if not contribution:
         raise HTTPException(404, "Contribution not found")
-    
-    if current_user.role != "admin" and str(contribution.contributor_id) != str(current_user.id):
+
+    if current_user.role != "admin" and str(contribution.contributor_id) != str(
+        current_user.id
+    ):
         raise HTTPException(403, "Access denied")
 
     _assert_editable(contribution)
 
     file_path = path if path else file.filename
-    
+    if not file_path:
+        raise HTTPException(400, "Upload requires a file name")
+
     # 1. Determine the actual root folder by checking existing files in storage
     from cygnus.runtime.config import settings
-    objects = storage_service.client.list_objects(settings.minio_bucket, prefix=contribution.storage_path, recursive=True)
-    existing_files = [obj.object_name.replace(contribution.storage_path, "", 1) for obj in objects]
-    
+
+    objects = storage_service.client.list_objects(
+        settings.minio_bucket, prefix=contribution.storage_path, recursive=True
+    )
+    existing_files = [
+        obj.object_name.replace(contribution.storage_path, "", 1) for obj in objects
+    ]
+
     root_folder = ""
     if existing_files:
         # Take the first segment of the first file as the root
-        root_folder = existing_files[0].split('/')[0]
-    
+        root_folder = existing_files[0].split("/")[0]
+
     if not root_folder:
         # Fallback to skill slug if no files exist yet
         from sqlalchemy import select
 
         from cygnus.runtime.database.models import Skill
+
         if contribution.skill_id:
             skill_stmt = select(Skill).where(Skill.id == contribution.skill_id)
             skill_res = await db.execute(skill_stmt)
             skill_obj = skill_res.scalars().first()
             if skill_obj:
                 root_folder = skill_obj.slug
-        
+
         if not root_folder:
             from cygnus.runtime.utils.text import slugify
+
             root_folder = slugify(contribution.title.replace("Upload: ", ""))
 
     # 2. Ensure file_path starts with the detected root_folder
@@ -407,15 +480,24 @@ async def upload_skill_contribution_file(
         file_path = f"{root_folder}/{file_path.lstrip('/')}"
 
     full_path = f"{contribution.storage_path}{file_path.lstrip('/')}"
-    
+
     try:
         content = await file.read()
-        storage_service.upload_file(full_path, content, content_type=file.content_type)
+        storage_service.upload_file(
+            full_path,
+            content,
+            content_type=file.content_type or "application/octet-stream",
+        )
         await db.commit()
-        return {"status": "ok", "path": file_path, "contribution_status": contribution.status}
+        return {
+            "status": "ok",
+            "path": file_path,
+            "contribution_status": contribution.status,
+        }
     except Exception as e:
         logger.error(f"Failed to upload to MinIO: {str(e)}")
         raise HTTPException(500, f"MinIO upload failed: {str(e)}")
+
 
 @router.put("/skill-contributions/{contribution_id}/files")
 async def put_skill_contribution_file(
@@ -426,42 +508,52 @@ async def put_skill_contribution_file(
 ):
     """Create or update a text file in a skill contribution."""
     from cygnus.runtime.services.storage_service import storage_service
+
     contribution = await db.get(SkillContribution, contribution_id)
     if not contribution:
         raise HTTPException(404, "Contribution not found")
-    
-    if current_user.role != "admin" and str(contribution.contributor_id) != str(current_user.id):
+
+    if current_user.role != "admin" and str(contribution.contributor_id) != str(
+        current_user.id
+    ):
         raise HTTPException(403, "Access denied")
 
     _assert_editable(contribution)
 
     file_path = request.path
     content = request.content
-    
+
     # 1. Determine the actual root folder by checking existing files in storage
     from cygnus.runtime.config import settings
-    objects = storage_service.client.list_objects(settings.minio_bucket, prefix=contribution.storage_path, recursive=True)
-    existing_files = [obj.object_name.replace(contribution.storage_path, "", 1) for obj in objects]
-    
+
+    objects = storage_service.client.list_objects(
+        settings.minio_bucket, prefix=contribution.storage_path, recursive=True
+    )
+    existing_files = [
+        obj.object_name.replace(contribution.storage_path, "", 1) for obj in objects
+    ]
+
     root_folder = ""
     if existing_files:
         # Take the first segment of the first file as the root
-        root_folder = existing_files[0].split('/')[0]
-    
+        root_folder = existing_files[0].split("/")[0]
+
     if not root_folder:
         # Fallback to skill slug if no files exist yet
         from sqlalchemy import select
 
         from cygnus.runtime.database.models import Skill
+
         if contribution.skill_id:
             skill_stmt = select(Skill).where(Skill.id == contribution.skill_id)
             skill_res = await db.execute(skill_stmt)
             skill_obj = skill_res.scalars().first()
             if skill_obj:
                 root_folder = skill_obj.slug
-        
+
         if not root_folder:
             from cygnus.runtime.utils.text import slugify
+
             root_folder = slugify(contribution.title.replace("Upload: ", ""))
 
     # 2. Ensure file_path starts with the detected root_folder
@@ -470,9 +562,16 @@ async def put_skill_contribution_file(
 
     full_path = f"{contribution.storage_path}{file_path.lstrip('/')}"
 
-    storage_service.upload_file(full_path, content.encode("utf-8"), content_type="text/plain")
+    storage_service.upload_file(
+        full_path, content.encode("utf-8"), content_type="text/plain"
+    )
     await db.commit()
-    return {"status": "ok", "path": file_path, "contribution_status": contribution.status}
+    return {
+        "status": "ok",
+        "path": file_path,
+        "contribution_status": contribution.status,
+    }
+
 
 @router.post("/skill-contributions/{contribution_id}/submit")
 async def submit_skill_contribution(
@@ -489,17 +588,23 @@ async def submit_skill_contribution(
         SkillContributionStatus.DRAFT.value,
         SkillContributionStatus.NEEDS_REVISION.value,
     ):
-        raise HTTPException(400, f"Cannot submit contribution in status: {contribution.status}")
+        raise HTTPException(
+            400, f"Cannot submit contribution in status: {contribution.status}"
+        )
 
     try:
         await contribution_service.submit_skill_contribution(db, contribution, user)
     except InvalidTransition as e:
         raise HTTPException(400, str(e))
     await contribution_service.notify_submitted(
-        db, skill_contribution_adapter, contribution, user,
+        db,
+        skill_contribution_adapter,
+        contribution,
+        user,
     )
     await db.commit()
     return {"status": contribution.status}
+
 
 @router.post("/skill-contributions/{contribution_id}/approve")
 async def approve_skill_contribution(
@@ -516,7 +621,7 @@ async def approve_skill_contribution(
     if not contribution:
         raise HTTPException(404, "Contribution not found")
 
-    # Permission check: 
+    # Permission check:
     # 1. Global admins can approve anything.
     # 2. If scope is 'global', any reviewer can approve.
     # 3. If scope is 'department', reviewer must belong to one of the target departments.
@@ -527,7 +632,7 @@ async def approve_skill_contribution(
             raise HTTPException(
                 403,
                 "You do not have permission to approve contributions for these departments. "
-                "Reviewer must belong to one of the target departments."
+                "Reviewer must belong to one of the target departments.",
             )
 
     # Use values from request if provided, otherwise default to None
@@ -546,7 +651,10 @@ async def approve_skill_contribution(
         raise HTTPException(400, str(e))
     # Refresh and notify the contributor of the good news.
     await contribution_service.notify_approved(
-        db, skill_contribution_adapter, contribution, admin,
+        db,
+        skill_contribution_adapter,
+        contribution,
+        admin,
         version_label=f"v{skill.current_version}",
     )
     await db.commit()
@@ -554,8 +662,9 @@ async def approve_skill_contribution(
         "status": "approved",
         "skill_id": skill.id,
         "skill_slug": skill.slug,
-        "version": skill.current_version
+        "version": skill.current_version,
     }
+
 
 @router.post("/skill-contributions/{contribution_id}/reject")
 async def reject_skill_contribution(
@@ -572,7 +681,10 @@ async def reject_skill_contribution(
     except InvalidTransition as e:
         raise HTTPException(400, str(e))
     await contribution_service.notify_rejected(
-        db, skill_contribution_adapter, contribution, admin,
+        db,
+        skill_contribution_adapter,
+        contribution,
+        admin,
     )
     await db.commit()
     return {"status": contribution.status}
@@ -581,6 +693,7 @@ async def reject_skill_contribution(
 # ---------------------------------------------------------------------------
 # needs_revision flow — request changes, resubmit, withdraw
 # ---------------------------------------------------------------------------
+
 
 class RequestChangesSkillRequest(BaseModel):
     reviewer_note: str
@@ -599,12 +712,19 @@ async def request_changes_on_skill_contribution(
         raise HTTPException(404, "Contribution not found")
     try:
         await contribution_service.request_changes(
-            db, skill_contribution_adapter, contribution, admin, req.reviewer_note,
+            db,
+            skill_contribution_adapter,
+            contribution,
+            admin,
+            req.reviewer_note,
         )
     except InvalidTransition as e:
         raise HTTPException(400, str(e))
     await db.commit()
-    return {"status": contribution.status, "revision_round": contribution.revision_round}
+    return {
+        "status": contribution.status,
+        "revision_round": contribution.revision_round,
+    }
 
 
 @router.post("/skill-contributions/{contribution_id}/resubmit")
@@ -622,7 +742,10 @@ async def resubmit_skill_contribution(
     except InvalidTransition as e:
         raise HTTPException(400, str(e))
     await db.commit()
-    return {"status": contribution.status, "revision_round": contribution.revision_round}
+    return {
+        "status": contribution.status,
+        "revision_round": contribution.revision_round,
+    }
 
 
 @router.post("/skill-contributions/{contribution_id}/withdraw")
@@ -637,12 +760,16 @@ async def withdraw_skill_contribution(
         raise HTTPException(404, "Contribution not found")
     try:
         await contribution_service.withdraw(
-            db, skill_contribution_adapter, contribution, user,
+            db,
+            skill_contribution_adapter,
+            contribution,
+            user,
         )
     except InvalidTransition as e:
         raise HTTPException(403, str(e))
     await db.commit()
     return {"status": contribution.status}
+
 
 @router.get("/skill-contributions/{contribution_id}/diff-status")
 async def get_skill_contribution_diff_status(
@@ -654,41 +781,54 @@ async def get_skill_contribution_diff_status(
     Returns a map of {path: status} where status is 'A' (Added), 'D' (Deleted), or 'M' (Modified).
     """
     from cygnus.runtime.services.storage_service import storage_service
-    
+
     contribution = await db.get(SkillContribution, contribution_id)
     if not contribution:
         raise HTTPException(404, "Contribution not found")
-    
-    if user.role != "admin" and str(contribution.contributor_id) != str(user.id) and "skill:contribution:review" not in _get_user_permissions(user):
+
+    if (
+        user.role != "admin"
+        and str(contribution.contributor_id) != str(user.id)
+        and "skill:contribution:review" not in _get_user_permissions(user)
+    ):
         raise HTTPException(403, "Access denied")
-        
-    contrib_files = storage_service.list_objects(contribution.storage_path, recursive=True)
-    contrib_map = {f.object_name.replace(contribution.storage_path, "", 1).lstrip("/"): f for f in contrib_files}
-    
+
+    storage_path = contribution.storage_path
+    if not storage_path:
+        return {}
+    contrib_files = storage_service.list_objects(storage_path, recursive=True)
+    contrib_map = {
+        f.object_name.replace(storage_path, "", 1).lstrip("/"): f for f in contrib_files
+    }
+
     base_files_map = {}
     if contribution.skill_id:
         # User requested to ALWAYS compare with latest version
-        stmt = select(SkillVersion).where(SkillVersion.skill_id == contribution.skill_id).order_by(SkillVersion.version_number.desc())
+        stmt = (
+            select(SkillVersion)
+            .where(SkillVersion.skill_id == contribution.skill_id)
+            .order_by(SkillVersion.version_number.desc())
+        )
         v_res = await db.execute(stmt)
         v_obj = v_res.scalars().first()
-        
-        if v_obj:
+
+        if v_obj and v_obj.storage_path:
             base_prefix = v_obj.storage_path
             base_files = storage_service.list_objects(base_prefix, recursive=True)
-            
+
             for f in base_files:
                 rel = f.object_name.replace(base_prefix, "", 1).lstrip("/")
                 # Handle 'content/' prefix if present in original storage
                 if rel.startswith("content/"):
                     rel = rel.replace("content/", "", 1).lstrip("/")
-                
+
                 if rel:
                     base_files_map[rel] = f
 
     # Determine if there's a root folder shift (e.g. contrib has 'slug/' but base doesn't, or vice-versa)
     contrib_paths = list(contrib_map.keys())
     base_paths = list(base_files_map.keys())
-    
+
     # Simple check for common root folder in contrib
     contrib_root = ""
     if contrib_paths:
@@ -708,28 +848,28 @@ async def get_skill_contribution_diff_status(
                 base_root = root
 
     status_map = {}
-    
+
     # If roots match (both have it or both don't), simple comparison
     # If roots differ, we should try to match paths by stripping/adding roots
-    
+
     def get_norm(p, root):
         if root and (p.startswith(root + "/") or p == root):
-            return p[len(root):].lstrip("/")
+            return p[len(root) :].lstrip("/")
         return p
 
     # Map normalized paths back to actual paths for each side
     norm_to_contrib = {get_norm(p, contrib_root): p for p in contrib_paths}
     norm_to_base = {get_norm(p, base_root): p for p in base_paths}
-    
+
     all_norms = set(norm_to_contrib.keys()) | set(norm_to_base.keys())
-    
+
     for norm in all_norms:
-        if not norm: 
+        if not norm:
             continue
-        
+
         p_contrib = norm_to_contrib.get(norm)
         p_base = norm_to_base.get(norm)
-        
+
         if p_contrib and not p_base:
             status_map[p_contrib] = "A"
         elif p_base and not p_contrib:
@@ -743,5 +883,5 @@ async def get_skill_contribution_diff_status(
             b_file = base_files_map[p_base]
             if c_file.size != b_file.size or c_file.etag != b_file.etag:
                 status_map[p_contrib] = "M"
-                
+
     return status_map

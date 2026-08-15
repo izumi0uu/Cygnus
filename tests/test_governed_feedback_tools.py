@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import contextmanager
 import json
 import unittest
 import uuid
+from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import cygnus.runtime.mcp.tools as mcp_tools
+from cygnus.domain import governed_object_ref
 from cygnus.governance.feedback import (
     FeedbackCommandConflict,
     FeedbackSignalInput,
@@ -35,7 +37,6 @@ from cygnus.runtime.database.models import (
 )
 from cygnus.runtime.mcp.permissions import ANY_AUTHENTICATED, requirement_for
 from cygnus.runtime.mcp.server import create_mcp_server
-import cygnus.runtime.mcp.tools as mcp_tools
 
 
 class _Result:
@@ -244,12 +245,14 @@ class FeedbackPersistenceTests(unittest.TestCase):
     def test_input_normalizes_command_context_and_persists_actor_and_refs(self) -> None:
         actor_id = uuid.uuid4()
         draft_id = uuid.uuid4()
+        page_id = uuid.uuid4()
         session = _FeedbackSession()
         signal_input = FeedbackSignalInput(
             command_id=" feedback-command:rewrite-1 ",
             signal_type="human_rewrite",
             audience_context={"visibility": "internal", "plan": "enterprise"},
-            object_id="ko-visible",
+            object_id=governed_object_ref(page_id),
+            page_id=page_id,
             draft_id=draft_id,
             source_context_ref="turn:42",
             notes="Rewrite was required.",
@@ -272,6 +275,8 @@ class FeedbackPersistenceTests(unittest.TestCase):
         self.assertEqual(signal.signal_type, "human_rewrite")
         self.assertEqual(signal.actor_id, actor_id)
         self.assertEqual(signal.audience_context["plan_tier"], "enterprise")
+        self.assertEqual(signal.object_id, governed_object_ref(page_id))
+        self.assertEqual(signal.page_id, page_id)
         self.assertEqual(signal.draft_id, draft_id)
         self.assertIs(session.added[0], signal)
         session.commit.assert_not_awaited()
@@ -408,7 +413,7 @@ class FeedbackPersistenceTests(unittest.TestCase):
                 "routing_state": "recorded_only",
                 "review_queued": False,
                 "refresh_queued": False,
-            }
+            },
         )
 
     def test_definition_is_one_strict_r1_tool(self) -> None:
@@ -595,7 +600,7 @@ class GovernedFeedbackAdapterTests(unittest.TestCase):
             actor=actor,
             command_id="feedback:visibility-replay-1",
             signal_type="low_rating",
-            object_id="ko-replayable",
+            object_id=governed_object_ref(page.id),
         )
         session.page = None
 
@@ -604,7 +609,7 @@ class GovernedFeedbackAdapterTests(unittest.TestCase):
             actor=actor,
             command_id="feedback:visibility-replay-1",
             signal_type="low_rating",
-            object_id="ko-replayable",
+            object_id=governed_object_ref(page.id),
         )
 
         self.assertTrue(replay["replayed"])
@@ -637,8 +642,26 @@ class GovernedFeedbackAdapterTests(unittest.TestCase):
 
         self.assertTrue(replay["replayed"])
         self.assertEqual(replay["signal_id"], first["signal_id"])
-        self.assertEqual(replay["object_id"], "ko-draft-replay")
+        self.assertEqual(replay["object_id"], governed_object_ref(page.id))
         self.assertEqual(replay["route_id"], first["route_id"])
+
+    def test_unmaterialized_draft_never_invents_a_slug_object_identity(self) -> None:
+        draft_id = uuid.uuid4()
+        draft = _draft(draft_id=draft_id, page_id=None)
+        session = _FeedbackSession(draft=draft)
+
+        result = self._record(
+            session,
+            command_id="feedback:unmaterialized-draft-1",
+            signal_type="human_rewrite",
+            draft_id=str(draft_id),
+        )
+
+        self.assertEqual(result["status"], "success")
+        signal = _items(session, GovernanceFeedbackSignal)[0]
+        self.assertIsNone(signal.object_id)
+        self.assertIsNone(signal.page_id)
+        self.assertEqual(signal.draft_id, draft_id)
 
     def test_bound_command_conflicts_before_changed_hidden_ref_lookup(self) -> None:
         actor = _actor()
@@ -720,7 +743,7 @@ class GovernedFeedbackAdapterTests(unittest.TestCase):
                         command_id=f"feedback:excluded:{page.slug}",
                         signal_type="low_rating",
                         audience_context={"visibility": "internal"},
-                        object_id=f"ko-{page.slug}",
+                        object_id=governed_object_ref(page.id),
                     )
                 )
 
@@ -785,7 +808,7 @@ class GovernedFeedbackAdapterTests(unittest.TestCase):
                     command_id="feedback:mismatch-1",
                     signal_type="escalated",
                     audience_context={"visibility": "internal"},
-                    object_id="ko-one",
+                    object_id=governed_object_ref(page.id),
                     draft_id=str(draft_id),
                 )
             )
@@ -805,26 +828,27 @@ class GovernedFeedbackAdapterTests(unittest.TestCase):
             session,
             command_id="feedback:linked-1",
             signal_type="human_rewrite",
-            object_id="ko-linked-answer",
+            object_id=governed_object_ref(page.id),
             draft_id=str(draft_id),
             notes="Linked correction.",
         )
 
         self.assertEqual(result["status"], "success")
         signal = _items(session, GovernanceFeedbackSignal)[0]
-        self.assertEqual(signal.object_id, "ko-linked-answer")
+        self.assertEqual(signal.object_id, governed_object_ref(page.id))
         self.assertEqual(signal.page_id, page.id)
         self.assertEqual(signal.draft_id, draft_id)
         self.assertEqual(_items(session, GovernanceFeedbackRoute), [])
 
-    def test_ambiguous_object_slug_is_safe_not_found_without_write(self) -> None:
+    def test_legacy_slug_object_ref_is_safe_not_found_without_write(self) -> None:
         session = _FeedbackSession(
-            page=(_page(slug="duplicate"), _page(slug="duplicate"))
+            page=_page(slug="duplicate"),
+            execute_error_entity=WikiPage,
         )
 
         result = self._record(
             session,
-            command_id="feedback:ambiguous-1",
+            command_id="feedback:legacy-slug-1",
             signal_type="unsupported_answer",
             object_id="ko-duplicate",
         )
@@ -860,7 +884,7 @@ class GovernedFeedbackAdapterTests(unittest.TestCase):
                     command_id="feedback:unmaterialized-1",
                     signal_type="escalated",
                     audience_context={"visibility": "internal"},
-                    object_id="ko-new-answer",
+                    object_id=governed_object_ref(page.id),
                     draft_id=str(draft_id),
                 )
             )

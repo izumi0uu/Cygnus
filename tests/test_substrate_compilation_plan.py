@@ -31,4 +31,3 @@ class CompilationPlanTests(unittest.TestCase):
         self.assertEqual(payload["object_type"], "answer_card")
         self.assertNotEqual(payload["object_type"], "wiki_page")
         self.assertEqual(payload["urgency"], "high")
-

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from cygnus.domain.audience import AudienceFilter, Visibility
+from cygnus.domain.objects import governed_object_ref
 from cygnus.governance.ledger import lock_governance_command
 from cygnus.runtime.database.models import GovernanceAudienceBinding, WikiPage
 
@@ -165,7 +166,7 @@ async def create_audience_binding(
     page = await session.get(WikiPage, command.page_id)
     if page is None:
         raise AudienceBindingNotFound(f"page_id={command.page_id} was not found")
-    expected_object_ref = f"ko-{page.slug}"
+    expected_object_ref = governed_object_ref(page.id)
     if command.object_ref != expected_object_ref:
         raise AudienceBindingConflict(
             f"object_ref={command.object_ref} does not identify page_id={page.id} "

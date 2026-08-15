@@ -84,7 +84,9 @@ class _SingleResult:
 
 @final
 class NotificationApiTests(unittest.TestCase):
-    def api_client(self, *, db: AsyncMock | None = None) -> tuple[TestClient, AsyncMock]:
+    def api_client(
+        self, *, db: AsyncMock | None = None
+    ) -> tuple[TestClient, AsyncMock]:
         app = FastAPI()
         app.include_router(notification_router.router)
         fake_db = db or AsyncMock()
@@ -101,7 +103,9 @@ class NotificationApiTests(unittest.TestCase):
         with TestClient(app) as client:
             self.assertEqual(client.get("/notifications").status_code, 401)
 
-    def test_list_filters_inside_recipient_scope_and_projects_durable_state(self) -> None:
+    def test_list_filters_inside_recipient_scope_and_projects_durable_state(
+        self,
+    ) -> None:
         fake_db = AsyncMock()
         fake_db.execute.return_value = _ScalarRows([_notification()])
         client, _ = self.api_client(db=fake_db)

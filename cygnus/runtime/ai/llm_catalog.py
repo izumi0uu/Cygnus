@@ -21,15 +21,15 @@ from typing import Optional
 
 @dataclass(frozen=True)
 class LLMModelSpec:
-    id: str                          # canonical "<provider>/<model_id>"
-    provider: str                    # matches ProviderType: "openai" | "google" | "anthropic"
-    model_id: str                    # ID sent to the provider API
-    context_window_tokens: int       # total context window (input + output)
-    max_output_tokens: int           # max output tokens per request
-    supports_tools: bool             # true if model supports function calling
-    supports_vision: bool            # true if model can accept image inputs
-    label: str                       # short label shown in UI
-    cost_per_1m_input_tokens: Optional[float]   # USD per 1M input tokens
+    id: str  # canonical "<provider>/<model_id>"
+    provider: str  # matches ProviderType: "openai" | "google" | "anthropic"
+    model_id: str  # ID sent to the provider API
+    context_window_tokens: int  # total context window (input + output)
+    max_output_tokens: int  # max output tokens per request
+    supports_tools: bool  # true if model supports function calling
+    supports_vision: bool  # true if model can accept image inputs
+    label: str  # short label shown in UI
+    cost_per_1m_input_tokens: Optional[float]  # USD per 1M input tokens
     cost_per_1m_output_tokens: Optional[float]  # USD per 1M output tokens
     notes: Optional[str] = None
 

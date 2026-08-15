@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 
 from fastapi import Depends
-from sqlalchemy import func, or_, select
+from sqlalchemy import any_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 from cygnus.governance.audience_bindings import (
@@ -23,7 +23,7 @@ from cygnus.publish import (
 )
 from cygnus.retrieval.substrate_provider import (
     SubstrateKnowledgeSnapshot,
-    build_substrate_snapshot,
+    load_substrate_snapshot,
     resolve_object_type,
 )
 from cygnus.review.intake import (
@@ -97,9 +97,7 @@ async def _load_source_failure_impacts(
         GovernanceAudienceBinding.channel,
         GovernanceAudienceBinding.binding_key,
     )
-    audience_bindings = tuple(
-        (await db.execute(binding_statement)).scalars().all()
-    )
+    audience_bindings = tuple((await db.execute(binding_statement)).scalars().all())
 
     governed_page_ids = tuple(
         page.id
@@ -175,16 +173,22 @@ async def load_governance_knowledge_snapshot(
         wiki_stmt = wiki_stmt.where(wiki_scope)
     visible_pages = tuple((await db.execute(wiki_stmt)).scalars().all())
 
-    ready_source_stmt = (
-        select(Source).where(Source.status == "ready").order_by(Source.id)
-    )
-    if document_scope is not None:
-        ready_source_stmt = ready_source_stmt.where(document_scope)
-    ready_sources = tuple((await db.execute(ready_source_stmt)).scalars().all())
+    source_ids = {
+        source_id for page in visible_pages for source_id in (page.source_ids or ())
+    }
+    if source_ids:
+        source_stmt = (
+            select(Source).where(Source.id.in_(source_ids)).order_by(Source.id)
+        )
+        if document_scope is not None:
+            source_stmt = source_stmt.where(document_scope)
+        visible_sources = tuple((await db.execute(source_stmt)).scalars().all())
+    else:
+        visible_sources = ()
 
     knowledge_type_ids = {
         source.knowledge_type_id
-        for source in ready_sources
+        for source in visible_sources
         if source.knowledge_type_id is not None
     }
     if knowledge_type_ids:
@@ -201,13 +205,11 @@ async def load_governance_knowledge_snapshot(
         )
     else:
         knowledge_types = ()
-    knowledge_type_slug_by_id: dict[object, str] = {
-        item.id: item.slug for item in knowledge_types
-    }
-    return build_substrate_snapshot(
-        visible_pages,
-        ready_sources,
-        knowledge_type_slug_by_id=knowledge_type_slug_by_id,
+    return await load_substrate_snapshot(
+        db,
+        visible_pages=visible_pages,
+        visible_sources=visible_sources,
+        visible_knowledge_types=knowledge_types,
     )
 
 
@@ -235,12 +237,7 @@ async def get_governance_read_snapshot(
     linked_pages: tuple[WikiPage, ...] = ()
     if error_sources:
         linked_page_stmt = select(WikiPage).where(
-            or_(
-                *(
-                    WikiPage.source_ids.any(source.id)  # pyright: ignore[reportArgumentType]
-                    for source in error_sources
-                )
-            )
+            or_(*(any_(WikiPage.source_ids) == source.id for source in error_sources))
         )
         if wiki_scope is not None:
             linked_page_stmt = linked_page_stmt.where(wiki_scope)

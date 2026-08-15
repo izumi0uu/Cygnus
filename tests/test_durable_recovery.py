@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 import uuid
 from unittest.mock import AsyncMock
 
@@ -45,8 +45,8 @@ class _RecoverySession:
         self,
         *,
         publication: object | None,
-        propagations: tuple[object, ...] = (),
-        signals: tuple[object, ...] = (),
+        propagations: tuple[SimpleNamespace, ...] = (),
+        signals: tuple[SimpleNamespace, ...] = (),
         page: object | None = None,
         actor: object | None = None,
         event: object | None = None,
@@ -215,16 +215,19 @@ def test_durable_recovery_uses_signal_snapshots_and_propagation_blockers() -> No
         ),
     )
 
-    surface = asyncio.run(
-        get_durable_recovery_window(
-            _session(
-                publication=publication,
-                propagations=propagations,
-                signals=signals,
-            ),
-            command_id=publication.command_id,
-        )
-    ).to_dict()
+    surface = cast(
+        dict[str, Any],
+        asyncio.run(
+            get_durable_recovery_window(
+                _session(
+                    publication=publication,
+                    propagations=propagations,
+                    signals=signals,
+                ),
+                command_id=publication.command_id,
+            )
+        ).to_dict(),
+    )
 
     assert surface["command_ref"]["issued_by"] == "Governance owner"
     assert surface["rewrite_delta"]["before_value"] == 1
@@ -246,16 +249,19 @@ def test_synced_propagation_and_zero_active_signals_can_close_without_fake_risk(
     published_at = datetime(2026, 8, 8, 12, 0, tzinfo=timezone.utc)
     publication = _publication(published_at)
 
-    surface = asyncio.run(
-        get_durable_recovery_window(
-            _session(
-                publication=publication,
-                propagations=(_propagation("synced", "copilot"),),
-                signals=(),
-            ),
-            command_id=publication.command_id,
-        )
-    ).to_dict()
+    surface = cast(
+        dict[str, Any],
+        asyncio.run(
+            get_durable_recovery_window(
+                _session(
+                    publication=publication,
+                    propagations=(_propagation("synced", "copilot"),),
+                    signals=(),
+                ),
+                command_id=publication.command_id,
+            )
+        ).to_dict(),
+    )
 
     assert surface["residual_risks"] == []
     assert surface["closure_judge"]["closeable"] is True
@@ -282,16 +288,19 @@ def test_durable_downstream_feedback_uses_only_post_publication_supported_signal
         observed_offset=-4,
     )
 
-    surface = asyncio.run(
-        get_durable_downstream_reality_check(
-            _session(
-                publication=publication,
-                propagations=(_propagation("synced", "macro"),),
-                signals=(pre_publish, feedback),
-            ),
-            command_id=publication.command_id,
-        )
-    ).to_dict()
+    surface = cast(
+        dict[str, Any],
+        asyncio.run(
+            get_durable_downstream_reality_check(
+                _session(
+                    publication=publication,
+                    propagations=(_propagation("synced", "macro"),),
+                    signals=(pre_publish, feedback),
+                ),
+                command_id=publication.command_id,
+            )
+        ).to_dict(),
+    )
 
     assert [item["signal_id"] for item in surface["feedback_feed"]] == [
         "rewrite-feedback"
@@ -370,16 +379,19 @@ def test_feedback_derived_signals_keep_exact_recovery_meaning() -> None:
         surface="review_queue",
     )
 
-    recovery = asyncio.run(
-        get_durable_recovery_window(
-            _session(
-                publication=publication,
-                propagations=(_propagation("synced", "copilot"),),
-                signals=(low_rating, stale_answer),
-            ),
-            command_id=publication.command_id,
-        )
-    ).to_dict()
+    recovery = cast(
+        dict[str, Any],
+        asyncio.run(
+            get_durable_recovery_window(
+                _session(
+                    publication=publication,
+                    propagations=(_propagation("synced", "copilot"),),
+                    signals=(low_rating, stale_answer),
+                ),
+                command_id=publication.command_id,
+            )
+        ).to_dict(),
+    )
     risks = {item["risk_id"]: item for item in recovery["residual_risks"]}
 
     assert recovery["escalation_delta"]["after_value"] == 1
@@ -459,12 +471,15 @@ def test_durable_overview_is_scoped_and_uses_persisted_recovery_windows() -> Non
     )
     session = cast(AsyncSession, cast(object, fake))
 
-    payload = asyncio.run(
-        get_durable_governance_overview(
-            session,
-            page_scope_clause=WikiPage.id.is_(None),
-        )
-    ).to_dict()
+    payload = cast(
+        dict[str, Any],
+        asyncio.run(
+            get_durable_governance_overview(
+                session,
+                page_scope_clause=WikiPage.id.is_(None),
+            )
+        ).to_dict(),
+    )
 
     statement = fake.execute.await_args_list[0].args[0]
     sql = str(
@@ -496,14 +511,17 @@ def test_recovery_overview_route_marks_durable_truth_not_rehearsal() -> None:
         event=SimpleNamespace(reason="Persisted publication reason"),
     )
 
-    payload = asyncio.run(
-        governance_overview(
-            current_user=cast(
-                Employee,
-                cast(object, SimpleNamespace(role="admin")),
-            ),
-            db=cast(AsyncSession, cast(object, fake)),
-        )
+    payload = cast(
+        dict[str, Any],
+        asyncio.run(
+            governance_overview(
+                current_user=cast(
+                    Employee,
+                    cast(object, SimpleNamespace(role="admin")),
+                ),
+                db=cast(AsyncSession, cast(object, fake)),
+            )
+        ),
     )
 
     assert payload["persisted"] is True

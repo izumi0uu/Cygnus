@@ -11,8 +11,12 @@ class WorkerJobRoutingRecoveryTests(unittest.TestCase):
     def test_post_extraction_routing_prefers_caption_before_map_reduce(self) -> None:
         from cygnus.runtime.worker import resolve_post_extraction_task
 
-        self.assertEqual(resolve_post_extraction_task(has_images=True), "caption_images_task")
-        self.assertEqual(resolve_post_extraction_task(has_images=False), "ingest_map_reduce_task")
+        self.assertEqual(
+            resolve_post_extraction_task(has_images=True), "caption_images_task"
+        )
+        self.assertEqual(
+            resolve_post_extraction_task(has_images=False), "ingest_map_reduce_task"
+        )
 
     def test_retry_routing_reenters_map_reduce_for_plan_ready_sources(self) -> None:
         from cygnus.runtime.worker import resolve_retry_task
@@ -66,21 +70,27 @@ class WorkerJobExecutionRecoveryTests(unittest.IsolatedAsyncioTestCase):
         import cygnus.runtime.worker as worker_module
 
         fake_pool = types.SimpleNamespace(
-            enqueue_job=AsyncMock(side_effect=[
-                types.SimpleNamespace(job_id="job-file"),
-                types.SimpleNamespace(job_id="job-url"),
-                types.SimpleNamespace(job_id="job-map"),
-                types.SimpleNamespace(job_id="job-refine"),
-                types.SimpleNamespace(job_id="job-regen"),
-            ])
+            enqueue_job=AsyncMock(
+                side_effect=[
+                    types.SimpleNamespace(job_id="job-file"),
+                    types.SimpleNamespace(job_id="job-url"),
+                    types.SimpleNamespace(job_id="job-map"),
+                    types.SimpleNamespace(job_id="job-refine"),
+                    types.SimpleNamespace(job_id="job-regen"),
+                ]
+            )
         )
 
-        with patch.object(worker_module, "get_arq_pool", AsyncMock(return_value=fake_pool)):
+        with patch.object(
+            worker_module, "get_arq_pool", AsyncMock(return_value=fake_pool)
+        ):
             file_job = await worker_module.enqueue_source_ingest_file("src-1")
             url_job = await worker_module.enqueue_source_ingest_url("src-2")
             map_job = await worker_module.enqueue_source_map_reduce("src-3")
             refine_job = await worker_module.enqueue_source_refine("src-4")
-            regen_job = await worker_module.enqueue_source_plan_regeneration("src-5", "note")
+            regen_job = await worker_module.enqueue_source_plan_regeneration(
+                "src-5", "note"
+            )
 
         self.assertEqual(file_job, "job-file")
         self.assertEqual(url_job, "job-url")
@@ -98,14 +108,20 @@ class WorkerJobExecutionRecoveryTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-    async def test_enqueue_post_extraction_pipeline_uses_worker_job_topology(self) -> None:
+    async def test_enqueue_post_extraction_pipeline_uses_worker_job_topology(
+        self,
+    ) -> None:
         import cygnus.runtime.worker as worker_module
 
         fake_pool = types.SimpleNamespace(
-            enqueue_job=AsyncMock(return_value=types.SimpleNamespace(job_id="job-55-caption"))
+            enqueue_job=AsyncMock(
+                return_value=types.SimpleNamespace(job_id="job-55-caption")
+            )
         )
 
-        with patch.object(worker_module, "get_arq_pool", AsyncMock(return_value=fake_pool)):
+        with patch.object(
+            worker_module, "get_arq_pool", AsyncMock(return_value=fake_pool)
+        ):
             job_id = await worker_module.enqueue_post_extraction_pipeline(
                 "src-55",
                 has_images=True,
@@ -118,10 +134,14 @@ class WorkerJobExecutionRecoveryTests(unittest.IsolatedAsyncioTestCase):
         import cygnus.runtime.worker as worker_module
 
         fake_pool = types.SimpleNamespace(
-            enqueue_job=AsyncMock(return_value=types.SimpleNamespace(job_id="job-88-retry"))
+            enqueue_job=AsyncMock(
+                return_value=types.SimpleNamespace(job_id="job-88-retry")
+            )
         )
 
-        with patch.object(worker_module, "get_arq_pool", AsyncMock(return_value=fake_pool)):
+        with patch.object(
+            worker_module, "get_arq_pool", AsyncMock(return_value=fake_pool)
+        ):
             job_id, task_name = await worker_module.enqueue_source_retry(
                 "src-88",
                 source_type="url",
@@ -133,7 +153,9 @@ class WorkerJobExecutionRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(job_id, "job-88-retry")
         self.assertEqual(task_name, "ingest_url_task")
 
-    async def test_auto_trigger_refine_promotes_plan_and_enqueues_resume_job(self) -> None:
+    async def test_auto_trigger_refine_promotes_plan_and_enqueues_resume_job(
+        self,
+    ) -> None:
         import cygnus.runtime.ai.mrp.pipeline as pipeline_module
         from cygnus.runtime.database.models import Source, SourceCompilationPlan
 
@@ -177,12 +199,18 @@ class WorkerJobExecutionRecoveryTests(unittest.IsolatedAsyncioTestCase):
                 return _SessionScope(_FakeSession())
 
         fake_pool = types.SimpleNamespace(
-            enqueue_job=AsyncMock(return_value=types.SimpleNamespace(job_id="job-55-refine"))
+            enqueue_job=AsyncMock(
+                return_value=types.SimpleNamespace(job_id="job-55-refine")
+            )
         )
 
         with (
-            patch("cygnus.runtime.database.async_session_factory", new=_SessionFactory()),
-            patch("cygnus.runtime.worker.get_arq_pool", AsyncMock(return_value=fake_pool)),
+            patch(
+                "cygnus.runtime.database.async_session_factory", new=_SessionFactory()
+            ),
+            patch(
+                "cygnus.runtime.worker.get_arq_pool", AsyncMock(return_value=fake_pool)
+            ),
         ):
             result = await pipeline_module._auto_trigger_refine(
                 source_id,
@@ -193,8 +221,12 @@ class WorkerJobExecutionRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(plan_row.review_note, "Auto-approved")
         self.assertIsNotNone(plan_row.reviewed_at)
         self.assertEqual(source_row.status, "processing")
-        self.assertEqual(source_row.progress_message, "Plan approved — compiling wiki pages...")
-        fake_pool.enqueue_job.assert_awaited_once_with("ingest_refine_task", str(source_id))
+        self.assertEqual(
+            source_row.progress_message, "Plan approved — compiling wiki pages..."
+        )
+        fake_pool.enqueue_job.assert_awaited_once_with(
+            "ingest_refine_task", str(source_id)
+        )
         self.assertEqual(
             result,
             {"status": "plan_auto_approved", "job_id": "job-55-refine"},

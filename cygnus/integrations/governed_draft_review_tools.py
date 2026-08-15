@@ -17,6 +17,13 @@ from cygnus.governance.ledger import (
     governance_state_for_draft_status,
     list_draft_events,
 )
+from cygnus.governance.tool_command_receipts import (
+    ToolCommandReceiptConflict,
+    ToolCommandReceiptWrite,
+    create_tool_command_receipt,
+    replay_tool_command_receipt,
+    tool_command_request_fingerprint,
+)
 from cygnus.retrieval import slugify
 from cygnus.review.contributions import (
     DraftVersionConflict,
@@ -96,15 +103,23 @@ class GovernedDraftReviewTools:
     async def propose_knowledge_object(
         self,
         *,
+        command_id: str,
         proposed_object_type: str,
         title: str,
         input_summary: str,
         audience_context: dict[str, Any],
+        scope_type: str | None = None,
+        scope_id: str | None = None,
         source_refs: list[dict[str, Any]] | None = None,
         evidence_refs: list[dict[str, Any]] | None = None,
         ticket_cluster_ref: str | None = None,
     ) -> dict[str, Any]:
-        """Persist an unsubmitted, typed knowledge-object draft."""
+        """Persist one scoped, unsubmitted typed knowledge-object draft.
+
+        A contributor limited to ``wiki:write:own_dept`` can never silently
+        create global content. Its target scope must be explicit and permitted
+        or be derived from a homogeneous set of current visible sources.
+        """
         if not self._can_create_draft():
             return _error(
                 "denied",
@@ -112,6 +127,9 @@ class GovernedDraftReviewTools:
                 "permission_denied",
             )
         try:
+            normalized_command_id = _required_string(
+                command_id, label="command_id", max_length=220
+            )
             object_type, inferred = _normalize_object_type(proposed_object_type)
             normalized_title = _required_string(title, label="title", max_length=500)
             normalized_summary = _required_string(
@@ -123,6 +141,9 @@ class GovernedDraftReviewTools:
                 normalized_title, normalized_summary
             )
             normalized_audience = _normalize_audience_context(audience_context)
+            normalized_requested_scope = _normalize_requested_scope(
+                scope_type, scope_id
+            )
             normalized_source_refs = _normalize_source_refs(source_refs or [])
             normalized_evidence_refs = _normalize_evidence_refs(evidence_refs or [])
             normalized_ticket_cluster_ref = _optional_string(
@@ -133,6 +154,46 @@ class GovernedDraftReviewTools:
         except ValueError as exc:
             return _error("invalid", str(exc), "invalid_arguments")
 
+        requested_scope_type = (
+            normalized_requested_scope[0]
+            if normalized_requested_scope is not None
+            else None
+        )
+        requested_scope_id = (
+            normalized_requested_scope[1]
+            if normalized_requested_scope is not None
+            else None
+        )
+        normalized_arguments = {
+            "proposed_object_type": object_type,
+            "title": normalized_title,
+            "input_summary": normalized_summary,
+            "audience_context": normalized_audience,
+            "scope_type": requested_scope_type,
+            "scope_id": requested_scope_id,
+            "source_refs": normalized_source_refs,
+            "evidence_refs": normalized_evidence_refs,
+            "ticket_cluster_ref": normalized_ticket_cluster_ref,
+        }
+        request_fingerprint = tool_command_request_fingerprint(
+            actor_id=self._actor.id,
+            tool_name="propose_knowledge_object",
+            command_id=normalized_command_id,
+            normalized_arguments=normalized_arguments,
+        )
+        try:
+            replay = await replay_tool_command_receipt(
+                self._session,
+                actor_id=self._actor.id,
+                tool_name="propose_knowledge_object",
+                command_id=normalized_command_id,
+                request_fingerprint=request_fingerprint,
+            )
+        except ToolCommandReceiptConflict:
+            return _receipt_conflict()
+        if replay is not None:
+            return _replayed_result(replay)
+
         source_ids = _linked_source_ids(
             normalized_source_refs,
             normalized_evidence_refs,
@@ -140,6 +201,14 @@ class GovernedDraftReviewTools:
         source_rows = await self._visible_sources(source_ids)
         if source_rows is None:
             return _unavailable_resource()
+        try:
+            target_scope_type, target_scope_id = _resolve_proposal_scope(
+                actor=self._actor,
+                requested_scope=normalized_requested_scope,
+                source_rows=source_rows.values(),
+            )
+        except ValueError as exc:
+            return _error("invalid", str(exc), "invalid_arguments")
 
         warnings, completeness = _draft_completeness(
             source_refs=normalized_source_refs,
@@ -151,8 +220,8 @@ class GovernedDraftReviewTools:
             "title": normalized_title,
             "page_type": "concept",
             "knowledge_type_slugs": [object_type],
-            "scope_type": "global",
-            "scope_id": None,
+            "scope_type": target_scope_type,
+            "scope_id": target_scope_id,
         }
         source_metadata = {
             "origin": "nanobot_session",
@@ -183,7 +252,7 @@ class GovernedDraftReviewTools:
             str(draft.id),
             reason=f"governed_session_proposal:{object_type}",
         )
-        return {
+        result = {
             "status": "success",
             "summary": "Durable knowledge-object draft created.",
             "data": {
@@ -204,16 +273,30 @@ class GovernedDraftReviewTools:
             "warnings": warnings,
             "errors": [],
         }
+        receipt_write = await create_tool_command_receipt(
+            self._session,
+            actor_id=self._actor.id,
+            tool_name="propose_knowledge_object",
+            command_id=normalized_command_id,
+            request_fingerprint=request_fingerprint,
+            result_payload=result,
+        )
+        result["receipt_ref"] = receipt_write.receipt_ref
+        return result
 
     async def update_draft_object(
         self,
         *,
+        command_id: str,
         draft_id: str,
         expected_version: int,
         patch: dict[str, Any],
     ) -> dict[str, Any]:
         """Apply one version-protected mutation to an authored durable draft."""
         try:
+            normalized_command_id = _required_string(
+                command_id, label="command_id", max_length=220
+            )
             parsed_draft_id = _parse_uuid(draft_id, label="draft_id")
             normalized_expected_version = _positive_int(
                 expected_version,
@@ -222,6 +305,30 @@ class GovernedDraftReviewTools:
             normalized_patch = _normalize_patch(patch)
         except ValueError as exc:
             return _error("invalid", str(exc), "invalid_arguments")
+
+        normalized_arguments = {
+            "draft_id": str(parsed_draft_id),
+            "expected_version": normalized_expected_version,
+            "patch": normalized_patch,
+        }
+        request_fingerprint = tool_command_request_fingerprint(
+            actor_id=self._actor.id,
+            tool_name="update_draft_object",
+            command_id=normalized_command_id,
+            normalized_arguments=normalized_arguments,
+        )
+        try:
+            replay = await replay_tool_command_receipt(
+                self._session,
+                actor_id=self._actor.id,
+                tool_name="update_draft_object",
+                command_id=normalized_command_id,
+                request_fingerprint=request_fingerprint,
+            )
+        except ToolCommandReceiptConflict:
+            return _receipt_conflict()
+        if replay is not None:
+            return _replayed_result(replay)
 
         draft = await self._scoped_draft(parsed_draft_id, action="write")
         if draft is None:
@@ -259,7 +366,7 @@ class GovernedDraftReviewTools:
             return _error("invalid", str(exc), "invalid_arguments")
 
         changed_fields = sorted(normalized_patch)
-        return {
+        result = {
             "status": "success",
             "summary": (
                 "Draft update replayed without a new version."
@@ -278,6 +385,16 @@ class GovernedDraftReviewTools:
             "warnings": _draft_warnings(draft),
             "errors": [],
         }
+        receipt_write = await create_tool_command_receipt(
+            self._session,
+            actor_id=self._actor.id,
+            tool_name="update_draft_object",
+            command_id=normalized_command_id,
+            request_fingerprint=request_fingerprint,
+            result_payload=result,
+        )
+        result["receipt_ref"] = receipt_write.receipt_ref
+        return result
 
     async def request_review(
         self,
@@ -442,7 +559,18 @@ class GovernedDraftReviewTools:
         if draft is None:
             return None
         source_ids = _draft_scope_source_ids(draft.source_metadata)
-        if source_ids is None or await self._visible_sources(source_ids) is None:
+        if source_ids is None:
+            return None
+        source_rows = await self._visible_sources(source_ids)
+        if source_rows is None:
+            return None
+        try:
+            _resolve_proposal_scope(
+                actor=self._actor,
+                requested_scope=_scope_from_draft(draft),
+                source_rows=source_rows.values(),
+            )
+        except ValueError:
             return None
         return draft
 
@@ -453,7 +581,11 @@ class GovernedDraftReviewTools:
         unique_ids = tuple(dict.fromkeys(source_ids))
         if not unique_ids:
             return {}
-        statement = select(Source).where(Source.id.in_(unique_ids))
+        statement = (
+            select(Source)
+            .where(Source.id.in_(unique_ids))
+            .options(selectinload(Source.departments))
+        )
         scope_clause = build_document_scope_clause(self._actor)
         if scope_clause is not None:
             statement = statement.where(scope_clause)
@@ -504,8 +636,14 @@ class GovernedDraftReviewTools:
             source_ids = _linked_source_ids(
                 existing_source_refs, normalized_evidence_refs
             )
-            if await self._visible_sources(source_ids) is None:
+            source_rows = await self._visible_sources(source_ids)
+            if source_rows is None:
                 raise _ScopedResourceNotFound()
+            _resolve_proposal_scope(
+                actor=self._actor,
+                requested_scope=_scope_from_draft(draft),
+                source_rows=source_rows.values(),
+            )
             if source_metadata is None:
                 source_metadata = dict(draft.source_metadata or {})
             source_metadata["evidence_refs"] = normalized_evidence_refs
@@ -743,6 +881,105 @@ def _stored_source_refs(
     ]
 
 
+_ProposalScope = tuple[str, str | None]
+
+
+def _normalize_requested_scope(
+    scope_type: object,
+    scope_id: object,
+) -> _ProposalScope | None:
+    """Normalize one explicit proposal target, or ``None`` when omitted."""
+    if scope_type is None and scope_id is None:
+        return None
+    if not isinstance(scope_type, str):
+        raise ValueError("scope_type is required when scope_id is provided")
+    normalized_type = scope_type.strip()
+    if normalized_type == "global":
+        if scope_id is not None:
+            raise ValueError("global scope must not include scope_id")
+        return ("global", None)
+    if normalized_type != "department":
+        raise ValueError("scope_type must be global or department")
+    if isinstance(scope_id, uuid.UUID):
+        parsed_scope_id = scope_id
+    else:
+        parsed_scope_id = _parse_uuid(scope_id, label="scope_id")
+    return ("department", str(parsed_scope_id))
+
+
+def _scope_from_source(source: Source) -> _ProposalScope:
+    """Return source scope only when explicit scope and department links agree."""
+    scope_type = getattr(source, "scope_type", None)
+    scope_id = getattr(source, "scope_id", None)
+    if scope_type == "global":
+        if scope_id is not None or tuple(getattr(source, "departments", ())):
+            raise ValueError("referenced source has inconsistent global scope")
+        return ("global", None)
+    if scope_type != "department":
+        raise ValueError("referenced source has unsupported scope")
+    if isinstance(scope_id, uuid.UUID):
+        parsed_scope_id = scope_id
+    else:
+        parsed_scope_id = _parse_uuid(scope_id, label="referenced source scope_id")
+    declared_department_id = str(parsed_scope_id)
+    department_links = tuple(getattr(source, "departments", ()))
+    if not any(
+        str(getattr(link, "department_id", "")) == declared_department_id
+        for link in department_links
+    ):
+        raise ValueError("referenced source has malformed department scope")
+    return ("department", declared_department_id)
+
+
+def _resolve_proposal_scope(
+    *,
+    actor: Employee,
+    requested_scope: _ProposalScope | None,
+    source_rows: Iterable[Source],
+) -> _ProposalScope:
+    """Resolve one target scope from explicit request and current source truth."""
+    source_scopes = {_scope_from_source(source) for source in source_rows}
+    if len(source_scopes) > 1:
+        raise ValueError("referenced sources do not share one governed scope")
+    derived_scope = next(iter(source_scopes), None)
+    if (
+        requested_scope is not None
+        and derived_scope is not None
+        and requested_scope != derived_scope
+    ):
+        raise ValueError("requested scope conflicts with referenced source scope")
+    target_scope = requested_scope or derived_scope or ("global", None)
+
+    permissions = get_effective_permissions(actor)
+    can_write_all = actor.role == "admin" or "wiki:write:all" in permissions
+    if can_write_all:
+        return target_scope
+
+    actor_department_ids = {
+        str(department_id) for department_id in actor.department_ids
+    }
+    if target_scope[0] != "department" or target_scope[1] not in actor_department_ids:
+        raise ValueError(
+            "current actor may create governed drafts only in one of their departments"
+        )
+    return target_scope
+
+
+def _scope_from_draft(draft: WikiPageDraft) -> _ProposalScope | None:
+    page = getattr(draft, "page", None)
+    if page is not None:
+        return _normalize_requested_scope(
+            getattr(page, "scope_type", None),
+            getattr(page, "scope_id", None),
+        )
+    metadata = getattr(draft, "suggested_metadata", None)
+    if not isinstance(metadata, dict):
+        return None
+    return _normalize_requested_scope(
+        metadata.get("scope_type"), metadata.get("scope_id")
+    )
+
+
 def _linked_source_ids(
     source_refs: Iterable[Mapping[str, object]],
     evidence_refs: Iterable[Mapping[str, object]],
@@ -895,6 +1132,24 @@ def _unavailable_resource() -> dict[str, Any]:
     )
 
 
+def _receipt_conflict() -> dict[str, Any]:
+    return _error(
+        "conflict",
+        "Command ID is already bound to different actor-bound input.",
+        "idempotency_conflict",
+    )
+
+
+def _replayed_result(
+    replay: ToolCommandReceiptWrite,
+) -> dict[str, Any]:
+    """Return the stored result verbatim with replay identity fields."""
+    payload = dict(replay.receipt.result_payload)
+    payload["replayed"] = True
+    payload["receipt_ref"] = replay.receipt_ref
+    return payload
+
+
 _DRAFT_REVIEW_TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         name="propose_knowledge_object",
@@ -903,6 +1158,11 @@ _DRAFT_REVIEW_TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
             "type": "object",
             "additionalProperties": False,
             "properties": {
+                "command_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 220,
+                },
                 "proposed_object_type": {
                     "type": "string",
                     "enum": [*sorted(_OBJECT_TYPE_VALUES), "auto"],
@@ -914,11 +1174,14 @@ _DRAFT_REVIEW_TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
                     "maxLength": 50_000,
                 },
                 "audience_context": {"type": "object"},
+                "scope_type": {"type": "string", "enum": ["global", "department"]},
+                "scope_id": {"type": "string", "format": "uuid"},
                 "source_refs": {"type": "array", "items": {"type": "object"}},
                 "evidence_refs": {"type": "array", "items": {"type": "object"}},
                 "ticket_cluster_ref": {"type": "string", "maxLength": 500},
             },
             "required": [
+                "command_id",
                 "proposed_object_type",
                 "title",
                 "input_summary",
@@ -934,6 +1197,11 @@ _DRAFT_REVIEW_TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
             "type": "object",
             "additionalProperties": False,
             "properties": {
+                "command_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 220,
+                },
                 "draft_id": {"type": "string", "format": "uuid"},
                 "expected_version": {"type": "integer", "minimum": 1},
                 "patch": {
@@ -958,7 +1226,7 @@ _DRAFT_REVIEW_TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
                     "minProperties": 1,
                 },
             },
-            "required": ["draft_id", "expected_version", "patch"],
+            "required": ["command_id", "draft_id", "expected_version", "patch"],
         },
         risk_level="R1",
     ),

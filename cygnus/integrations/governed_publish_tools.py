@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.domain import AudienceContext
+from cygnus.evidence.freshness import freshness_gate
 from cygnus.governance import (
     AudienceBindingLifecycle,
     GovernanceEventType,
@@ -77,6 +78,10 @@ class GovernedPublishTools:
         *,
         draft_id: str,
         approval_ref: str,
+        approval_digest: str,
+        scope_digest: str,
+        signal_id: str,
+        signal_freshness: str,
         command_id: str,
         action_key: str,
         target_channels: list[str],
@@ -95,6 +100,10 @@ class GovernedPublishTools:
             command = DurablePublishCommand(
                 draft_id=_parse_uuid(draft_id, label="draft_id"),
                 approval_ref=_parse_uuid(approval_ref, label="approval_ref"),
+                approval_digest=approval_digest,
+                scope_digest=scope_digest,
+                signal_id=_parse_uuid(signal_id, label="signal_id"),
+                signal_freshness=signal_freshness,
                 command_id=command_id,
                 action_key=action_key,
                 target_channels=tuple(target_channels),
@@ -328,13 +337,15 @@ class GovernedPublishTools:
                 data=common_data,
             )
         source_rows = (
-            await self._session.execute(
-                select(Source.id, Source.status).where(Source.id.in_(source_ids))
+            (
+                await self._session.execute(
+                    select(Source).where(Source.id.in_(source_ids))
+                )
             )
-        ).all()
-        source_state = {
-            source_id: source_status for source_id, source_status in source_rows
-        }
+            .scalars()
+            .all()
+        )
+        source_state = {source.id: source.status for source in source_rows}
         if any(source_state.get(source_id) != "ready" for source_id in source_ids):
             checks.append(
                 _policy_check(
@@ -354,6 +365,30 @@ class GovernedPublishTools:
                 "source_readiness",
                 "pass",
                 "Every linked source exists and is ready.",
+            )
+        )
+
+        freshness_gate_result = freshness_gate(source_rows)
+        if not freshness_gate_result.passed:
+            checks.append(
+                _policy_check(
+                    "source_freshness",
+                    "fail",
+                    "Every linked source must carry an explicit, unexpired FRESH "
+                    "attestation.",
+                )
+            )
+            return _error(
+                status="denied",
+                summary="Publish policy rejected the object's source freshness.",
+                code="source_freshness_required",
+                data=common_data,
+            )
+        checks.append(
+            _policy_check(
+                "source_freshness",
+                "pass",
+                "Every linked source carries an explicit, unexpired FRESH attestation.",
             )
         )
 
@@ -483,6 +518,19 @@ def publish_tool_definitions() -> tuple[ToolDefinition, ...]:
                 "properties": {
                     "draft_id": {"type": "string", "format": "uuid"},
                     "approval_ref": {"type": "string", "format": "uuid"},
+                    "approval_digest": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$",
+                    },
+                    "scope_digest": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$",
+                    },
+                    "signal_id": {"type": "string", "format": "uuid"},
+                    "signal_freshness": {
+                        "type": "string",
+                        "enum": ["fresh", "stale", "unknown"],
+                    },
                     "command_id": {"type": "string"},
                     "action_key": {
                         "type": "string",
@@ -505,6 +553,10 @@ def publish_tool_definitions() -> tuple[ToolDefinition, ...]:
                 "required": [
                     "draft_id",
                     "approval_ref",
+                    "approval_digest",
+                    "scope_digest",
+                    "signal_id",
+                    "signal_freshness",
                     "command_id",
                     "action_key",
                     "target_channels",

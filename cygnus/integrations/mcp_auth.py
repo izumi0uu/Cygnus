@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from loguru import logger
-from sqlalchemy import exists, or_, select, update
+from sqlalchemy import CursorResult, and_, exists, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -46,9 +46,36 @@ def hash_token(token: str) -> str:
     ).hexdigest()
 
 
+def parse_bearer_token(authorization: Optional[str]) -> Optional[str]:
+    """Extract the token from an Authorization header value.
+
+    Shared, case-insensitive Bearer credential parser. Every bearer consumer —
+    the /mcp HTTP gate (cygnus/runtime/main.py) and the MCP tool auth path
+    (cygnus/runtime/mcp/tools.py) — uses this one function so they agree on
+    what a valid credential looks like.
+
+    Accepts any scheme casing: ``Bearer <token>``, ``bearer <token>``,
+    ``BEARER <token>``.
+
+    Returns None for every malformed or non-Bearer form uniformly: missing or
+    empty header, a bare scheme with no token, extra whitespace-separated
+    parts (``Bearer a b``), or another scheme (``Basic ...``, ``Digest ...``).
+    """
+    if not authorization:
+        return None
+    parts = authorization.split()
+    if len(parts) != 2:
+        return None
+    scheme, token = parts
+    if scheme.lower() != "bearer":
+        return None
+    return token
+
+
 @dataclass
 class ResolvedIdentity:
     """The authenticated employee context, passed to MCP tools."""
+
     employee_id: uuid.UUID
     employee_name: str
     # All departments the employee belongs to. May be empty — in which case the
@@ -57,9 +84,16 @@ class ResolvedIdentity:
     department_ids: list[uuid.UUID] = field(default_factory=list)
     department_names: list[str] = field(default_factory=list)
     allowed_knowledge_types: Optional[list[str]] = None  # None = all
-    allowed_source_ids: Optional[list[str]] = None       # None = all
+    allowed_source_ids: Optional[list[str]] = None  # None = all
     is_admin: bool = False
     permissions: list[str] = field(default_factory=list)
+    # Project/workspace memberships for the legacy wiki read surface. No
+    # membership source exists yet, so _resolve_scope never populates it;
+    # declared so legacy handlers degrade to an empty scope instead of
+    # raising AttributeError on an undeclared identity field. The governed
+    # session profile denies these tools at dispatch, so this only matters
+    # if a handler is invoked outside /mcp.
+    project_ids: list[str] = field(default_factory=list)
 
     # ------------------------------------------------------------------ #
     # Predicate helpers — used by MCP tool-visibility middleware so the   #
@@ -190,37 +224,59 @@ class MCPAuthService:
         )
 
     async def _get_department_source_ids(
-        self, department_ids: list[uuid.UUID],
+        self,
+        department_ids: list[uuid.UUID],
     ) -> list[str]:
-        """Get IDs of sources that are global (no departments) or in any of the
-        given departments. Empty `department_ids` returns only global sources.
+        """Resolve only well-formed global or linked department sources.
+
+        A department-scoped legacy source without a link for its declared
+        ``scope_id`` is malformed and must not be reclassified as global or
+        exposed through another department link.
         """
-        # Sources with no department entries (global)
-        global_stmt = (
-            select(Source.id)
-            .where(
-                ~exists(
-                    select(SourceDepartment.source_id)
-                    .where(SourceDepartment.source_id == Source.id)
-                )
+        has_department_links = exists(
+            select(SourceDepartment.source_id).where(
+                SourceDepartment.source_id == Source.id
             )
         )
+        global_stmt = select(Source.id).where(
+            Source.scope_type == "global",
+            Source.scope_id.is_(None),
+            ~has_department_links,
+        )
         global_result = await self.db.execute(global_stmt)
-        global_ids = [str(r[0]) for r in global_result.all()]
+        global_ids = [str(row[0]) for row in global_result.all()]
 
         if not department_ids:
             return global_ids
 
-        # Sources in any of these departments
-        dept_stmt = (
-            select(SourceDepartment.source_id)
-            .where(SourceDepartment.department_id.in_(department_ids))
-            .distinct()
+        declared_department_link = exists(
+            select(SourceDepartment.source_id).where(
+                SourceDepartment.source_id == Source.id,
+                SourceDepartment.department_id == Source.scope_id,
+            )
         )
-        dept_result = await self.db.execute(dept_stmt)
-        dept_ids = [str(r[0]) for r in dept_result.all()]
-
-        return global_ids + dept_ids
+        valid_scope = or_(
+            and_(
+                Source.scope_type == "global",
+                Source.scope_id.is_(None),
+            ),
+            and_(
+                Source.scope_type == "department",
+                declared_department_link,
+            ),
+        )
+        department_stmt = select(Source.id).where(
+            valid_scope,
+            exists(
+                select(SourceDepartment.source_id).where(
+                    SourceDepartment.source_id == Source.id,
+                    SourceDepartment.department_id.in_(department_ids),
+                )
+            ),
+        )
+        department_result = await self.db.execute(department_stmt)
+        department_source_ids = [str(row[0]) for row in department_result.all()]
+        return list(dict.fromkeys((*global_ids, *department_source_ids)))
 
     # --- Token Management ---
 
@@ -262,41 +318,60 @@ class MCPAuthService:
         )
         result = await self.db.execute(stmt)
         await self.db.flush()
-        return (result.rowcount or 0) > 0  # type: ignore[union-attr]
+        if isinstance(result, CursorResult):
+            return (result.rowcount or 0) > 0
+        return False
 
 
 def apply_scope_filter(query, identity: ResolvedIdentity):
-    """
-    Apply knowledge scope filters to a SQLAlchemy query on the Source table.
+    """Apply explicit grants while failing closed for malformed source scope.
 
-    Sources are accessible when any of these conditions is true:
-      1. No scope restrictions defined (open access)
-      2. Source ID is in allowed_source_ids (explicit grant)
-      3. Source knowledge_type is in allowed_knowledge_types (type-based grant)
-
-    Usage:
-        stmt = select(Source).where(Source.status == "ready")
-        stmt = apply_scope_filter(stmt, identity)
+    Every non-admin reader excludes department-scoped sources lacking the
+    required declared-department link. This applies even when the identity has
+    an otherwise broad knowledge-type grant, so malformed rows cannot escape
+    through an alternate MCP read path.
     """
+    if not identity.is_admin:
+        declared_department_link = exists(
+            select(SourceDepartment.source_id).where(
+                SourceDepartment.source_id == Source.id,
+                SourceDepartment.department_id == Source.scope_id,
+            )
+        )
+        query = query.where(
+            or_(
+                and_(
+                    Source.scope_type == "global",
+                    Source.scope_id.is_(None),
+                ),
+                and_(
+                    Source.scope_type == "department",
+                    declared_department_link,
+                ),
+            )
+        )
+
     if identity.allowed_source_ids is None and identity.allowed_knowledge_types is None:
-        # Open access
         return query
 
     conditions = []
-
     if identity.allowed_source_ids is not None:
-        conditions.append(Source.id.in_([uuid.UUID(s) for s in identity.allowed_source_ids]))
+        conditions.append(
+            Source.id.in_(
+                [uuid.UUID(source_id) for source_id in identity.allowed_source_ids]
+            )
+        )
 
     if identity.allowed_knowledge_types is not None:
         from sqlalchemy import select as sa_select
 
         from cygnus.runtime.database.models import KnowledgeType
-        kt_subq = sa_select(KnowledgeType.id).where(
+
+        knowledge_type_ids = sa_select(KnowledgeType.id).where(
             KnowledgeType.slug.in_(identity.allowed_knowledge_types)
         )
-        conditions.append(Source.knowledge_type_id.in_(kt_subq))
+        conditions.append(Source.knowledge_type_id.in_(knowledge_type_ids))
 
     if conditions:
         query = query.where(or_(*conditions))
-
     return query

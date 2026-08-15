@@ -32,6 +32,7 @@ from cygnus.runtime.database.models import Source, WikiPage
 
 def _page(**overrides: object) -> WikiPage:
     defaults = dict(
+        id=uuid.uuid4(),
         slug="refund-policy",
         title="Refund policy",
         status="mature",
@@ -78,9 +79,10 @@ class ResolveObjectTypeTests(unittest.TestCase):
 
 class WikiPageMappingTests(unittest.TestCase):
     def test_answer_card_projection(self) -> None:
-        object_ = wiki_page_to_knowledge_object(_page(), evidence_ids=("ev-src-x",))
+        page = _page()
+        object_ = wiki_page_to_knowledge_object(page, evidence_ids=("ev-src-x",))
         assert isinstance(object_, AnswerCard)
-        self.assertEqual(object_.object_id, "ko-refund-policy")
+        self.assertEqual(object_.object_id, f"ko-page-{page.id}")
         self.assertEqual(object_.title, "Refund policy")
         self.assertIs(object_.lifecycle_state, LifecycleState.PUBLISHED)
         self.assertEqual(object_.evidence_ids, ("ev-src-x",))
@@ -88,6 +90,12 @@ class WikiPageMappingTests(unittest.TestCase):
         self.assertIn("answer_card", object_.tags)
         self.assertEqual(len(object_.supported_audiences), 1)
         self.assertEqual(object_.supported_audiences[0].visibility.value, "internal")
+
+    def test_page_projection_rejects_non_uuid_identity(self) -> None:
+        with self.assertRaisesRegex(
+            TypeError, "governed object identity requires a WikiPage UUID"
+        ):
+            wiki_page_to_knowledge_object(_page(id="refund-policy"))
 
     def test_seed_and_developing_pages_stay_draft(self) -> None:
         for status in ("seed", "developing", None):
@@ -200,17 +208,23 @@ class SnapshotBuildTests(unittest.TestCase):
         self.assertEqual(len(snapshot.objects), 1)
         self.assertEqual(snapshot.objects[0].evidence_ids, (f"ev-src-{ready.id}",))
 
-    def test_snapshot_skips_reserved_orphaned_and_source_pages(self) -> None:
+    def test_snapshot_skips_reserved_orphaned_source_and_draft_pages(
+        self,
+    ) -> None:
         pages = [
             _page(slug="_index"),
             _page(slug="_log"),
             _page(slug="source/billing-sop"),
             _page(slug="orphan", orphaned=True),
             _page(slug="non-support", knowledge_type_slugs=["sop"]),
+            _page(slug="draft", status="developing"),
             _page(slug="kept"),
         ]
         snapshot = build_substrate_snapshot(pages, [])
-        self.assertEqual([obj.object_id for obj in snapshot.objects], ["ko-kept"])
+        self.assertEqual(
+            [obj.object_id for obj in snapshot.objects],
+            [f"ko-page-{pages[-1].id}"],
+        )
 
     def test_snapshot_maps_evidence_type_via_knowledge_type_lookup(self) -> None:
         kt_id = uuid.uuid4()

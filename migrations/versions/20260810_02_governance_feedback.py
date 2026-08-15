@@ -121,12 +121,8 @@ def upgrade() -> None:
             "AND char_length(notes) BETWEEN 1 AND 10000)",
             name="ck_governance_feedback_signals_notes",
         ),
-        sa.ForeignKeyConstraint(
-            ["actor_id"], ["employees.id"], ondelete="RESTRICT"
-        ),
-        sa.ForeignKeyConstraint(
-            ["page_id"], ["wiki_pages.id"], ondelete="RESTRICT"
-        ),
+        sa.ForeignKeyConstraint(["actor_id"], ["employees.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["page_id"], ["wiki_pages.id"], ondelete="RESTRICT"),
         sa.ForeignKeyConstraint(
             ["draft_id"], ["wiki_page_drafts.id"], ondelete="RESTRICT"
         ),

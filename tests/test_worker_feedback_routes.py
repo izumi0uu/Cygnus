@@ -43,6 +43,13 @@ class _SessionScope:
         return False
 
 
+class _HeartbeatRedis:
+    """Minimal Redis fake so WorkerSettings.on_startup can publish heartbeats."""
+
+    async def set(self, *_args, **_kwargs) -> None:
+        return None
+
+
 class _SessionFactory:
     def __init__(self, sessions: list[_Session]) -> None:
         self._sessions = iter(sessions)
@@ -400,7 +407,7 @@ class FeedbackRouteWorkerWiringTests(unittest.IsolatedAsyncioTestCase):
             patch.object(worker_module, "drain_feedback_routes", route_drain),
         ):
             await worker_module.sweep_feedback_routes_cron({})
-            await worker_module.WorkerSettings.on_startup({})
+            await worker_module.WorkerSettings.on_startup({"redis": _HeartbeatRedis()})
 
         self.assertEqual(route_drain.await_count, 2)
         pre_review_sweep.assert_awaited_once()
@@ -431,7 +438,7 @@ class FeedbackRouteWorkerWiringTests(unittest.IsolatedAsyncioTestCase):
             ),
             patch.object(worker_module, "drain_feedback_routes", route_drain),
         ):
-            await worker_module.WorkerSettings.on_startup({})
+            await worker_module.WorkerSettings.on_startup({"redis": _HeartbeatRedis()})
 
         pre_review_sweep.assert_awaited_once()
         route_drain.assert_awaited_once()
@@ -450,7 +457,7 @@ class FeedbackRouteWorkerWiringTests(unittest.IsolatedAsyncioTestCase):
             ),
             patch.object(worker_module, "drain_feedback_routes", route_drain),
         ):
-            await worker_module.WorkerSettings.on_startup({})
+            await worker_module.WorkerSettings.on_startup({"redis": _HeartbeatRedis()})
 
         pre_review_sweep.assert_awaited_once()
         route_drain.assert_awaited_once()

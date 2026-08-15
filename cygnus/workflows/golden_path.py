@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Iterable
 
 from cygnus.substrate.pipeline_checkpoint import PipelineCheckpoint
 from cygnus.substrate.pipeline_phases import PipelinePhase
@@ -114,15 +115,25 @@ class GoldenPathCheckpoint:
 
     @classmethod
     def from_dict(cls, payload: dict[str, object]) -> GoldenPathCheckpoint:
+        raw_completed_stages = payload.get("completed_stages", ())
+        if not isinstance(raw_completed_stages, Iterable):
+            raise ValueError("completed_stages must be a sequence of stage names")
         return cls(
             workflow_id=str(payload["workflow_id"]),
             current_stage=GoldenPathStage(str(payload["current_stage"])),
             completed_stages=tuple(
-                GoldenPathStage(str(stage))
-                for stage in payload.get("completed_stages", ())
+                GoldenPathStage(str(stage)) for stage in raw_completed_stages
             ),
             is_complete=bool(payload.get("is_complete", False)),
         )
+
+
+def _optional_ref(value: object, *, label: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be a string when present")
+    return value
 
 
 @dataclass(slots=True, kw_only=True)
@@ -151,38 +162,57 @@ class GovernanceGoldenPathWorkflow:
 
     @property
     def current_stage(self) -> GoldenPathStage:
-        return self.stage_checkpoint.current_stage
+        stage_checkpoint = self.stage_checkpoint
+        assert stage_checkpoint is not None
+        return stage_checkpoint.current_stage
 
     @property
     def current_phase(self) -> PipelinePhase:
-        return self.phase_checkpoint.current_phase
+        phase_checkpoint = self.phase_checkpoint
+        assert phase_checkpoint is not None
+        return phase_checkpoint.current_phase
 
     @property
     def is_complete(self) -> bool:
-        return self.stage_checkpoint.is_complete and self.phase_checkpoint.is_complete
+        stage_checkpoint = self.stage_checkpoint
+        phase_checkpoint = self.phase_checkpoint
+        assert stage_checkpoint is not None
+        assert phase_checkpoint is not None
+        return stage_checkpoint.is_complete and phase_checkpoint.is_complete
 
     def advance_to(self, target: GoldenPathStage) -> None:
-        self.stage_checkpoint = self.stage_checkpoint.advance_to(target)
+        stage_checkpoint = self.stage_checkpoint
+        phase_checkpoint = self.phase_checkpoint
+        assert stage_checkpoint is not None
+        assert phase_checkpoint is not None
+        self.stage_checkpoint = stage_checkpoint.advance_to(target)
         target_phase = _STAGE_ENTRY_PHASE[target]
         while (
-            not self.phase_checkpoint.is_complete
-            and self.phase_checkpoint.current_phase is not target_phase
+            not phase_checkpoint.is_complete
+            and phase_checkpoint.current_phase is not target_phase
         ):
-            self.phase_checkpoint = self.phase_checkpoint.mark_current_phase_complete()
+            phase_checkpoint = phase_checkpoint.mark_current_phase_complete()
+        self.phase_checkpoint = phase_checkpoint
 
     def mark_current_stage_complete(self) -> None:
-        self.stage_checkpoint = self.stage_checkpoint.mark_current_stage_complete()
+        stage_checkpoint = self.stage_checkpoint
+        phase_checkpoint = self.phase_checkpoint
+        assert stage_checkpoint is not None
+        assert phase_checkpoint is not None
+        self.stage_checkpoint = stage_checkpoint.mark_current_stage_complete()
         if self.stage_checkpoint.is_complete:
-            while not self.phase_checkpoint.is_complete:
-                self.phase_checkpoint = self.phase_checkpoint.mark_current_phase_complete()
+            while not phase_checkpoint.is_complete:
+                phase_checkpoint = phase_checkpoint.mark_current_phase_complete()
+            self.phase_checkpoint = phase_checkpoint
             return
 
         target_phase = _STAGE_ENTRY_PHASE[self.stage_checkpoint.current_stage]
         while (
-            not self.phase_checkpoint.is_complete
-            and self.phase_checkpoint.current_phase is not target_phase
+            not phase_checkpoint.is_complete
+            and phase_checkpoint.current_phase is not target_phase
         ):
-            self.phase_checkpoint = self.phase_checkpoint.mark_current_phase_complete()
+            phase_checkpoint = phase_checkpoint.mark_current_phase_complete()
+        self.phase_checkpoint = phase_checkpoint
 
     def add_note(self, note: str) -> None:
         value = note.strip()
@@ -191,11 +221,15 @@ class GovernanceGoldenPathWorkflow:
         self.notes = (*self.notes, value)
 
     def to_dict(self) -> dict[str, object]:
+        stage_checkpoint = self.stage_checkpoint
+        phase_checkpoint = self.phase_checkpoint
+        assert stage_checkpoint is not None
+        assert phase_checkpoint is not None
         return {
             "workflow_id": self.workflow_id,
             "workflow_name": "governance_golden_path",
-            "stage_checkpoint": self.stage_checkpoint.to_dict(),
-            "phase_checkpoint": self.phase_checkpoint.to_dict(),
+            "stage_checkpoint": stage_checkpoint.to_dict(),
+            "phase_checkpoint": phase_checkpoint.to_dict(),
             "current_stage": self.current_stage.value,
             "current_phase": self.current_phase.value,
             "is_complete": self.is_complete,
@@ -213,24 +247,34 @@ class GovernanceGoldenPathWorkflow:
         if stage_payload is None:
             stage_checkpoint = GoldenPathCheckpoint.from_dict(payload)
         else:
-            stage_checkpoint = GoldenPathCheckpoint.from_dict(dict(stage_payload))
+            if not isinstance(stage_payload, dict):
+                raise ValueError("stage_checkpoint must be a checkpoint object")
+            stage_checkpoint = GoldenPathCheckpoint.from_dict(stage_payload)
 
         phase_payload = payload.get("phase_checkpoint")
         if phase_payload is None:
             phase_checkpoint = PipelineCheckpoint.from_dict(payload)
         else:
-            phase_checkpoint = PipelineCheckpoint.from_dict(dict(phase_payload))
+            if not isinstance(phase_payload, dict):
+                raise ValueError("phase_checkpoint must be a checkpoint object")
+            phase_checkpoint = PipelineCheckpoint.from_dict(phase_payload)
+
+        raw_notes = payload.get("notes", ())
+        if not isinstance(raw_notes, Iterable):
+            raise ValueError("notes must be a sequence of strings")
 
         return cls(
             workflow_id=str(payload["workflow_id"]),
             stage_checkpoint=stage_checkpoint,
             phase_checkpoint=phase_checkpoint,
-            ingress_ref=payload.get("ingress_ref"),
-            compile_ref=payload.get("compile_ref"),
-            review_ref=payload.get("review_ref"),
-            publish_ref=payload.get("publish_ref"),
-            recovery_ref=payload.get("recovery_ref"),
-            notes=tuple(str(note) for note in payload.get("notes", ())),
+            ingress_ref=_optional_ref(payload.get("ingress_ref"), label="ingress_ref"),
+            compile_ref=_optional_ref(payload.get("compile_ref"), label="compile_ref"),
+            review_ref=_optional_ref(payload.get("review_ref"), label="review_ref"),
+            publish_ref=_optional_ref(payload.get("publish_ref"), label="publish_ref"),
+            recovery_ref=_optional_ref(
+                payload.get("recovery_ref"), label="recovery_ref"
+            ),
+            notes=tuple(str(note) for note in raw_notes),
         )
 
     @classmethod
@@ -243,7 +287,9 @@ class GovernanceGoldenPathWorkflow:
             publish_ref="publish:ko-billing-refund-policy",
             recovery_ref="recovery:cmd-publish-1",
         )
-        workflow.add_note("Product-level golden path for post-cutover governance verification.")
+        workflow.add_note(
+            "Product-level golden path for post-cutover governance verification."
+        )
         return workflow
 
 

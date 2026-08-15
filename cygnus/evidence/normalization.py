@@ -24,7 +24,6 @@ class RawEvidenceInput:
     updated_at: str | None = None
 
 
-
 def normalize_evidence(evidence_id: str, raw: RawEvidenceInput) -> SupportEvidence:
     audience = AudienceFilter(
         visibility=raw.visibility,
@@ -53,14 +52,18 @@ def normalize_evidence(evidence_id: str, raw: RawEvidenceInput) -> SupportEviden
     )
 
 
-
 def _derive_tags(raw: RawEvidenceInput) -> tuple[str, ...]:
     tags: list[str] = [raw.source_type.value]
-    for value in (raw.product_line, raw.plan, raw.region, raw.language, raw.product_version):
+    for value in (
+        raw.product_line,
+        raw.plan,
+        raw.region,
+        raw.language,
+        raw.product_version,
+    ):
         if value:
             tags.append(value)
     return tuple(tags)
-
 
 
 def normalize_payload(evidence_id: str, payload: dict[str, Any]) -> SupportEvidence:
@@ -76,7 +79,9 @@ def normalize_payload(evidence_id: str, payload: dict[str, Any]) -> SupportEvide
         region=payload.get("region"),
         language=payload.get("language"),
         product_version=payload.get("product_version"),
-        freshness_state=FreshnessState(payload.get("freshness_state", FreshnessState.UNKNOWN.value)),
+        freshness_state=FreshnessState(
+            payload.get("freshness_state", FreshnessState.UNKNOWN.value)
+        ),
         updated_at=payload.get("updated_at"),
     )
     return normalize_evidence(evidence_id, raw)

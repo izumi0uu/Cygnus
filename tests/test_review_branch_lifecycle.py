@@ -4,6 +4,7 @@ import types
 import unittest
 import uuid
 from contextlib import asynccontextmanager
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 
@@ -86,7 +87,9 @@ class WikiBranchLifecycleTests(unittest.IsolatedAsyncioTestCase):
             ) as notify_submitted,
             patch.object(branch_module, "log_audit", AsyncMock()) as log_audit,
         ):
-            result = await branch_module.submit_wiki_branch(db, branch, author)
+            result = await branch_module.submit_wiki_branch(
+                cast(Any, db), cast(Any, branch), cast(Any, author)
+            )
 
         self.assertEqual(branch.status, "pending_merge")
         self.assertEqual([draft.status for draft in drafts], ["pending", "pending"])
@@ -119,7 +122,9 @@ class WikiBranchLifecycleTests(unittest.IsolatedAsyncioTestCase):
             patch.object(branch_module, "withdraw", AsyncMock()) as withdraw,
             patch.object(branch_module, "log_audit", AsyncMock()) as log_audit,
         ):
-            await branch_module.close_wiki_branch(db, branch, author)
+            await branch_module.close_wiki_branch(
+                cast(Any, db), cast(Any, branch), cast(Any, author)
+            )
 
         self.assertEqual(branch.status, "closed")
         self.assertEqual(withdraw.await_count, 2)
@@ -163,7 +168,10 @@ class WikiBranchLifecycleTests(unittest.IsolatedAsyncioTestCase):
             patch.object(branch_module, "log_audit", AsyncMock()) as log_audit,
         ):
             result = await branch_module.merge_wiki_branch(
-                db, branch, reviewer, reviewer_note="Ship it"
+                cast(Any, db),
+                cast(Any, branch),
+                cast(Any, reviewer),
+                reviewer_note="Ship it",
             )
 
         self.assertEqual(result, [draft])
@@ -202,7 +210,9 @@ class WikiBranchLifecycleTests(unittest.IsolatedAsyncioTestCase):
         db = _FakeDB(count=None, drafts=[draft], page_by_id={draft.page_id: page})
 
         with self.assertRaises(branch_module.BranchMergeConflict) as exc:
-            await branch_module.merge_wiki_branch(db, branch, reviewer)
+            await branch_module.merge_wiki_branch(
+                cast(Any, db), cast(Any, branch), cast(Any, reviewer)
+            )
 
         self.assertTrue(branch.has_conflict)
         self.assertEqual(exc.exception.page_slug, "billing")
@@ -255,7 +265,11 @@ class WikiBranchLifecycleTests(unittest.IsolatedAsyncioTestCase):
             patch.object(branch_module, "log_audit", AsyncMock()) as log_audit,
         ):
             result = await branch_module.rebase_wiki_branch_draft(
-                db, branch, draft, author, "resolved"
+                cast(Any, db),
+                cast(Any, branch),
+                cast(Any, draft),
+                cast(Any, author),
+                "resolved",
             )
 
         self.assertIs(result, draft)
@@ -270,9 +284,11 @@ class WikiBranchLifecycleTests(unittest.IsolatedAsyncioTestCase):
         lock.assert_awaited_once_with(db, draft.id)
         self.assertIn(draft, db.refreshed)
         record.assert_awaited_once()
-        self.assertEqual(record.await_args.kwargs["action"], "branch_rebase")
-        self.assertEqual(record.await_args.kwargs["previous_draft_version"], 1)
-        self.assertEqual(record.await_args.args[1].version, 2)
+        rebase_call = record.await_args
+        assert rebase_call is not None
+        self.assertEqual(rebase_call.kwargs["action"], "branch_rebase")
+        self.assertEqual(rebase_call.kwargs["previous_draft_version"], 1)
+        self.assertEqual(rebase_call.args[1].version, 2)
         stage.assert_awaited_once_with(db, draft)
         log_audit.assert_awaited_once()
 
@@ -330,10 +346,10 @@ class WikiBranchLifecycleTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.assertRaises(branch_module.InvalidTransition):
                 await branch_module.rebase_wiki_branch_draft(
-                    db,
-                    branch,
-                    draft,
-                    author,
+                    cast(Any, db),
+                    cast(Any, branch),
+                    cast(Any, draft),
+                    cast(Any, author),
                     "lost concurrent overwrite",
                 )
 
@@ -383,10 +399,10 @@ class WikiBranchLifecycleTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.assertRaises(branch_module.InvalidTransition):
                 await branch_module.rebase_wiki_branch_draft(
-                    db,
-                    branch,
-                    draft,
-                    author,
+                    cast(Any, db),
+                    cast(Any, branch),
+                    cast(Any, draft),
+                    cast(Any, author),
                     "unauthorized overwrite",
                 )
 

@@ -38,13 +38,14 @@ OVERLAP_SEPARATOR = "[…context from previous section…]\n"
 # Dataclass
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class DocumentChunk:
     index: int
-    start_char: int       # absolute offset in full_text (does NOT include overlap prefix)
-    end_char: int         # absolute offset in full_text
-    section_path: str     # e.g. "Chapter 2 > Section 2.1"
-    text: str             # chunk body (may be prefixed with OVERLAP_SEPARATOR + overlap text)
+    start_char: int  # absolute offset in full_text (does NOT include overlap prefix)
+    end_char: int  # absolute offset in full_text
+    section_path: str  # e.g. "Chapter 2 > Section 2.1"
+    text: str  # chunk body (may be prefixed with OVERLAP_SEPARATOR + overlap text)
     overlap_prefix_len: int = field(default=0)
     # Length of the overlap prefix prepended to `text` (chars before the separator newline).
     # local_offset values from LLM output must be >= 0 relative to the body start
@@ -54,6 +55,7 @@ class DocumentChunk:
 # ---------------------------------------------------------------------------
 # Phase 0 — Triage
 # ---------------------------------------------------------------------------
+
 
 def classify_strategy(full_text: str, outline_json: Optional[list]) -> str:
     """Return 'single_pass', 'standard', or 'hierarchical' based on text length."""
@@ -70,6 +72,7 @@ def classify_strategy(full_text: str, outline_json: Optional[list]) -> str:
 # Phase 1a — Chunking
 # ---------------------------------------------------------------------------
 
+
 def _flatten_outline(nodes: list, depth: int = 0) -> list[dict]:
     """Recursively flatten an outline tree into a sorted list of nodes."""
     result = []
@@ -80,7 +83,9 @@ def _flatten_outline(nodes: list, depth: int = 0) -> list[dict]:
     return result
 
 
-def build_chunks(full_text: str, outline_json: Optional[list], strategy: str) -> list[DocumentChunk]:
+def build_chunks(
+    full_text: str, outline_json: Optional[list], strategy: str
+) -> list[DocumentChunk]:
     """
     Split full_text into DocumentChunks for MAP extraction.
 
@@ -93,7 +98,11 @@ def build_chunks(full_text: str, outline_json: Optional[list], strategy: str) ->
     LLM output should be relative to the body (i.e., after the separator).
     """
     flat = _flatten_outline(outline_json or [])
-    top_nodes = [n for n in flat if n.get("level", 99) <= 2 and "char_start" in n and "char_end" in n]
+    top_nodes = [
+        n
+        for n in flat
+        if n.get("level", 99) <= 2 and "char_start" in n and "char_end" in n
+    ]
     top_nodes.sort(key=lambda n: n["char_start"])
 
     if not top_nodes:
@@ -194,14 +203,16 @@ def _sliding_window_chunks(full_text: str) -> list[DocumentChunk]:
         else:
             prefix = ""
             overlap_len = 0
-        chunks.append(DocumentChunk(
-            index=idx,
-            start_char=pos,
-            end_char=end,
-            section_path=f"chunk_{idx}",
-            text=prefix + body,
-            overlap_prefix_len=overlap_len,
-        ))
+        chunks.append(
+            DocumentChunk(
+                index=idx,
+                start_char=pos,
+                end_char=end,
+                section_path=f"chunk_{idx}",
+                text=prefix + body,
+                overlap_prefix_len=overlap_len,
+            )
+        )
         prev_end = end
         pos = end
         idx += 1
@@ -293,9 +304,11 @@ def _build_extraction_prompt(chunk: DocumentChunk) -> str:
 # Phase 1c — Single chunk extraction
 # ---------------------------------------------------------------------------
 
+
 def _parse_extract_json(raw: str) -> dict:
     """Parse LLM response to extraction dict. Raises ValueError on failure."""
     from cygnus.runtime.utils.text import parse_json_loose
+
     return parse_json_loose(raw)
 
 
@@ -337,6 +350,7 @@ async def extract_chunk(llm: LLMProvider, chunk: DocumentChunk) -> dict:
 # Phase 1d — MAP phase orchestrator
 # ---------------------------------------------------------------------------
 
+
 async def run_map_phase(
     session: AsyncSession,
     source_id: uuid.UUID,
@@ -370,9 +384,17 @@ async def run_map_phase(
         await session.commit()
 
     # Load existing chunk rows (for resume)
-    existing_rows = (await session.execute(
-        select(SourceChunkExtract).where(SourceChunkExtract.source_id == source_id)
-    )).scalars().all()
+    existing_rows = (
+        (
+            await session.execute(
+                select(SourceChunkExtract).where(
+                    SourceChunkExtract.source_id == source_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     existing_by_idx = {r.chunk_index: r for r in existing_rows}
 
     # Ensure a DB row exists for every chunk
@@ -391,14 +413,24 @@ async def run_map_phase(
     await session.commit()
 
     # Reload after flush so IDs are populated
-    existing_rows = (await session.execute(
-        select(SourceChunkExtract).where(SourceChunkExtract.source_id == source_id)
-    )).scalars().all()
+    existing_rows = (
+        (
+            await session.execute(
+                select(SourceChunkExtract).where(
+                    SourceChunkExtract.source_id == source_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     existing_by_idx = {r.chunk_index: r for r in existing_rows}
 
     pending_chunks = [c for c in chunks if existing_by_idx[c.index].status != "done"]
     done_count = len(chunks) - len(pending_chunks)
-    logger.info(f"MRP MAP: {done_count} already done, {len(pending_chunks)} pending for source={source_id}")
+    logger.info(
+        f"MRP MAP: {done_count} already done, {len(pending_chunks)} pending for source={source_id}"
+    )
 
     semaphore = asyncio.Semaphore(MAX_MAP_CONCURRENCY)
     commit_lock = asyncio.Lock()
@@ -421,14 +453,18 @@ async def run_map_phase(
                     row.error_message = str(e)[:500]
                     await session.commit()
             pct = 10 + int(40 * (done_count + chunk.index + 1) / max(len(chunks), 1))
-            await tracker.update(pct, f"Extracting chunk {chunk.index + 1}/{len(chunks)}...")
+            await tracker.update(
+                pct, f"Extracting chunk {chunk.index + 1}/{len(chunks)}..."
+            )
 
     await asyncio.gather(*[_extract_with_sem(c) for c in pending_chunks])
 
     # Sequential retry for failed chunks
     error_chunks = [c for c in chunks if existing_by_idx[c.index].status == "error"]
     if error_chunks:
-        logger.info(f"MRP MAP: retrying {len(error_chunks)} failed chunks for source={source_id}")
+        logger.info(
+            f"MRP MAP: retrying {len(error_chunks)} failed chunks for source={source_id}"
+        )
         for chunk in error_chunks:
             row = existing_by_idx[chunk.index]
             try:
@@ -441,6 +477,12 @@ async def run_map_phase(
                 logger.warning(f"MRP MAP chunk {chunk.index} retry failed: {e}")
 
     # Return all done rows
-    done_rows = [existing_by_idx[c.index] for c in chunks if existing_by_idx[c.index].status == "done"]
-    logger.info(f"MRP MAP complete: {len(done_rows)}/{len(chunks)} chunks done for source={source_id}")
+    done_rows = [
+        existing_by_idx[c.index]
+        for c in chunks
+        if existing_by_idx[c.index].status == "done"
+    ]
+    logger.info(
+        f"MRP MAP complete: {len(done_rows)}/{len(chunks)} chunks done for source={source_id}"
+    )
     return strategy, done_rows

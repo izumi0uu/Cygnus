@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cygnus.domain import governed_object_ref
 from cygnus.evidence import EvidenceSourceType, FreshnessState
 from cygnus.governance.feedback_execution import (
     FeedbackRouteClaim,
@@ -99,7 +100,7 @@ def _feedback(
     feedback_id: uuid.UUID | None = None,
     actor_id: uuid.UUID | None = None,
     signal_type: str = "low_rating",
-    object_id: str | None = "ko-billing-answer",
+    object_id: str | None = None,
     page_id: uuid.UUID | None = None,
     draft_id: uuid.UUID | None = None,
     source_context_ref: str | None = "private://session-context",
@@ -442,7 +443,11 @@ class FeedbackRouteExecutionTests(unittest.IsolatedAsyncioTestCase):
     async def test_low_rating_materializes_scoped_ticket_pressure_truth(self) -> None:
         actor_id = uuid.uuid4()
         page = _page()
-        feedback = _feedback(actor_id=actor_id, page_id=page.id)
+        feedback = _feedback(
+            actor_id=actor_id,
+            object_id=governed_object_ref(page.id),
+            page_id=page.id,
+        )
         route = _route(
             feedback_signal_id=feedback.id,
             lifecycle_state="running",
@@ -475,7 +480,9 @@ class FeedbackRouteExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(route.lease_token)
         self.assertIsNone(route.lease_expires_at)
         self.assertEqual(len(session.downstream_signals), 1)
-        input_ = materialize.await_args.args[1]
+        materialize_call = materialize.await_args
+        assert materialize_call is not None
+        input_ = materialize_call.args[1]
         self.assertEqual(input_.signal_ref, f"feedback-route:{route.id}")
         self.assertIs(input_.signal_type, PressureSignalType.LOW_RATING)
         self.assertIs(
@@ -483,7 +490,7 @@ class FeedbackRouteExecutionTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIs(input_.freshness, FreshnessState.UNKNOWN)
         self.assertEqual(input_.page_id, page.id)
-        self.assertEqual(input_.object_ref, "ko-billing-answer")
+        self.assertEqual(input_.object_ref, governed_object_ref(page.id))
         self.assertEqual(input_.affected_surfaces, ("feedback", "review_queue"))
         self.assertEqual(
             input_.audience_filter.product_lines,
@@ -503,7 +510,7 @@ class FeedbackRouteExecutionTests(unittest.IsolatedAsyncioTestCase):
             f"route_ref=feedback-route:{route.id}",
         )
         self.assertEqual(input_.observed_at, _OBSERVED_AT)
-        self.assertEqual(materialize.await_args.kwargs["created_by_id"], actor_id)
+        self.assertEqual(materialize_call.kwargs["created_by_id"], actor_id)
         self.assertEqual(len(_audit_rows(session)), 1)
         self.assertNotIn(
             feedback.source_context_ref, _audit_rows(session)[0].reason or ""
@@ -516,7 +523,7 @@ class FeedbackRouteExecutionTests(unittest.IsolatedAsyncioTestCase):
         feedback = _feedback(
             actor_id=actor_id,
             signal_type="stale_answer",
-            object_id="ko-billing-stale-answer",
+            object_id=governed_object_ref(page.id),
             page_id=page.id,
         )
         route = _route(
@@ -543,7 +550,9 @@ class FeedbackRouteExecutionTests(unittest.IsolatedAsyncioTestCase):
                 cast(AsyncSession, cast(object, session)), _claim(route), now=_NOW
             )
 
-        input_ = materialize.await_args.args[1]
+        materialize_call = materialize.await_args
+        assert materialize_call is not None
+        input_ = materialize_call.args[1]
         self.assertEqual(input_.signal_ref, f"feedback-route:{route.id}")
         self.assertIs(input_.signal_type, PressureSignalType.STALE_ANSWER)
         self.assertIs(
@@ -560,7 +569,11 @@ class FeedbackRouteExecutionTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         actor_id = uuid.uuid4()
         page = _page()
-        feedback = _feedback(actor_id=actor_id, page_id=page.id)
+        feedback = _feedback(
+            actor_id=actor_id,
+            object_id=governed_object_ref(page.id),
+            page_id=page.id,
+        )
         route = _route(
             feedback_signal_id=feedback.id,
             lifecycle_state="running",
@@ -615,7 +628,10 @@ class FeedbackRouteExecutionTests(unittest.IsolatedAsyncioTestCase):
         session.commit.assert_not_awaited()
 
     async def test_invalid_targets_block_without_guessed_downstream_truth(self) -> None:
-        cases = (
+        cases: tuple[
+            tuple[str, Any, tuple[Any, ...], tuple[Any, ...], str],
+            ...,
+        ] = (
             (
                 "generic",
                 _feedback(object_id=None, page_id=None, draft_id=None),
@@ -654,9 +670,9 @@ class FeedbackRouteExecutionTests(unittest.IsolatedAsyncioTestCase):
                         actor_id=actor_id,
                         page_id=page.id,
                         object_id=(
-                            "ko-other-answer"
+                            governed_object_ref(uuid.uuid4())
                             if name == "identity_drift"
-                            else f"ko-{page.slug}"
+                            else governed_object_ref(page.id)
                         ),
                     )
                 else:
@@ -833,7 +849,11 @@ class FeedbackRouteExecutionTests(unittest.IsolatedAsyncioTestCase):
     async def test_caller_rollback_removes_an_unflushed_execution_outcome(self) -> None:
         actor_id = uuid.uuid4()
         page = _page()
-        feedback = _feedback(actor_id=actor_id, page_id=page.id)
+        feedback = _feedback(
+            actor_id=actor_id,
+            object_id=governed_object_ref(page.id),
+            page_id=page.id,
+        )
         route = _route(
             feedback_signal_id=feedback.id,
             lifecycle_state="running",

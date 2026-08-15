@@ -29,9 +29,16 @@ _PATTERNS: tuple[tuple[str, str, str], ...] = (
     ("secret.aws_access", "AWS access key", r"\bAKIA[0-9A-Z]{16}\b"),
     ("secret.github_pat", "GitHub PAT", r"\bghp_[A-Za-z0-9]{36}\b"),
     ("secret.google_api", "Google API key", r"\bAIza[0-9A-Za-z_\-]{35}\b"),
-    ("secret.jwt", "JWT", r"\beyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\b"),
-    ("secret.private_key", "Private key block",
-     r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
+    (
+        "secret.jwt",
+        "JWT",
+        r"\beyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\b",
+    ),
+    (
+        "secret.private_key",
+        "Private key block",
+        r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----",
+    ),
 )
 
 # Allow-list marker: `<!-- pii-allow: <reason> -->` on its own line.
@@ -42,7 +49,7 @@ _ALLOW_RE = re.compile(r"<!--\s*pii-allow:\s*([^\s>][^>]*?)\s*-->")
 @dataclass
 class _AllowRegion:
     start_line: int
-    end_line: int       # inclusive
+    end_line: int  # inclusive
     reason: str
 
 
@@ -92,29 +99,35 @@ def run(content_md: str) -> list[dict]:
                 if allow_reason is not None:
                     allowed_count += 1
                     continue
-                raw_matches.append({
-                    "line": line_idx + 1,
-                    "snippet": _redact(m.group(0)),
-                })
+                raw_matches.append(
+                    {
+                        "line": line_idx + 1,
+                        "snippet": _redact(m.group(0)),
+                    }
+                )
 
         if not raw_matches:
             status = "pass"
             message = (
-                f"{allowed_count} suppressed by pii-allow marker" if allowed_count else None
+                f"{allowed_count} suppressed by pii-allow marker"
+                if allowed_count
+                else None
             )
         else:
             status = "fail" if check_id.startswith("secret.") else "warn"
             message = f"{len(raw_matches)} {label.lower()} match(es) found in content"
 
-        out.append({
-            "id": check_id,
-            "layer": "L1",
-            "severity": "block" if check_id.startswith("secret.") else "warn",
-            "status": status,
-            "message": message,
-            "matches": raw_matches[:10],  # cap so JSONB stays small
-            "suppressed": allowed_count,
-        })
+        out.append(
+            {
+                "id": check_id,
+                "layer": "L1",
+                "severity": "block" if check_id.startswith("secret.") else "warn",
+                "status": status,
+                "message": message,
+                "matches": raw_matches[:10],  # cap so JSONB stays small
+                "suppressed": allowed_count,
+            }
+        )
     return out
 
 

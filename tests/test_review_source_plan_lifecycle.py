@@ -3,11 +3,14 @@ from __future__ import annotations
 import types
 import unittest
 import uuid
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 
 class SourcePlanLifecycleTests(unittest.IsolatedAsyncioTestCase):
-    async def test_approve_source_compilation_plan_updates_plan_and_source(self) -> None:
+    async def test_approve_source_compilation_plan_updates_plan_and_source(
+        self,
+    ) -> None:
         import cygnus.review.source_plans as plan_module
 
         plan = types.SimpleNamespace(
@@ -26,10 +29,10 @@ class SourcePlanLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(plan_module, "log_audit", AsyncMock()) as log_audit:
             result = await plan_module.approve_source_compilation_plan(
-                object(),
-                plan,
-                source,
-                reviewer,
+                cast(Any, object()),
+                cast(Any, plan),
+                cast(Any, source),
+                cast(Any, reviewer),
                 "Looks good",
             )
 
@@ -40,7 +43,9 @@ class SourcePlanLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(plan.reviewed_at)
         self.assertEqual(source.status, "processing")
         self.assertEqual(source.progress, 78)
-        self.assertEqual(source.progress_message, "Plan approved — compiling wiki pages...")
+        self.assertEqual(
+            source.progress_message, "Plan approved — compiling wiki pages..."
+        )
         log_audit.assert_awaited_once()
 
     async def test_reject_source_compilation_plan_updates_plan_and_source(self) -> None:
@@ -58,10 +63,10 @@ class SourcePlanLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(plan_module, "log_audit", AsyncMock()) as log_audit:
             result = await plan_module.reject_source_compilation_plan(
-                object(),
-                plan,
-                source,
-                reviewer,
+                cast(Any, object()),
+                cast(Any, plan),
+                cast(Any, source),
+                cast(Any, reviewer),
                 "Need a narrower plan",
             )
 
@@ -71,20 +76,24 @@ class SourcePlanLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(plan.review_note, "Need a narrower plan")
         self.assertIsNotNone(plan.reviewed_at)
         self.assertEqual(source.status, "error")
-        self.assertEqual(source.error_message, "Compilation plan rejected: Need a narrower plan")
+        self.assertEqual(
+            source.error_message, "Compilation plan rejected: Need a narrower plan"
+        )
         log_audit.assert_awaited_once()
 
     async def test_request_source_plan_regeneration_marks_regenerating(self) -> None:
         import cygnus.review.source_plans as plan_module
 
-        plan = types.SimpleNamespace(id=uuid.uuid4(), status="pending_review", review_note=None)
+        plan = types.SimpleNamespace(
+            id=uuid.uuid4(), status="pending_review", review_note=None
+        )
         reviewer = types.SimpleNamespace(id=uuid.uuid4(), role="admin")
 
         with patch.object(plan_module, "log_audit", AsyncMock()) as log_audit:
             result = await plan_module.request_source_plan_regeneration(
-                object(),
-                plan,
-                reviewer,
+                cast(Any, object()),
+                cast(Any, plan),
+                cast(Any, reviewer),
                 "Use stronger grouping by issue type",
             )
 
@@ -101,22 +110,33 @@ class SourcePlanLifecycleTests(unittest.IsolatedAsyncioTestCase):
         reviewer = types.SimpleNamespace(id=uuid.uuid4(), role="admin")
 
         with self.assertRaises(plan_module.SourcePlanInvalidTransition):
-            await plan_module.approve_source_compilation_plan(object(), plan, source, reviewer)
+            await plan_module.approve_source_compilation_plan(
+                cast(Any, object()),
+                cast(Any, plan),
+                cast(Any, source),
+                cast(Any, reviewer),
+            )
 
     def test_auto_approve_source_compilation_plan_promotes_pending_review(self) -> None:
         import cygnus.review.source_plans as plan_module
 
-        plan = types.SimpleNamespace(status="pending_review", review_note=None, reviewed_at=None)
+        plan = types.SimpleNamespace(
+            status="pending_review", review_note=None, reviewed_at=None
+        )
         source = types.SimpleNamespace(status="plan_ready", progress_message=None)
 
-        result = plan_module.auto_approve_source_compilation_plan(plan, source)
+        result = plan_module.auto_approve_source_compilation_plan(
+            cast(Any, plan), cast(Any, source)
+        )
 
         self.assertIs(result, plan)
         self.assertEqual(plan.status, "approved")
         self.assertEqual(plan.review_note, "Auto-approved")
         self.assertIsNotNone(plan.reviewed_at)
         self.assertEqual(source.status, "processing")
-        self.assertEqual(source.progress_message, "Plan approved — compiling wiki pages...")
+        self.assertEqual(
+            source.progress_message, "Plan approved — compiling wiki pages..."
+        )
 
     def test_restore_and_fail_regeneration_preserve_owner_truth(self) -> None:
         import cygnus.review.source_plans as plan_module
@@ -129,7 +149,9 @@ class SourcePlanLifecycleTests(unittest.IsolatedAsyncioTestCase):
             reviewed_at=object(),
         )
 
-        plan_module.restore_source_plan_pending_review(plan, plan_json={"after": True})
+        plan_module.restore_source_plan_pending_review(
+            cast(Any, plan), plan_json={"after": True}
+        )
         self.assertEqual(plan.status, "pending_review")
         self.assertEqual(plan.plan_json, {"after": True})
         self.assertIsNone(plan.reviewed_by)
@@ -137,7 +159,9 @@ class SourcePlanLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(plan.reviewed_at)
 
         plan.status = "regenerating"
-        plan_module.fail_source_plan_regeneration(plan, reason="provider unavailable")
+        plan_module.fail_source_plan_regeneration(
+            cast(Any, plan), reason="provider unavailable"
+        )
         self.assertEqual(plan.status, "pending_review")
         self.assertEqual(plan.review_note, "Regeneration failed: provider unavailable")
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from typing import cast
 
 from cygnus.domain.objects import KnowledgeObjectType
 from cygnus.substrate.compilation_plan import (
@@ -42,5 +43,8 @@ class ReviewPublishWorkflowTests(unittest.TestCase):
         )
         self.assertEqual(payload["resume_phase"], "plan")
         self.assertFalse(payload["is_complete"])
-        self.assertEqual(payload["proposals"][0]["object_type"], "known_issue_page")
-        self.assertEqual(payload["review_notes"], ["Need confirmation on external wording."])
+        proposals = cast(list[dict[str, object]], payload["proposals"])
+        self.assertEqual(proposals[0]["object_type"], "known_issue_page")
+        self.assertEqual(
+            payload["review_notes"], ["Need confirmation on external wording."]
+        )

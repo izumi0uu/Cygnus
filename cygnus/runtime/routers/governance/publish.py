@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import cast
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,15 +35,27 @@ from cygnus.publish import (
     remember_publish_projection,
     update_propagation,
 )
+from cygnus.publish.delivery import (
+    DeliveryAckConflict,
+    DeliveryReceiptNotFound,
+    DeliveryStatus,
+    DeliveryVerificationError,
+    acknowledge_propagation_delivery,
+    delivery_to_dict,
+    list_propagation_deliveries,
+)
 from cygnus.publish.surface import get_pressure_intake_publish_preview_surface
 from cygnus.review import (
     get_pressure_intake_review_brief_surface,
     is_feedback_derived_signal_type,
 )
+from cygnus.runtime.config import get_settings
 from cygnus.runtime.database import get_db
 from cygnus.runtime.database.models import (
     Employee,
     GovernanceAudienceBinding,
+    GovernancePropagation,
+    GovernancePropagationDelivery,
     GovernancePublication,
     WikiPage,
     WikiPageDraft,
@@ -53,6 +65,9 @@ from cygnus.runtime.services.permission_engine import build_wiki_scope_clause
 
 router = APIRouter()
 
+_ACK_BODY_LIMIT = 1024 * 1024
+_DELIVERY_QUERY_LIMIT_MAX = 200
+
 
 class PublishApplyRequest(BaseModel):
     object_ref: str | None = None
@@ -60,6 +75,10 @@ class PublishApplyRequest(BaseModel):
     reason: str | None = None
     draft_id: uuid.UUID | None = None
     approval_ref: uuid.UUID | None = None
+    approval_digest: str | None = None
+    scope_digest: str | None = None
+    signal_id: uuid.UUID | None = None
+    signal_freshness: str | None = None
     command_id: str | None = None
     target_channels: list[str] | None = None
     expected_version: int | None = Field(default=None, ge=1)
@@ -193,10 +212,12 @@ async def publish_preview(
 @router.post("/api/publish/apply")
 async def publish_apply(
     body: PublishApplyRequest,
+    request: Request,
     current_user: Employee = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
     """Execute either a qualified durable command or an explicit fixture rehearsal."""
+    correlation_id, traceparent = _request_correlation(request)
     if body.draft_id is not None:
         if body.object_ref is not None:
             raise HTTPException(
@@ -207,8 +228,13 @@ async def publish_apply(
             field_name
             for field_name, value in (
                 ("approval_ref", body.approval_ref),
+                ("approval_digest", body.approval_digest),
+                ("scope_digest", body.scope_digest),
+                ("signal_id", body.signal_id),
+                ("signal_freshness", body.signal_freshness),
                 ("command_id", body.command_id),
                 ("target_channels", body.target_channels),
+                ("expected_version", body.expected_version),
             )
             if value is None
         ]
@@ -221,16 +247,22 @@ async def publish_apply(
             command = DurablePublishCommand(
                 draft_id=body.draft_id,
                 approval_ref=cast(uuid.UUID, body.approval_ref),
+                approval_digest=cast(str, body.approval_digest),
+                scope_digest=cast(str, body.scope_digest),
+                signal_id=cast(uuid.UUID, body.signal_id),
+                signal_freshness=cast(str, body.signal_freshness),
                 command_id=cast(str, body.command_id),
                 action_key=body.action_key,
                 target_channels=tuple(body.target_channels or ()),
                 reason=body.reason,
-                expected_version=body.expected_version,
+                expected_version=cast(int, body.expected_version),
             )
             return await apply_durable_publish(
                 db,
                 command=command,
                 actor_id=current_user.id,
+                correlation_id=correlation_id,
+                traceparent=traceparent,
             )
         except DurablePublishNotFound as exc:
             raise HTTPException(
@@ -323,7 +355,19 @@ async def publish_propagation(
             detail=f"{selector} has no visible durable publication",
         )
     propagations = await list_publication_propagations(db, publication.id)
-    records = [propagation_to_dict(record) for record in propagations]
+    deliveries = await list_propagation_deliveries(
+        db, tuple(item.id for item in propagations)
+    )
+    delivery_by_propagation = {
+        delivery.propagation_id: delivery for delivery in deliveries
+    }
+    records = [
+        propagation_to_dict(
+            record,
+            delivery=delivery_by_propagation.get(record.id),
+        )
+        for record in propagations
+    ]
     summary = {item.value: 0 for item in PropagationStatus}
     for record in propagations:
         summary[record.status] = summary.get(record.status, 0) + 1
@@ -474,8 +518,174 @@ async def update_governance_propagation(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
         ) from exc
+    except DurablePublishDenied as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
+
+
+@router.post("/api/internal/propagation-ack")
+async def propagation_ack(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    """Accept one signed downstream acknowledgment for a durable delivery.
+
+    Authentication is the HMAC-SHA256 signature over the exact request body
+    (``X-Cygnus-Ack-Signature: sha256=<hex>``) using the shared delivery
+    secret — no employee session is involved. Only this path may set a
+    propagation to ``synced``; a wrong, stale, or forged ack is denied.
+    """
+    body = await request.body()
+    if len(body) > _ACK_BODY_LIMIT:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="ack body exceeds the bounded size limit",
+        )
+    raw_delivery_id = request.headers.get("X-Cygnus-Delivery-Id")
+    if not raw_delivery_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="X-Cygnus-Delivery-Id header is required",
+        )
+    try:
+        delivery_id = uuid.UUID(raw_delivery_id.strip())
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="X-Cygnus-Delivery-Id must be a UUID",
+        ) from exc
+    correlation_id, traceparent = _request_correlation(request)
+    secret = get_settings().delivery_hmac_secret
+    try:
+        return await acknowledge_propagation_delivery(
+            db,
+            delivery_id=delivery_id,
+            ack_body=body,
+            signature=request.headers.get("X-Cygnus-Ack-Signature", ""),
+            secret=secret,
+            correlation_id=correlation_id,
+            traceparent=traceparent,
+        )
+    except DeliveryReceiptNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except DeliveryVerificationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
+        ) from exc
+    except DeliveryAckConflict as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get("/api/propagation-deliveries")
+async def propagation_deliveries(
+    status_filter: str | None = Query(
+        default=None,
+        alias="status",
+        description="Delivery status: pending, in_flight, synced, failed, dead_letter",
+    ),
+    publication_id: uuid.UUID | None = None,
+    limit: int = Query(default=50, ge=1, le=_DELIVERY_QUERY_LIMIT_MAX),
+    _current_user: Employee = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    """Admin reconciliation truth for outbound propagation deliveries.
+
+    Surfaces pending, mismatched (delivery vs propagation state disagreement),
+    and dead-lettered deliveries with durable attempt evidence. Never
+    fabricates rows: every record is persisted outbox/receipt truth.
+    """
+    statement = select(GovernancePropagationDelivery)
+    if status_filter is not None:
+        normalized_status = status_filter.strip()
+        if not normalized_status:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="status filter must not be blank",
+            )
+        statement = statement.where(
+            GovernancePropagationDelivery.status == normalized_status
+        )
+    if publication_id is not None:
+        statement = statement.where(
+            GovernancePropagationDelivery.publication_id == publication_id
+        )
+    statement = statement.order_by(
+        GovernancePropagationDelivery.created_at.desc(),
+        GovernancePropagationDelivery.id.desc(),
+    ).limit(limit)
+    rows = tuple((await db.execute(statement)).scalars().all())
+
+    propagation_ids = tuple(row.propagation_id for row in rows)
+    propagation_status_by_id: dict[uuid.UUID, str | None] = {}
+    if propagation_ids:
+        propagation_rows = tuple(
+            (
+                await db.execute(
+                    select(GovernancePropagation).where(
+                        GovernancePropagation.id.in_(propagation_ids)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        propagation_status_by_id = {row.id: row.status for row in propagation_rows}
+
+    records: list[dict[str, object]] = []
+    for row in rows:
+        payload = delivery_to_dict(row, include_payload=True)
+        propagation_status = propagation_status_by_id.get(row.propagation_id)
+        payload["propagation_status"] = propagation_status
+        payload["mismatch"] = (
+            (row.status == DeliveryStatus.SYNCED.value)
+            != (propagation_status == PropagationStatus.SYNCED.value)
+            if propagation_status is not None
+            else None
+        )
+        records.append(payload)
+
+    summary: dict[str, int] = {}
+    for row in rows:
+        summary[row.status] = summary.get(row.status, 0) + 1
+    return {
+        "persisted": True,
+        "rehearsal": False,
+        "summary": summary,
+        "records": records,
+        "total": len(rows),
+        "limit": limit,
+        "filters": {
+            "status": status_filter,
+            "publication_id": (
+                str(publication_id) if publication_id is not None else None
+            ),
+        },
+    }
+
+
+def _request_correlation(request: Request) -> tuple[str | None, str | None]:
+    """Bounded correlation metadata from request headers (never in digests)."""
+    correlation_id = request.headers.get("X-Cygnus-Correlation-Id")
+    traceparent = request.headers.get("traceparent")
+    if correlation_id is not None:
+        correlation_id = correlation_id.strip()[:_BOUNDED_CORRELATION_CHARS] or None
+    if traceparent is not None:
+        traceparent = traceparent.strip()[:_BOUNDED_CORRELATION_CHARS] or None
+    return correlation_id, traceparent
+
+
+_BOUNDED_CORRELATION_CHARS = 200

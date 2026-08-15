@@ -7,17 +7,31 @@ Ownership:
 
 import hashlib
 import uuid
-from typing import Optional
+from typing import Optional, cast
 
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.runtime.ai.embedding_catalog import EmbeddingModelSpec, get_spec
 from cygnus.runtime.database.models import (
     EmbeddingJob,
+    WikiPageEmbedding1024,
+    WikiPageEmbedding1536,
+    WikiPageEmbedding3072,
+    WikiPageEmbedding768,
     get_embedding_model_for_dim,
     get_source_chunk_embedding_model_for_dim,
+)
+
+# The registry lookup returns the bare class; bind the union of concrete
+# per-dimension tables so column access stays typed.
+_WikiPageEmbeddingModel = (
+    type[WikiPageEmbedding768]
+    | type[WikiPageEmbedding1024]
+    | type[WikiPageEmbedding1536]
+    | type[WikiPageEmbedding3072]
 )
 
 
@@ -61,7 +75,7 @@ async def upsert_page_embedding(
 async def get_existing_hash(
     session: AsyncSession, page_id: uuid.UUID, spec_id: str, dimension: int
 ) -> Optional[str]:
-    Model = get_embedding_model_for_dim(dimension)
+    Model = cast(_WikiPageEmbeddingModel, get_embedding_model_for_dim(dimension))
     row = (
         await session.execute(
             select(Model.content_hash).where(
@@ -72,9 +86,7 @@ async def get_existing_hash(
     return row
 
 
-async def cleanup_stale_embeddings(
-    session: AsyncSession, keep_spec_id: str
-) -> int:
+async def cleanup_stale_embeddings(session: AsyncSession, keep_spec_id: str) -> int:
     """
     Delete rows in every wiki_page_embeddings_<dim> table whose model_spec_id
     is NOT `keep_spec_id`. Returns total deleted rows.
@@ -88,6 +100,7 @@ async def cleanup_stale_embeddings(
         WikiPageEmbedding1536,
         WikiPageEmbedding3072,
     )
+
     total = 0
     for Model in (
         WikiPageEmbedding768,
@@ -98,7 +111,8 @@ async def cleanup_stale_embeddings(
         result = await session.execute(
             delete(Model).where(Model.model_spec_id != keep_spec_id)
         )
-        total += result.rowcount or 0  # type: ignore[union-attr]
+        if isinstance(result, CursorResult):
+            total += result.rowcount or 0
     return total
 
 
@@ -118,6 +132,7 @@ async def cleanup_stale_source_chunk_embeddings(
         SourceChunkEmbedding1536,
         SourceChunkEmbedding3072,
     )
+
     total = 0
     for Model in (
         SourceChunkEmbedding768,
@@ -128,13 +143,15 @@ async def cleanup_stale_source_chunk_embeddings(
         result = await session.execute(
             delete(Model).where(Model.model_spec_id != keep_spec_id)
         )
-        total += result.rowcount or 0  # type: ignore[union-attr]
+        if isinstance(result, CursorResult):
+            total += result.rowcount or 0
     return total
 
 
 # ---------------------------------------------------------------------------
 # Verbatim source chunk embeddings
 # ---------------------------------------------------------------------------
+
 
 def chunk_content_hash(text: str) -> str:
     """Stable hash of the raw chunk text fed into the embedding model."""
@@ -197,6 +214,7 @@ async def delete_source_chunk_embeddings(
         SourceChunkEmbedding1536,
         SourceChunkEmbedding3072,
     )
+
     total = 0
     for Model in (
         SourceChunkEmbedding768,
@@ -207,5 +225,6 @@ async def delete_source_chunk_embeddings(
         result = await session.execute(
             delete(Model).where(Model.source_id == source_id)
         )
-        total += result.rowcount or 0  # type: ignore[union-attr]
+        if isinstance(result, CursorResult):
+            total += result.rowcount or 0
     return total

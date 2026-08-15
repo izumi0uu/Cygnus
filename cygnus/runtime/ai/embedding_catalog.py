@@ -20,14 +20,16 @@ from typing import Iterable
 
 @dataclass(frozen=True)
 class EmbeddingModelSpec:
-    id: str                    # canonical: "<provider>/<model_id>", e.g. "openai/text-embedding-3-small"
-    provider: str              # matches ProviderType: "openai" | "google" | ...
-    model_id: str              # ID sent to the provider API: "text-embedding-3-small"
-    dimension: int             # output vector dim — must match a wiki_page_embeddings_<dim> table
-    max_input_tokens: int      # provider's per-request token cap (used for chunking budgets)
-    label: str                 # short label shown in UI
+    id: str  # canonical: "<provider>/<model_id>", e.g. "openai/text-embedding-3-small"
+    provider: str  # matches ProviderType: "openai" | "google" | ...
+    model_id: str  # ID sent to the provider API: "text-embedding-3-small"
+    dimension: int  # output vector dim — must match a wiki_page_embeddings_<dim> table
+    max_input_tokens: (
+        int  # provider's per-request token cap (used for chunking budgets)
+    )
+    label: str  # short label shown in UI
     cost_per_1m_tokens: float | None  # USD per 1M input tokens; None = unknown / free
-    notes: str | None = None   # short hint for admins
+    notes: str | None = None  # short hint for admins
 
 
 # All entries here MUST have a `dimension` value that has a matching

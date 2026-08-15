@@ -34,7 +34,9 @@ SURFACE_BASELINE_FILES = [
 
 def test_surface_baseline_files_exist() -> None:
     for relative_path in SURFACE_BASELINE_FILES:
-        assert Path(relative_path).is_file(), f"missing mirrored surface file: {relative_path}"
+        assert Path(relative_path).is_file(), (
+            f"missing mirrored surface file: {relative_path}"
+        )
 
 
 def test_surface_baseline_files_are_syntax_valid() -> None:

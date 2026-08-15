@@ -1,3 +1,7 @@
+from cygnus.governance.approval_guards import (
+    approval_digest,
+    publish_scope_digest,
+)
 from cygnus.governance.audience_bindings import (
     AudienceBindingConflict,
     AudienceBindingConflictRecord,
@@ -106,6 +110,14 @@ from cygnus.governance.ticket_draft_promotions import (
     TicketDraftPromotionResult,
     promote_ticket_cluster_to_draft,
 )
+from cygnus.governance.tool_command_receipts import (
+    ToolCommandReceiptConflict,
+    ToolCommandReceiptWrite,
+    create_tool_command_receipt,
+    replay_tool_command_receipt,
+    tool_command_receipt_ref,
+    tool_command_request_fingerprint,
+)
 
 __all__ = [
     "AudienceBindingConflict",
@@ -114,6 +126,8 @@ __all__ = [
     "AudienceBindingLifecycle",
     "AudienceBindingNotFound",
     "AudienceConflictProviderData",
+    "approval_digest",
+    "publish_scope_digest",
     "GovernanceAuditEntry",
     "GovernanceAuditPage",
     "GovernanceAuditPhase",
@@ -146,6 +160,8 @@ __all__ = [
     "TicketDraftPromotionCommand",
     "TicketDraftPromotionConflict",
     "TicketDraftPromotionResult",
+    "ToolCommandReceiptConflict",
+    "ToolCommandReceiptWrite",
     "GovernanceSignalStatus",
     "GovernanceLedgerConflict",
     "append_draft_event",
@@ -196,4 +212,8 @@ __all__ = [
     "load_drift_signal_provider",
     "resolve_governance_signal",
     "promote_ticket_cluster_to_draft",
+    "create_tool_command_receipt",
+    "replay_tool_command_receipt",
+    "tool_command_receipt_ref",
+    "tool_command_request_fingerprint",
 ]

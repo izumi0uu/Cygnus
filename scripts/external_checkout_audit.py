@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import TypedDict
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BASE_REF = "origin/main"
@@ -62,7 +63,7 @@ def resolve_git_dir(repo_path: Path) -> Path | None:
         text = marker.read_text(encoding="utf-8").strip()
         prefix = "gitdir:"
         if text.startswith(prefix):
-            target = text[len(prefix):].strip()
+            target = text[len(prefix) :].strip()
             return (repo_path / target).resolve()
     return None
 
@@ -95,7 +96,9 @@ def is_upstream_origin(url: str | None) -> bool:
 
 
 def run_git(repo_path: Path, *args: str) -> str:
-    return subprocess.check_output(["git", "-C", str(repo_path), *args], text=True).strip()
+    return subprocess.check_output(
+        ["git", "-C", str(repo_path), *args], text=True
+    ).strip()
 
 
 def safe_git(repo_path: Path, *args: str) -> tuple[str | None, str | None]:
@@ -105,8 +108,12 @@ def safe_git(repo_path: Path, *args: str) -> tuple[str | None, str | None]:
         return None, str(exc)
 
 
-def collect_ahead_commits(repo_path: Path, base_ref: str) -> tuple[list[dict[str, str]], str | None]:
-    raw, error = safe_git(repo_path, "log", "--reverse", "--format=%H%x09%s", f"{base_ref}..HEAD")
+def collect_ahead_commits(
+    repo_path: Path, base_ref: str
+) -> tuple[list[dict[str, str]], str | None]:
+    raw, error = safe_git(
+        repo_path, "log", "--reverse", "--format=%H%x09%s", f"{base_ref}..HEAD"
+    )
     if error is not None:
         return [], error
     if not raw:
@@ -130,7 +137,38 @@ def collect_status_lines(repo_path: Path) -> tuple[list[str], str | None]:
     return [line for line in raw.splitlines() if line], None
 
 
-def classify_repo(repo_path: Path, *, base_ref: str = DEFAULT_BASE_REF) -> dict[str, object] | None:
+class CheckoutRecord(TypedDict):
+    path: str
+    repo_name: str
+    contains_arkon_name: bool
+    origin_url: str | None
+    is_upstream_origin: bool
+    branch: str | None
+    head_commit: str | None
+    base_ref: str
+    ahead_commit_count: int
+    ahead_commits: list[dict[str, str]]
+    status_lines: list[str]
+    untracked_files: list[str]
+    has_tracked_dirty: bool
+    requires_preservation: bool
+    preservation_reasons: list[str]
+    physical_delete_blocked: bool
+    inspection_errors: list[str]
+
+
+class CheckoutAudit(TypedDict):
+    audit_name: str
+    base_ref: str
+    search_roots: list[str]
+    checkout_count: int
+    requires_preservation_count: int
+    checkouts: list[CheckoutRecord]
+
+
+def classify_repo(
+    repo_path: Path, *, base_ref: str = DEFAULT_BASE_REF
+) -> CheckoutRecord | None:
     origin_url = read_origin_url(repo_path)
     contains_arkon_name = "arkon" in repo_path.name.lower()
     upstream = is_upstream_origin(origin_url)
@@ -185,10 +223,10 @@ def audit_external_checkouts(
     *,
     max_depth: int = 4,
     base_ref: str = DEFAULT_BASE_REF,
-) -> dict[str, object]:
+) -> CheckoutAudit:
     roots = search_roots or default_search_roots()
     seen_paths: set[Path] = set()
-    checkouts: list[dict[str, object]] = []
+    checkouts: list[CheckoutRecord] = []
 
     for root in roots:
         for repo_path in iter_git_repos(root, max_depth=max_depth):
@@ -206,7 +244,9 @@ def audit_external_checkouts(
         "base_ref": base_ref,
         "search_roots": [str(path) for path in roots],
         "checkout_count": len(checkouts),
-        "requires_preservation_count": sum(1 for item in checkouts if item["requires_preservation"]),
+        "requires_preservation_count": sum(
+            1 for item in checkouts if item["requires_preservation"]
+        ),
         "checkouts": checkouts,
     }
 
@@ -246,7 +286,9 @@ def main() -> int:
 
     explicit_roots = [Path(value).expanduser().resolve() for value in args.search_root]
     search_roots = explicit_roots or default_search_roots()
-    payload = audit_external_checkouts(search_roots, max_depth=args.max_depth, base_ref=args.base_ref)
+    payload = audit_external_checkouts(
+        search_roots, max_depth=args.max_depth, base_ref=args.base_ref
+    )
 
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))

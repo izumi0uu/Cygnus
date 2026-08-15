@@ -8,7 +8,7 @@ from typing import Any, cast, final
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cygnus.domain import AudienceContext
+from cygnus.domain import AudienceContext, governed_object_ref
 from cygnus.governance.feedback import (
     FeedbackCommandConflict,
     FeedbackSignalInput,
@@ -157,7 +157,7 @@ class GovernedFeedbackTools:
                 if page is None:
                     page = draft_page
 
-                draft_object_id = _draft_object_id(draft, draft_page)
+                draft_object_id = _draft_object_id(draft_page)
                 if (
                     normalized_object_id is not None
                     and normalized_object_id != draft_object_id
@@ -249,18 +249,18 @@ class GovernedFeedbackTools:
         }
 
     async def _scoped_object(self, object_id: str) -> WikiPage | None:
-        """Resolve a typed wiki object through the actor's SQL scope."""
+        """Resolve an immutable page identity through the actor's SQL scope."""
 
-        if not object_id.startswith("ko-") or len(object_id) <= 3:
+        page_id = _governed_page_id(object_id)
+        if page_id is None:
             return None
-        statement = select(WikiPage).where(WikiPage.slug == object_id[3:])
+        statement = select(WikiPage).where(WikiPage.id == page_id)
         scope_clause = build_wiki_scope_clause(self._actor, action="read")
         if scope_clause is not None:
             statement = statement.where(scope_clause)
-        pages = tuple((await self._session.execute(statement.limit(2))).scalars().all())
-        if len(pages) != 1:
+        page = (await self._session.execute(statement)).scalar_one_or_none()
+        if page is None:
             return None
-        page = pages[0]
         projected = wiki_page_to_knowledge_object(page)
         if projected is None or projected.object_id != object_id:
             return None
@@ -345,20 +345,22 @@ def _audience_payload(context: AudienceContext) -> dict[str, str | None]:
     }
 
 
-def _draft_object_id(
-    draft: WikiPageDraft,
-    page: WikiPage | None,
-) -> str | None:
-    if page is not None:
-        projected = wiki_page_to_knowledge_object(page)
-        return projected.object_id if projected is not None else None
-    metadata = draft.suggested_metadata
-    if not isinstance(metadata, dict):
+def _draft_object_id(page: WikiPage | None) -> str | None:
+    if page is None:
         return None
-    slug = metadata.get("slug")
-    if not isinstance(slug, str) or not slug.strip():
+    projected = wiki_page_to_knowledge_object(page)
+    return projected.object_id if projected is not None else None
+
+
+def _governed_page_id(object_id: str) -> uuid.UUID | None:
+    prefix = "ko-page-"
+    if not object_id.startswith(prefix):
         return None
-    return f"ko-{slug.strip()}"
+    try:
+        page_id = uuid.UUID(object_id[len(prefix) :])
+    except ValueError:
+        return None
+    return page_id if governed_object_ref(page_id) == object_id else None
 
 
 def _parse_uuid(value: object, *, label: str) -> uuid.UUID:
@@ -488,7 +490,15 @@ _FEEDBACK_TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
                     },
                     "required": ["visibility"],
                 },
-                "object_id": {"type": "string", "minLength": 1, "maxLength": 320},
+                "object_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 320,
+                    "description": (
+                        "Exact immutable ko-page-<WikiPage UUID> returned by "
+                        "governed retrieval; slugs are not accepted."
+                    ),
+                },
                 "draft_id": {"type": "string", "format": "uuid"},
                 "notes": {"type": "string", "minLength": 1, "maxLength": 10_000},
                 "source_context_ref": {

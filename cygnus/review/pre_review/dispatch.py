@@ -146,14 +146,22 @@ def _matches_pending_draft(
     draft: WikiPageDraft | None,
     staged: PendingAiPreReview,
 ) -> bool:
-    return _matches_draft_revision(draft, staged) and draft.ai_check_status == "pending"
+    return bool(
+        draft is not None
+        and _matches_draft_revision(draft, staged)
+        and draft.ai_check_status == "pending"
+    )
 
 
 def _matches_queued_draft(
     draft: WikiPageDraft | None,
     staged: PendingAiPreReview,
 ) -> bool:
-    return _matches_draft_revision(draft, staged) and draft.ai_check_status == "queued"
+    return bool(
+        draft is not None
+        and _matches_draft_revision(draft, staged)
+        and draft.ai_check_status == "queued"
+    )
 
 
 def _has_terminal_draft_verdict(
@@ -161,7 +169,8 @@ def _has_terminal_draft_verdict(
     staged: PendingAiPreReview,
 ) -> bool:
     return bool(
-        _matches_draft_revision(draft, staged)
+        draft is not None
+        and _matches_draft_revision(draft, staged)
         and draft.ai_check_status in _FINAL_DRAFT_AI_STATUSES
     )
 
@@ -311,7 +320,7 @@ async def _claim_due_dispatches(
         if dispatch is None or not _dispatch_is_due(dispatch, now=now):
             continue
 
-        if _has_terminal_draft_verdict(draft, staged):
+        if draft is not None and _has_terminal_draft_verdict(draft, staged):
             _mark_completed(
                 dispatch,
                 now=now,
@@ -321,7 +330,7 @@ async def _claim_due_dispatches(
             continue
 
         if dispatch.dispatch_status == AI_PRE_REVIEW_DISPATCH_PENDING:
-            if _matches_pending_draft(draft, staged):
+            if draft is not None and _matches_pending_draft(draft, staged):
                 if ai_pre_review_enabled is None:
                     ai_pre_review_enabled = await _ai_pre_review_enabled(db)
                 if not ai_pre_review_enabled:

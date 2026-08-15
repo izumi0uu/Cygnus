@@ -10,6 +10,7 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cygnus.domain.objects import governed_object_ref
 from cygnus.governance.ledger import GovernanceEventType
 from cygnus.governance.ticket_pilot import (
     TicketPilotFunnelQuery,
@@ -194,15 +195,16 @@ def _publication(
     publish_event: GovernanceLedgerEvent,
     published_at: datetime,
 ) -> GovernancePublication:
+    page_id = uuid.uuid4()
     return GovernancePublication(
         id=uuid.uuid4(),
         draft_id=draft.id,
-        page_id=uuid.uuid4(),
+        page_id=page_id,
         approval_event_id=approval_event.id,
         publish_event_id=publish_event.id,
         command_id=f"publish:{draft.id}",
         request_fingerprint=uuid.uuid4().hex * 2,
-        object_ref=f"wiki-page:{draft.id}",
+        object_ref=governed_object_ref(page_id),
         object_type="troubleshooting_flow",
         object_version=1,
         action_key="publish",

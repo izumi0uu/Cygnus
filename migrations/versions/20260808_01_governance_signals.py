@@ -31,8 +31,12 @@ def upgrade() -> None:
         sa.Column("page_id", postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column("source_id", postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column("audience_binding_ref", sa.String(length=220), nullable=True),
-        sa.Column("audience_filter", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-        sa.Column("affected_surfaces", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column(
+            "audience_filter", postgresql.JSONB(astext_type=sa.Text()), nullable=True
+        ),
+        sa.Column(
+            "affected_surfaces", postgresql.JSONB(astext_type=sa.Text()), nullable=False
+        ),
         sa.Column(
             "trigger_signals",
             postgresql.JSONB(astext_type=sa.Text()),
@@ -45,7 +49,9 @@ def upgrade() -> None:
         sa.Column("reason", sa.Text(), nullable=False),
         sa.Column("evidence_excerpt", sa.Text(), nullable=False),
         sa.Column("queue_owner", sa.String(length=220), nullable=True),
-        sa.Column("status", sa.String(length=20), server_default="active", nullable=False),
+        sa.Column(
+            "status", sa.String(length=20), server_default="active", nullable=False
+        ),
         sa.Column(
             "observed_at",
             sa.DateTime(timezone=True),

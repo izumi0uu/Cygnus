@@ -13,9 +13,12 @@ by setting a custom base_url.
 import asyncio
 import base64
 import json
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from openai import AsyncOpenAI
 
 from cygnus.substrate.agent_protocol import (
     AssistantTurn,
@@ -27,6 +30,7 @@ from cygnus.runtime.ai.providers.base import (
     LLMProvider,
     ProviderConfig,
     VisionProvider,
+    observe_provider_call,
 )
 
 
@@ -35,12 +39,13 @@ class OpenAIEmbedding(EmbeddingProvider):
 
     def __init__(self, config: ProviderConfig):
         super().__init__(config)
-        self._client = None
+        self._client: AsyncOpenAI | None = None
 
     @property
-    def client(self):
+    def client(self) -> "AsyncOpenAI":
         if self._client is None:
             import openai
+
             self._client = openai.AsyncOpenAI(
                 api_key=self.config.api_key,
                 base_url=self.config.base_url,  # None = default OpenAI
@@ -56,7 +61,13 @@ class OpenAIEmbedding(EmbeddingProvider):
         if self.config.dimensions:
             kwargs["dimensions"] = self.dimensions
 
-        response = await self.client.embeddings.create(**kwargs)
+        with observe_provider_call(
+            provider="openai",
+            model=self.config.model_id,
+            operation="embed",
+        ) as observation:
+            response = await self.client.embeddings.create(**kwargs)
+            observation.success(response)
         return response.data[0].embedding
 
     async def embed_batch(
@@ -69,14 +80,20 @@ class OpenAIEmbedding(EmbeddingProvider):
 
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
-            kwargs = {
+            kwargs: dict = {
                 "model": self.config.model_id,
                 "input": batch,
             }
             if self.config.dimensions:
                 kwargs["dimensions"] = self.dimensions
 
-            response = await self.client.embeddings.create(**kwargs)
+            with observe_provider_call(
+                provider="openai",
+                model=self.config.model_id,
+                operation="embed_batch",
+            ) as observation:
+                response = await self.client.embeddings.create(**kwargs)
+                observation.success(response)
             # Sort by index to maintain order
             sorted_data = sorted(response.data, key=lambda x: x.index)
             all_embeddings.extend([d.embedding for d in sorted_data])
@@ -98,12 +115,13 @@ class OpenAILLM(LLMProvider):
 
     def __init__(self, config: ProviderConfig):
         super().__init__(config)
-        self._client = None
+        self._client: AsyncOpenAI | None = None
 
     @property
-    def client(self):
+    def client(self) -> "AsyncOpenAI":
         if self._client is None:
             import openai
+
             self._client = openai.AsyncOpenAI(
                 api_key=self.config.api_key,
                 base_url=self.config.base_url,
@@ -138,7 +156,13 @@ class OpenAILLM(LLMProvider):
             kwargs["max_tokens"] = max_tokens
         kwargs.update(self._reasoning_kwargs())
 
-        response = await self.client.chat.completions.create(**kwargs)
+        with observe_provider_call(
+            provider="openai",
+            model=self.config.model_id,
+            operation="generate",
+        ) as observation:
+            response = await self.client.chat.completions.create(**kwargs)
+            observation.success(response)
         return response.choices[0].message.content or ""
 
     async def generate_with_tools(
@@ -164,7 +188,13 @@ class OpenAILLM(LLMProvider):
             kwargs["max_tokens"] = max_tokens
         kwargs.update(self._reasoning_kwargs())
 
-        response = await self.client.chat.completions.create(**kwargs)
+        with observe_provider_call(
+            provider="openai",
+            model=self.config.model_id,
+            operation="generate_tools",
+        ) as observation:
+            response = await self.client.chat.completions.create(**kwargs)
+            observation.success(response)
 
         choice = response.choices[0]
         message = choice.message
@@ -178,14 +208,20 @@ class OpenAILLM(LLMProvider):
                         args = json.loads(tc.function.arguments)
                     except Exception:
                         pass
-                tool_calls.append(ToolCall(id=tc.id, name=tc.function.name, arguments=args))
+                tool_calls.append(
+                    ToolCall(id=tc.id, name=tc.function.name, arguments=args)
+                )
 
-        reason_map = {"stop": "end_turn", "tool_calls": "tool_use", "length": "max_tokens"}
+        reason_map = {
+            "stop": "end_turn",
+            "tool_calls": "tool_use",
+            "length": "max_tokens",
+        }
         finish_reason = reason_map.get(choice.finish_reason or "stop", "end_turn")
 
         return AssistantTurn(
             text=text or None,
-            tool_calls=tool_calls,
+            tool_calls=tuple(tool_calls),
             finish_reason=finish_reason,
         )
 
@@ -202,12 +238,13 @@ class OpenAIVision(VisionProvider):
 
     def __init__(self, config: ProviderConfig):
         super().__init__(config)
-        self._client = None
+        self._client: AsyncOpenAI | None = None
 
     @property
-    def client(self):
+    def client(self) -> "AsyncOpenAI":
         if self._client is None:
             import openai
+
             self._client = openai.AsyncOpenAI(
                 api_key=self.config.api_key,
                 base_url=self.config.base_url,
@@ -232,22 +269,28 @@ class OpenAIVision(VisionProvider):
 
         for attempt in range(3):
             try:
-                response = await self.client.chat.completions.create(
+                with observe_provider_call(
+                    provider="openai",
                     model=self.config.model_id,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": prompt},
-                                {
-                                    "type": "image_url",
-                                    "image_url": {"url": data_url, "detail": "low"},
-                                },
-                            ],
-                        }
-                    ],
-                    temperature=0.2,
-                )
+                    operation="vision",
+                ) as observation:
+                    response = await self.client.chat.completions.create(
+                        model=self.config.model_id,
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": prompt},
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {"url": data_url, "detail": "low"},
+                                    },
+                                ],
+                            }
+                        ],
+                        temperature=0.2,
+                    )
+                    observation.success(response)
                 return response.choices[0].message.content or ""
             except Exception as e:
                 logger.warning(f"OpenAI Vision attempt {attempt + 1} failed: {e}")

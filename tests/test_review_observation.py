@@ -4,7 +4,9 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Callable, cast
 import unittest
+import uuid
 
+from cygnus.domain import governed_object_ref
 from cygnus.review.drift import DriftGovernanceSurface, get_drift_governance_surface
 from cygnus.review.fixtures import sample_review_bundles
 from cygnus.review.home import get_review_home_surface
@@ -23,6 +25,9 @@ from cygnus.review.source_blindness import (
     build_source_failure_observations,
 )
 from cygnus.review.surface import ObservationState, SurfaceObservation
+
+_VISIBLE_PAGE_ID = uuid.UUID("00000000-0000-4000-8000-000000000701")
+_HIDDEN_PAGE_ID = uuid.UUID("00000000-0000-4000-8000-000000000702")
 
 
 PARTIAL_REVIEW = SurfaceObservation(
@@ -78,7 +83,9 @@ class SurfaceObservationTests(unittest.TestCase):
                 missing_signals=("release_delta",),
             )
 
-    def test_valid_observation_serializes_machine_codes_and_deduplicates_signals(self) -> None:
+    def test_valid_observation_serializes_machine_codes_and_deduplicates_signals(
+        self,
+    ) -> None:
         observation = SurfaceObservation(
             state=ObservationState.PARTIAL,
             observed_count=0,
@@ -99,7 +106,9 @@ class SurfaceObservationTests(unittest.TestCase):
         )
 
     def test_empty_and_nonempty_builders_keep_truthful_shape(self) -> None:
-        empty_home = get_review_home_surface(bundles=(), observation=PARTIAL_REVIEW).to_dict()
+        empty_home = get_review_home_surface(
+            bundles=(), observation=PARTIAL_REVIEW
+        ).to_dict()
         self.assertEqual(empty_home["priority_stack"], [])
         self.assertEqual(empty_home["available_commands"], [])
         self.assertIsNone(empty_home["command_brief"])
@@ -128,7 +137,9 @@ class SurfaceObservationTests(unittest.TestCase):
             impact_state=SourceImpactState.UNMAPPED,
         )
 
-        drift_builder = cast(Callable[..., DriftGovernanceSurface], get_drift_governance_surface)
+        drift_builder = cast(
+            Callable[..., DriftGovernanceSurface], get_drift_governance_surface
+        )
         drift_surface = drift_builder(
             bundles=(),
             observation=UNAVAILABLE_DRIFT,
@@ -199,7 +210,7 @@ class SurfaceObservationTests(unittest.TestCase):
             cast(
                 object,
                 SimpleNamespace(
-                    id="page-visible",
+                    id=_VISIBLE_PAGE_ID,
                     slug="billing-incident",
                     knowledge_type_slugs=("known_issue_page",),
                     source_ids=("source-error",),
@@ -211,7 +222,7 @@ class SurfaceObservationTests(unittest.TestCase):
             cast(
                 object,
                 SimpleNamespace(
-                    id="page-hidden",
+                    id=_HIDDEN_PAGE_ID,
                     slug="hidden-incident",
                     knowledge_type_slugs=("known_issue_page",),
                     source_ids=("source-ready",),
@@ -230,7 +241,10 @@ class SurfaceObservationTests(unittest.TestCase):
         self.assertEqual(observation.title, "incident-feed.json")
         self.assertEqual(observation.error_message, "source_error_detail_unavailable")
         self.assertEqual(observation.linked_wiki_refs, ("billing-incident",))
-        self.assertEqual(observation.linked_object_refs, ("ko-billing-incident",))
+        self.assertEqual(
+            observation.linked_object_refs,
+            (governed_object_ref(_VISIBLE_PAGE_ID),),
+        )
         self.assertEqual(observation.impact_state, SourceImpactState.MAPPED)
 
     def test_projector_carries_durable_audience_and_page_scoped_propagation_truth(
@@ -256,7 +270,7 @@ class SurfaceObservationTests(unittest.TestCase):
             cast(
                 object,
                 SimpleNamespace(
-                    id="page-visible",
+                    id=_VISIBLE_PAGE_ID,
                     slug="billing-incident",
                     knowledge_type_slugs=("known_issue_page",),
                     source_ids=("source-error",),
@@ -268,8 +282,8 @@ class SurfaceObservationTests(unittest.TestCase):
             cast(
                 object,
                 SimpleNamespace(
-                    page_id="page-visible",
-                    object_ref="ko-billing-incident",
+                    page_id=_VISIBLE_PAGE_ID,
+                    object_ref=governed_object_ref(_VISIBLE_PAGE_ID),
                     variant_ref="enterprise-eu",
                     channel="external-help",
                     visibility="external",
@@ -291,8 +305,8 @@ class SurfaceObservationTests(unittest.TestCase):
                 object,
                 SimpleNamespace(
                     id="publication-visible",
-                    page_id="page-visible",
-                    object_ref="ko-billing-incident",
+                    page_id=_VISIBLE_PAGE_ID,
+                    object_ref=governed_object_ref(_VISIBLE_PAGE_ID),
                 ),
             ),
         )
@@ -302,8 +316,8 @@ class SurfaceObservationTests(unittest.TestCase):
                 object,
                 SimpleNamespace(
                     id="publication-hidden",
-                    page_id="page-hidden",
-                    object_ref="ko-billing-incident",
+                    page_id=_HIDDEN_PAGE_ID,
+                    object_ref=governed_object_ref(_VISIBLE_PAGE_ID),
                 ),
             ),
         )
@@ -398,4 +412,3 @@ class SurfaceObservationTests(unittest.TestCase):
         self.assertEqual(observation.propagation_impacts, ())
         self.assertIn("no governed Wiki impact mapped", surface.summary)
         self.assertEqual(surface.available_commands, ())
-

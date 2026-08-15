@@ -64,10 +64,11 @@ def create_mcp_server() -> FastMCP:
             "and object version before a durable command.\n"
             "12. `publish_knowledge_object` — administrator-only durable publication; a successful "
             "command stages propagation as `pending`, never as downstream `synced`.\n"
-            "Generic wiki and source tools remain available for substrate exploration, but "
-            "must not bypass the governed object path for support answers. If governed "
-            "retrieval finds no usable object or reports a restriction, say so and fall back "
-            "or escalate instead of fabricating an answer."
+            "Only these twelve governed tools are exposed through /mcp; generic wiki, raw "
+            "source, and direct mutation tools are not part of the governed profile and "
+            "cannot be called, for any role. If governed retrieval finds no usable object "
+            "or reports a restriction, say so and fall back or escalate instead of "
+            "fabricating an answer."
         ),
     )
 

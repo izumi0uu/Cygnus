@@ -7,8 +7,12 @@ from cygnus.runtime.main import app, create_app
 
 
 def test_backend_settings_provider_is_cached_and_parses_cors_list(monkeypatch) -> None:
-    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://boot:boot@localhost:5432/boot")
-    monkeypatch.setenv("CORS_ORIGINS", "https://ops.cygnus.local, https://review.cygnus.local")
+    monkeypatch.setenv(
+        "DATABASE_URL", "postgresql+asyncpg://boot:boot@localhost:5432/boot"
+    )
+    monkeypatch.setenv(
+        "CORS_ORIGINS", "https://ops.cygnus.local, https://review.cygnus.local"
+    )
 
     get_settings.cache_clear()
     resolved = get_settings()
@@ -29,8 +33,12 @@ def test_backend_app_factory_exposes_boot_entry_with_settings_state() -> None:
     assert assembled.title == "Cygnus API"
     assert assembled.state.settings is not None
 
-    http_routes = {route.path for route in assembled.routes if isinstance(route, APIRoute)}
-    mount_routes = {route.path for route in assembled.routes if isinstance(route, Mount)}
+    http_routes = {
+        route.path for route in assembled.routes if isinstance(route, APIRoute)
+    }
+    mount_routes = {
+        route.path for route in assembled.routes if isinstance(route, Mount)
+    }
     openapi_paths = set(assembled.openapi()["paths"])
 
     assert "/" in http_routes

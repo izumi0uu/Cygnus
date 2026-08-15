@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import asyncio
+from datetime import datetime, timedelta, timezone
 import os
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 import unittest
 import uuid
 from unittest.mock import AsyncMock, patch
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -18,13 +19,18 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from cygnus.domain import AudienceFilter, Visibility
+from cygnus.domain.objects import governed_object_ref
 from cygnus.governance import (
     AudienceBindingCreate,
+    AudienceBindingLifecycle,
     GovernanceEventType,
     GovernanceLedgerConflict,
     append_draft_event,
+    approval_digest,
     create_audience_binding,
+    list_audience_bindings,
     list_draft_events,
+    publish_scope_digest,
 )
 from cygnus.governance.ledger import record_draft_update
 from cygnus.publish import (
@@ -33,20 +39,27 @@ from cygnus.publish import (
     DurablePublishDenied,
     PropagationStatus,
     PropagationUpdateCommand,
+    acknowledge_propagation_delivery,
     apply_durable_publish,
     get_publication,
+    list_propagation_deliveries,
     list_publication_propagations,
     update_propagation,
 )
+from cygnus.publish.delivery import canonical_json, sign_body
+
 from cygnus.review.contributions import approve_wiki_draft, create_wiki_draft
 from cygnus.runtime.services import wiki_service
 from cygnus.runtime.services.auth_service import require_admin
 from cygnus.runtime.database.models import (
+    AuditLog,
     Employee,
     GovernanceAudienceBinding,
     GovernanceLedgerEvent,
     GovernancePropagation,
+    GovernancePropagationDelivery,
     GovernancePublication,
+    GovernanceSignal,
     Source,
     WikiPage,
     WikiPageDraft,
@@ -59,6 +72,8 @@ from cygnus.runtime.routers.governance.publish import (
     PublishApplyRequest,
     publish_apply,
 )
+
+_LEDGER_ACK_SECRET = "cyg138-ledger-test-ack-secret"
 
 
 class _ScalarResult:
@@ -155,7 +170,7 @@ class GovernanceLedgerUnitTests(unittest.TestCase):
         event = asyncio.run(
             record_draft_update(
                 cast(AsyncSession, cast(object, fake)),
-                draft,
+                cast(WikiPageDraft, draft),
                 previous_draft_version=3,
                 from_state="in_review",
                 to_state="in_review",
@@ -190,20 +205,33 @@ class GovernanceLedgerUnitTests(unittest.TestCase):
     def test_publish_command_normalizes_channels_and_fingerprints_request(self) -> None:
         draft_id = uuid.uuid4()
         approval_ref = uuid.uuid4()
+        signal_id = uuid.uuid4()
+        approval_digest = "a" * 64
+        scope_digest = "b" * 64
         command = DurablePublishCommand(
             draft_id=draft_id,
             approval_ref=approval_ref,
+            approval_digest=approval_digest,
+            scope_digest=scope_digest,
+            signal_id=signal_id,
+            signal_freshness=" fresh ",
             command_id=" command-1 ",
             action_key=" publish ",
             target_channels=("agent-copilot", "agent-copilot", "internal-search"),
+            expected_version=3,
             reason=" checked ",
         )
         equivalent = DurablePublishCommand(
             draft_id=draft_id,
             approval_ref=approval_ref,
+            approval_digest=approval_digest,
+            scope_digest=scope_digest,
+            signal_id=signal_id,
+            signal_freshness="fresh",
             command_id="command-1",
             action_key="publish",
             target_channels=("agent-copilot", "internal-search"),
+            expected_version=3,
             reason="checked",
         )
 
@@ -212,6 +240,34 @@ class GovernanceLedgerUnitTests(unittest.TestCase):
             ("agent-copilot", "internal-search"),
         )
         self.assertEqual(command.request_fingerprint, equivalent.request_fingerprint)
+        self.assertEqual(command.expected_version, 3)
+        self.assertEqual(command.signal_freshness, "fresh")
+
+    def test_publish_command_rejects_missing_or_invalid_guards(self) -> None:
+        draft_id = uuid.uuid4()
+        approval_ref = uuid.uuid4()
+        signal_id = uuid.uuid4()
+        common: dict[str, Any] = {
+            "draft_id": draft_id,
+            "approval_ref": approval_ref,
+            "approval_digest": "a" * 64,
+            "scope_digest": "b" * 64,
+            "signal_id": signal_id,
+            "signal_freshness": "fresh",
+            "command_id": "command-1",
+            "action_key": "publish",
+            "target_channels": ("agent-copilot",),
+            "expected_version": 3,
+        }
+        for label, overrides in (
+            ("approval_digest", {"approval_digest": "short"}),
+            ("scope_digest", {"scope_digest": "x" * 64}),
+            ("signal_freshness", {"signal_freshness": "expired"}),
+            ("expected_version", {"expected_version": 0}),
+        ):
+            with self.subTest(label=label):
+                with self.assertRaises(ValueError):
+                    _ = DurablePublishCommand(**{**common, **overrides})
 
     def test_durable_route_requires_complete_command_envelope(self) -> None:
         with self.assertRaises(HTTPException) as raised:
@@ -221,6 +277,7 @@ class GovernanceLedgerUnitTests(unittest.TestCase):
                         draft_id=uuid.uuid4(),
                         action_key="publish",
                     ),
+                    request=cast(Request, SimpleNamespace(headers={})),
                     current_user=cast(
                         Employee,
                         cast(object, SimpleNamespace(id=uuid.uuid4())),
@@ -262,12 +319,17 @@ class GovernanceLedgerUnitTests(unittest.TestCase):
                     PublishApplyRequest(
                         draft_id=draft_id,
                         approval_ref=approval_ref,
+                        approval_digest="a" * 64,
+                        scope_digest="b" * 64,
+                        signal_id=uuid.uuid4(),
+                        signal_freshness="fresh",
                         command_id="publish-command-1",
                         action_key="publish",
                         target_channels=["agent-copilot"],
                         reason="approved evidence",
                         expected_version=3,
                     ),
+                    request=cast(Request, SimpleNamespace(headers={})),
                     current_user=cast(
                         Employee,
                         cast(object, SimpleNamespace(id=actor_id)),
@@ -310,8 +372,10 @@ class GovernanceLedgerPostgresTests(unittest.TestCase):
         scope_id = uuid.uuid4()
         draft_id: uuid.UUID | None = None
         page_id: uuid.UUID | None = None
+        signal_id: uuid.UUID | None = None
         publication_id: uuid.UUID | None = None
         unique = uuid.uuid4().hex
+        source_updated_at = datetime.now(timezone.utc)
 
         async def persistence_counts(session: AsyncSession) -> tuple[int, int, int]:
             event_count = (
@@ -346,9 +410,17 @@ class GovernanceLedgerPostgresTests(unittest.TestCase):
                     title="Verified support evidence",
                     full_text="A verified internal support procedure.",
                     source_type="url",
+                    language="en",
                     url=f"https://example.test/evidence/{unique}",
                     status="ready",
                     progress=100,
+                    created_at=source_updated_at,
+                    updated_at=source_updated_at,
+                    freshness_state="fresh",
+                    freshness_actor_id=actor_id,
+                    freshness_reason="Attested fresh for governed publication.",
+                    freshness_attested_at=source_updated_at + timedelta(seconds=1),
+                    freshness_expires_at=source_updated_at + timedelta(days=1),
                 )
                 session.add_all((actor, source))
                 await session.flush()
@@ -359,6 +431,7 @@ class GovernanceLedgerPostgresTests(unittest.TestCase):
                     content_md="# Refund policy\n\nUse verified evidence before refunding.",
                     note="ready for governed review",
                     draft_kind="create",
+                    source_metadata={"source_ids": [str(source.id)]},
                     suggested_metadata={
                         "slug": f"governance-ledger-{unique}",
                         "title": "Governance ledger integration policy",
@@ -374,13 +447,13 @@ class GovernanceLedgerPostgresTests(unittest.TestCase):
                     reviewer_id=actor.id,
                     reviewer_note="evidence and audience checked",
                 )
-                page.source_ids = [source.id]
+                self.assertEqual(page.source_ids, [source.id])
                 for channel in ("agent-copilot", "internal-search"):
                     _ = await create_audience_binding(
                         session,
                         command=AudienceBindingCreate(
                             page_id=page.id,
-                            object_ref=f"ko-{page.slug}",
+                            object_ref=governed_object_ref(page.id),
                             variant_ref="internal-governed",
                             channel=channel,
                             audience_filter=AudienceFilter(
@@ -389,6 +462,40 @@ class GovernanceLedgerPostgresTests(unittest.TestCase):
                         ),
                         actor_id=actor.id,
                     )
+                signal = GovernanceSignal(
+                    signal_ref=f"governance-ledger-signal-{unique}",
+                    signal_type="human_rewrite",
+                    object_ref=governed_object_ref(page.id),
+                    title="Governance ledger integration policy",
+                    object_type="answer_card",
+                    page_id=page.id,
+                    source_id=source.id,
+                    audience_binding_ref=None,
+                    audience_filter={
+                        "visibility": "internal",
+                        "brands": [],
+                        "product_lines": [],
+                        "plans": [],
+                        "regions": [],
+                        "languages": [],
+                        "product_versions": [],
+                    },
+                    affected_surfaces=["agent-copilot", "internal-search"],
+                    trigger_signals=[],
+                    evidence_source_type="support_document",
+                    freshness="fresh",
+                    summary="Verified support evidence triggers governed publication.",
+                    reason="Evidence and audience checked by a reviewer.",
+                    evidence_excerpt="A verified internal support procedure.",
+                    status="active",
+                    observed_at=datetime.now(timezone.utc),
+                    resolved_at=None,
+                    created_by_id=actor.id,
+                    version=1,
+                )
+                session.add(signal)
+                await session.flush()
+                signal_id = signal.id
                 index_page = await wiki_service.regenerate_index(
                     session,
                     scope_type="project",
@@ -413,12 +520,65 @@ class GovernanceLedgerPostgresTests(unittest.TestCase):
                     for event in events
                     if event.event_type == GovernanceEventType.APPROVED.value
                 )
+                self.assertIn("approval_digest", approval.payload)
+                loaded_draft = await session.get(WikiPageDraft, draft_id)
+                loaded_page = await session.get(WikiPage, page_id)
+                loaded_signal = await session.get(GovernanceSignal, signal_id)
+                self.assertIsNotNone(loaded_draft)
+                self.assertIsNotNone(loaded_page)
+                self.assertIsNotNone(loaded_signal)
+                if loaded_draft is None or loaded_page is None or loaded_signal is None:
+                    raise AssertionError("guarded publish fixtures unexpectedly absent")
+                sources = (
+                    (
+                        await session.execute(
+                            select(Source).where(Source.id == source_id)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                binding_rows = await list_audience_bindings(
+                    session,
+                    page_id=loaded_page.id,
+                    object_ref=governed_object_ref(loaded_page.id),
+                    lifecycle_state=AudienceBindingLifecycle.ACTIVE,
+                )
+                canonical_digest = approval_digest(
+                    draft=loaded_draft,
+                    page=loaded_page,
+                    final_content=loaded_page.content_md,
+                    reviewer_id=loaded_draft.reviewed_by_id,
+                    reviewed_at=loaded_draft.reviewed_at,
+                    reviewer_note=loaded_draft.reviewer_note,
+                )
+                self.assertEqual(
+                    canonical_digest,
+                    approval.payload["approval_digest"],
+                )
+                scope = publish_scope_digest(
+                    approval_ref=approval.id,
+                    approval_digest_value=canonical_digest,
+                    object_version=loaded_page.version,
+                    binding_rows=binding_rows,
+                    source_state=((source.id, source.status) for source in sources),
+                    signal_freshness=loaded_signal.freshness,
+                    signal_id=loaded_signal.id,
+                    signal_status=loaded_signal.status,
+                    action_key="publish",
+                    target_channels=("agent-copilot", "internal-search"),
+                )
                 command = DurablePublishCommand(
                     draft_id=draft_id,
                     approval_ref=approval.id,
+                    approval_digest=canonical_digest,
+                    scope_digest=scope,
+                    signal_id=loaded_signal.id,
+                    signal_freshness=loaded_signal.freshness,
                     command_id=f"publish-{unique}",
                     action_key="publish",
                     target_channels=("agent-copilot", "internal-search"),
+                    expected_version=loaded_page.version,
                     reason="approved evidence and internal audience",
                 )
                 result = await apply_durable_publish(
@@ -429,6 +589,8 @@ class GovernanceLedgerPostgresTests(unittest.TestCase):
                 self.assertTrue(result["persisted"])
                 self.assertFalse(result["rehearsal"])
                 self.assertFalse(result["replayed"])
+                self.assertEqual(result["approval_digest"], command.approval_digest)
+                self.assertEqual(result["scope_digest"], command.scope_digest)
                 propagation = cast(dict[str, object], result["propagation"])
                 summary = cast(dict[str, int], propagation["summary"])
                 self.assertEqual(summary["pending"], 2)
@@ -437,7 +599,7 @@ class GovernanceLedgerPostgresTests(unittest.TestCase):
 
             async with sessions() as session:
                 durable_projection = await get_durable_publish_projection(
-                    f"ko-governance-ledger-{unique}",
+                    governed_object_ref(page_id),
                     session,
                 )
                 self.assertIsNotNone(durable_projection)
@@ -465,7 +627,7 @@ class GovernanceLedgerPostgresTests(unittest.TestCase):
                 target = next(
                     item for item in propagations if item.surface_id == "agent-copilot"
                 )
-                update = PropagationUpdateCommand(
+                forbidden_update = PropagationUpdateCommand(
                     publication_id=publication_id,
                     surface_id=target.surface_id,
                     status=PropagationStatus.SYNCED,
@@ -474,23 +636,67 @@ class GovernanceLedgerPostgresTests(unittest.TestCase):
                     reason="downstream acknowledged version",
                     follow_up_commands=(),
                 )
-                updated = await update_propagation(
+                # Manual mutation may never set synced; only the signed ack path can.
+                with self.assertRaises(DurablePublishDenied):
+                    _ = await update_propagation(
+                        session,
+                        command=forbidden_update,
+                        actor_id=actor_id,
+                    )
+                await session.rollback()
+
+                deliveries = await list_propagation_deliveries(
+                    session, tuple(item.id for item in propagations)
+                )
+                delivery = next(
+                    item for item in deliveries if item.propagation_id == target.id
+                )
+                ack_payload = {
+                    "publication_id": str(delivery.publication_id),
+                    "surface_id": delivery.surface_id,
+                    "version": delivery.expected_page_version,
+                    "digest": delivery.desired_digest,
+                    "receipt_ref": "ledger-test-receipt",
+                }
+                ack_body = canonical_json(ack_payload)
+                ack_signature = f"sha256={sign_body(ack_body, _LEDGER_ACK_SECRET)}"
+                updated = await acknowledge_propagation_delivery(
                     session,
-                    command=update,
-                    actor_id=actor_id,
+                    delivery_id=delivery.id,
+                    ack_body=ack_body,
+                    signature=ack_signature,
+                    secret=_LEDGER_ACK_SECRET,
                 )
                 self.assertEqual(updated["status"], "synced")
-                self.assertEqual(updated["version"], 2)
                 self.assertFalse(updated["replayed"])
+                self.assertEqual(
+                    updated["acknowledged_digest"], delivery.desired_digest
+                )
                 await session.commit()
 
             async with sessions() as session:
-                propagation_replay = await update_propagation(
+                propagations = await list_publication_propagations(
                     session,
-                    command=update,
-                    actor_id=actor_id,
+                    publication_id,
+                )
+                delivery = next(
+                    item
+                    for item in await list_propagation_deliveries(
+                        session, tuple(item.id for item in propagations)
+                    )
+                    if item.surface_id == "agent-copilot"
+                )
+                propagation_replay = await acknowledge_propagation_delivery(
+                    session,
+                    delivery_id=delivery.id,
+                    ack_body=ack_body,
+                    signature=ack_signature,
+                    secret=_LEDGER_ACK_SECRET,
                 )
                 self.assertTrue(propagation_replay["replayed"])
+                self.assertEqual(
+                    propagation_replay["delivery_id"], updated["delivery_id"]
+                )
                 publication = await get_publication(session, publication_id)
                 self.assertIsNotNone(publication)
                 events = await list_draft_events(session, draft_id)
@@ -512,9 +718,14 @@ class GovernanceLedgerPostgresTests(unittest.TestCase):
                 conflicting = DurablePublishCommand(
                     draft_id=draft_id,
                     approval_ref=command.approval_ref,
+                    approval_digest=command.approval_digest,
+                    scope_digest=command.scope_digest,
+                    signal_id=command.signal_id,
+                    signal_freshness=command.signal_freshness,
                     command_id=command.command_id,
                     action_key="publish",
                     target_channels=("agent-copilot",),
+                    expected_version=command.expected_version,
                     reason="different request",
                 )
                 with self.assertRaises(DurablePublishConflict):
@@ -553,12 +764,21 @@ class GovernanceLedgerPostgresTests(unittest.TestCase):
                     rejected = DurablePublishCommand(
                         draft_id=draft_id,
                         approval_ref=approval_ref,
+                        approval_digest=command.approval_digest,
+                        scope_digest=command.scope_digest,
+                        signal_id=command.signal_id,
+                        signal_freshness=command.signal_freshness,
                         command_id=f"rejected-{suffix}-{unique}",
                         action_key=action_key,
                         target_channels=("agent-copilot",),
+                        expected_version=command.expected_version,
                         reason=f"exercise {suffix} rejection",
                     )
-                    with self.assertRaises(DurablePublishDenied):
+                    # Edit/source/binding/freshness/action drift rejects
+                    # atomically as a conflict; structural invalidity denies.
+                    with self.assertRaises(
+                        (DurablePublishConflict, DurablePublishDenied)
+                    ):
                         _ = await apply_durable_publish(
                             session,
                             command=rejected,
@@ -627,6 +847,12 @@ class GovernanceLedgerPostgresTests(unittest.TestCase):
                 async with sessions() as cleanup:
                     if publication_id is not None:
                         _ = await cleanup.execute(
+                            delete(GovernancePropagationDelivery).where(
+                                GovernancePropagationDelivery.publication_id
+                                == publication_id
+                            )
+                        )
+                        _ = await cleanup.execute(
                             delete(GovernancePropagation).where(
                                 GovernancePropagation.publication_id == publication_id
                             )
@@ -667,8 +893,17 @@ class GovernanceLedgerPostgresTests(unittest.TestCase):
                                 WikiPage.scope_id == scope_id,
                             )
                         )
+                    if signal_id is not None:
+                        _ = await cleanup.execute(
+                            delete(GovernanceSignal).where(
+                                GovernanceSignal.id == signal_id
+                            )
+                        )
                     _ = await cleanup.execute(
                         delete(Source).where(Source.id == source_id)
+                    )
+                    _ = await cleanup.execute(
+                        delete(AuditLog).where(AuditLog.principal_id == actor_id)
                     )
                     _ = await cleanup.execute(
                         delete(Employee).where(Employee.id == actor_id)

@@ -107,7 +107,9 @@ def sample_reality_check_feedback() -> tuple[DownstreamFeedbackSignal, ...]:
     )
 
 
-def sample_recovery_metrics_before(*, command_id: str = "cmd-publish-1") -> tuple[RecoveryMetricSnapshot, ...]:
+def sample_recovery_metrics_before(
+    *, command_id: str = "cmd-publish-1"
+) -> tuple[RecoveryMetricSnapshot, ...]:
     if command_id == "cmd-restrict-2":
         return (
             RecoveryMetricSnapshot(
@@ -175,7 +177,9 @@ def sample_recovery_metrics_before(*, command_id: str = "cmd-publish-1") -> tupl
     )
 
 
-def sample_recovery_metrics_after(*, command_id: str = "cmd-publish-1") -> tuple[RecoveryMetricSnapshot, ...]:
+def sample_recovery_metrics_after(
+    *, command_id: str = "cmd-publish-1"
+) -> tuple[RecoveryMetricSnapshot, ...]:
     if command_id == "cmd-restrict-2":
         return (
             RecoveryMetricSnapshot(
@@ -243,7 +247,9 @@ def sample_recovery_metrics_after(*, command_id: str = "cmd-publish-1") -> tuple
     )
 
 
-def sample_recovery_alignment_planes(*, command_id: str = "cmd-publish-1") -> tuple[AlignmentPlaneChange, ...]:
+def sample_recovery_alignment_planes(
+    *, command_id: str = "cmd-publish-1"
+) -> tuple[AlignmentPlaneChange, ...]:
     if command_id == "cmd-restrict-2":
         return (
             AlignmentPlaneChange(
@@ -253,7 +259,9 @@ def sample_recovery_alignment_planes(*, command_id: str = "cmd-publish-1") -> tu
                 after_state=TruthPlaneState.PARTIAL,
                 before_score=0.48,
                 after_score=0.66,
-                residual_reasons=("Refund policy object is stable, but not all exception paths are represented.",),
+                residual_reasons=(
+                    "Refund policy object is stable, but not all exception paths are represented.",
+                ),
             ),
             AlignmentPlaneChange(
                 plane_key="audience_truth",
@@ -262,7 +270,9 @@ def sample_recovery_alignment_planes(*, command_id: str = "cmd-publish-1") -> tu
                 after_state=TruthPlaneState.PARTIAL,
                 before_score=0.19,
                 after_score=0.47,
-                residual_reasons=("Enterprise contract exceptions still leak into self-serve answers.",),
+                residual_reasons=(
+                    "Enterprise contract exceptions still leak into self-serve answers.",
+                ),
             ),
             AlignmentPlaneChange(
                 plane_key="publish_truth",
@@ -271,7 +281,9 @@ def sample_recovery_alignment_planes(*, command_id: str = "cmd-publish-1") -> tu
                 after_state=TruthPlaneState.PARTIAL,
                 before_score=0.27,
                 after_score=0.52,
-                residual_reasons=("External bot propagation is still behind the newly restricted publish state.",),
+                residual_reasons=(
+                    "External bot propagation is still behind the newly restricted publish state.",
+                ),
             ),
             AlignmentPlaneChange(
                 plane_key="coverage_truth",
@@ -280,7 +292,9 @@ def sample_recovery_alignment_planes(*, command_id: str = "cmd-publish-1") -> tu
                 after_state=TruthPlaneState.PARTIAL,
                 before_score=0.31,
                 after_score=0.41,
-                residual_reasons=("Coverage still lacks refund exception branches for contract-driven refunds.",),
+                residual_reasons=(
+                    "Coverage still lacks refund exception branches for contract-driven refunds.",
+                ),
             ),
         )
     return (
@@ -328,7 +342,9 @@ def sample_recovery_alignment_planes(*, command_id: str = "cmd-publish-1") -> tu
     )
 
 
-def sample_recovery_residual_risks(*, command_id: str = "cmd-publish-1") -> tuple[ResidualRisk, ...]:
+def sample_recovery_residual_risks(
+    *, command_id: str = "cmd-publish-1"
+) -> tuple[ResidualRisk, ...]:
     if command_id == "cmd-restrict-2":
         return (
             ResidualRisk(
@@ -342,7 +358,10 @@ def sample_recovery_residual_risks(*, command_id: str = "cmd-publish-1") -> tupl
                 recommended_command="split_refund_contract_variant",
                 owner="support-ops",
                 blocking_surface="external_bot",
-                evidence_refs=("conversation/refund-contract-1", "help_center/refund-routing"),
+                evidence_refs=(
+                    "conversation/refund-contract-1",
+                    "help_center/refund-routing",
+                ),
             ),
             ResidualRisk(
                 command_id="cmd-restrict-2",

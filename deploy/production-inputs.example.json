@@ -1,0 +1,92 @@
+{
+  "schema_version": 2,
+  "status": "pending",
+  "release": {
+    "git_sha": "REPLACE_WITH_RELEASE_COMMIT_SHA",
+    "backend_image": "ghcr.io/OWNER/cygnus/backend@sha256:REPLACE_WITH_DIGEST",
+    "frontend_image": "ghcr.io/OWNER/cygnus/frontend@sha256:REPLACE_WITH_DIGEST",
+    "alembic_head": "REPLACE_WITH_ALEMBIC_HEAD"
+  },
+  "hosting": {
+    "host_ref": "host-inventory://REPLACE_WITH_HOST_ID",
+    "region": "REPLACE_WITH_REGION",
+    "network": {
+      "proxy_cidr": "172.30.0.0/24",
+      "ingress_policy_ref": "network-policy://REPLACE_WITH_INGRESS_POLICY",
+      "metrics_allowlist_ref": "network-policy://REPLACE_WITH_METRICS_ALLOWLIST",
+      "metrics_allowed_cidr": "REPLACE_WITH_NARROW_METRICS_CIDR"
+    }
+  },
+  "registry": {
+    "repository_ref": "registry://ghcr.io/OWNER/cygnus",
+    "credential_ref": "secret-store://REPLACE_WITH_REGISTRY_CREDENTIAL_REF"
+  },
+  "secrets": {
+    "store_ref": "secret-store://REPLACE_WITH_STORE_ID",
+    "runtime_secret_ref": "secret-store://REPLACE_WITH_RUNTIME_SECRET_REF",
+    "mcp_token_pepper_ref": "secret-store://REPLACE_WITH_MCP_TOKEN_PEPPER_REF",
+    "delivery_hmac_secret_ref": "secret-store://REPLACE_WITH_DELIVERY_HMAC_SECRET_REF",
+    "oauth_credentials_ref": "secret-store://REPLACE_WITH_OAUTH_CREDENTIALS_REF",
+    "provider_credentials_ref": "secret-store://REPLACE_WITH_PROVIDER_CREDENTIALS_REF",
+    "database_password_ref": "secret-store://REPLACE_WITH_DATABASE_PASSWORD_REF",
+    "redis_password_ref": "secret-store://REPLACE_WITH_REDIS_PASSWORD_REF",
+    "minio_credentials_ref": "secret-store://REPLACE_WITH_MINIO_CREDENTIALS_REF",
+    "tls_certificate_ref": "secret-store://REPLACE_WITH_TLS_CERT_REF"
+  },
+  "public_endpoint": {
+    "domain": "REPLACE_WITH_PUBLIC_FQDN",
+    "dns_change_ref": "change://REPLACE_WITH_DNS_APPROVAL",
+    "tls_validation_ref": "change://REPLACE_WITH_TLS_VALIDATION"
+  },
+  "capacity": {
+    "thresholds_ref": "capacity-config://REPLACE_WITH_APPROVED_THRESHOLDS",
+    "targets_ref": "capacity-config://REPLACE_WITH_APPROVED_TARGETS",
+    "thresholds_sha256": "sha256:REPLACE_WITH_64_HEX_THRESHOLD_FILE_HASH",
+    "max_p95_latency_ms": 0,
+    "max_error_rate_percent": 0,
+    "max_queue_age_seconds": 0,
+    "max_worker_utilization_percent": 0,
+    "approval_ref": "approval://REPLACE_WITH_CAPACITY_APPROVAL"
+  },
+  "observability": {
+    "approval_ref": "approval://REPLACE_WITH_ALERT_THRESHOLD_APPROVAL",
+    "alert_thresholds_ref": "observability-config://REPLACE_WITH_APPROVED_ALERT_THRESHOLDS",
+    "alert_thresholds_sha256": "sha256:REPLACE_WITH_64_HEX_ALERT_THRESHOLD_FILE_HASH"
+  },
+  "objectives": {
+    "availability_slo_percent": 0,
+    "rpo_seconds": 0,
+    "rto_seconds": 0,
+    "rpo_objective_ref": "approval://REPLACE_WITH_RPO_OBJECTIVE",
+    "rto_objective_ref": "approval://REPLACE_WITH_RTO_OBJECTIVE",
+    "retention_days": 0,
+    "drill_cadence_days": 0
+  },
+  "backup": {
+    "source_identity": "production://REPLACE_WITH_BACKUP_SOURCE_ID",
+    "approval_ref": "approval://REPLACE_WITH_BACKUP_DRILL_AUTHORITY"
+  },
+  "delivery": {
+    "targets": [
+      {
+        "channel_id": "REPLACE_WITH_CHANNEL_ID",
+        "endpoint": "https://REPLACE_WITH_INTERNAL_DELIVERY_HOST/v1/delivery"
+      }
+    ],
+    "hmac_secret_ref": "secret-store://REPLACE_WITH_DELIVERY_HMAC_SECRET_REF",
+    "approval_ref": "approval://REPLACE_WITH_DELIVERY_APPROVAL"
+  },
+  "canary": {
+    "cohort_ref": "approval://REPLACE_WITH_CANARY_COHORT",
+    "audience_dimension": "plan"
+  },
+  "operations": {
+    "on_call_ref": "oncall://REPLACE_WITH_ROTATION",
+    "rollback_authority_ref": "approval://REPLACE_WITH_ROLLBACK_AUTHORITY",
+    "approval_refs": {
+      "security": "approval://REPLACE_WITH_SECURITY_APPROVAL",
+      "operations": "approval://REPLACE_WITH_OPERATIONS_APPROVAL",
+      "release": "approval://REPLACE_WITH_RELEASE_APPROVAL"
+    }
+  }
+}

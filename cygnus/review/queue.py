@@ -40,7 +40,11 @@ class UpstreamCommandTrace:
             raise ValueError("source_risk_id must not be blank")
         if not self.command_origin_tag.strip():
             raise ValueError("command_origin_tag must not be blank")
-        object.__setattr__(self, "command_history", _normalize(self.command_history, label="command history"))
+        object.__setattr__(
+            self,
+            "command_history",
+            _normalize(self.command_history, label="command history"),
+        )
 
     def append(self, value: str) -> "UpstreamCommandTrace":
         return UpstreamCommandTrace(
@@ -66,8 +70,16 @@ class QueueDependencyState:
     waiting_summary: str = "Ready for direct action."
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "impacted_surfaces", _normalize(self.impacted_surfaces, label="impacted surface"))
-        object.__setattr__(self, "waiting_on_refs", _normalize(self.waiting_on_refs, label="waiting ref"))
+        object.__setattr__(
+            self,
+            "impacted_surfaces",
+            _normalize(self.impacted_surfaces, label="impacted surface"),
+        )
+        object.__setattr__(
+            self,
+            "waiting_on_refs",
+            _normalize(self.waiting_on_refs, label="waiting ref"),
+        )
         if not self.waiting_summary.strip():
             raise ValueError("waiting_summary must not be blank")
 
@@ -101,7 +113,11 @@ class ReviewQueueEntry:
             raise ValueError("queue_position must not be negative")
         if self.queue_owner is not None and not self.queue_owner.strip():
             raise ValueError("queue_owner must not be blank when provided")
-        object.__setattr__(self, "command_actions", _normalize(self.command_actions, label="command action"))
+        object.__setattr__(
+            self,
+            "command_actions",
+            _normalize(self.command_actions, label="command action"),
+        )
         if not self.command_actions:
             raise ValueError("command_actions must not be empty")
 
@@ -134,8 +150,16 @@ class ReviewQueueSurface:
         if not self.headline.strip():
             raise ValueError("headline must not be blank")
         object.__setattr__(self, "entries", tuple(self.entries))
-        object.__setattr__(self, "restack_lane", _normalize(self.restack_lane, label="restack lane ref"))
-        object.__setattr__(self, "available_bulk_commands", _normalize(self.available_bulk_commands, label="bulk command"))
+        object.__setattr__(
+            self,
+            "restack_lane",
+            _normalize(self.restack_lane, label="restack lane ref"),
+        )
+        object.__setattr__(
+            self,
+            "available_bulk_commands",
+            _normalize(self.available_bulk_commands, label="bulk command"),
+        )
         if not self.entries:
             raise ValueError("entries must not be empty")
 
@@ -160,7 +184,9 @@ class QueueCommand:
     def __post_init__(self) -> None:
         if self.object_ref is not None and not self.object_ref.strip():
             raise ValueError("object_ref must not be blank when provided")
-        object.__setattr__(self, "ordered_refs", _normalize(self.ordered_refs, label="ordered ref"))
+        object.__setattr__(
+            self, "ordered_refs", _normalize(self.ordered_refs, label="ordered ref")
+        )
         if self.new_owner is not None and not self.new_owner.strip():
             raise ValueError("new_owner must not be blank when provided")
         if not self.reason.strip():
@@ -176,8 +202,12 @@ class QueueMutationResult:
     command_log: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "touched_refs", _normalize(self.touched_refs, label="touched ref"))
-        object.__setattr__(self, "command_log", _normalize(self.command_log, label="command log"))
+        object.__setattr__(
+            self, "touched_refs", _normalize(self.touched_refs, label="touched ref")
+        )
+        object.__setattr__(
+            self, "command_log", _normalize(self.command_log, label="command log")
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -198,7 +228,9 @@ def get_review_queue_surface(
     return build_review_queue_surface(source_surface)
 
 
-def build_review_queue_surface(command_surface: ReviewCommandSurface) -> ReviewQueueSurface:
+def build_review_queue_surface(
+    command_surface: ReviewCommandSurface,
+) -> ReviewQueueSurface:
     cards = command_surface.priority_stack
     entries = _entries_from_cards(cards)
     return ReviewQueueSurface(
@@ -219,19 +251,30 @@ def apply_queue_commands(
     command_log: list[str] = []
     for command in commands:
         if command.command_type is QueueCommandType.RESTACK:
-            current, refs = restack_queue(current, ordered_refs=command.ordered_refs, reason=command.reason)
+            current, refs = restack_queue(
+                current, ordered_refs=command.ordered_refs, reason=command.reason
+            )
             touched.extend(refs)
             command_log.append(f"restack:{command.reason}")
         elif command.command_type is QueueCommandType.REROUTE:
-            current, ref = reroute_queue_entry(current, object_ref=_required_ref(command), new_owner=_required_owner(command), reason=command.reason)
+            current, ref = reroute_queue_entry(
+                current,
+                object_ref=_required_ref(command),
+                new_owner=_required_owner(command),
+                reason=command.reason,
+            )
             touched.append(ref)
             command_log.append(f"reroute:{ref}:{command.reason}")
         elif command.command_type is QueueCommandType.ESCALATE:
-            current, ref = escalate_queue_entry(current, object_ref=_required_ref(command), reason=command.reason)
+            current, ref = escalate_queue_entry(
+                current, object_ref=_required_ref(command), reason=command.reason
+            )
             touched.append(ref)
             command_log.append(f"escalate:{ref}:{command.reason}")
     touched_refs = tuple(_dedupe(touched))
-    touched_entries = tuple(entry for entry in current.entries if entry.object_ref in touched_refs)
+    touched_entries = tuple(
+        entry for entry in current.entries if entry.object_ref in touched_refs
+    )
     return QueueMutationResult(
         queue_surface=current,
         touched_refs=touched_refs,
@@ -264,10 +307,11 @@ def restack_queue(
     _validate_full_order(queue_surface=queue_surface, ordered_refs=ordered_refs)
     mapping = {entry.object_ref: entry for entry in queue_surface.entries}
     ordered_entries = [
-        _entry_with_trace(mapping[ref], f"restack:{reason}")
-        for ref in ordered_refs
+        _entry_with_trace(mapping[ref], f"restack:{reason}") for ref in ordered_refs
     ]
-    rebuilt = _rebuild_queue_surface(queue_surface=queue_surface, ordered_entries=tuple(ordered_entries))
+    rebuilt = _rebuild_queue_surface(
+        queue_surface=queue_surface, ordered_entries=tuple(ordered_entries)
+    )
     return rebuilt, ordered_refs
 
 
@@ -295,13 +339,17 @@ def reroute_queue_entry(
                 owner_state=OwnerState.ASSIGNED,
                 queue_owner=new_owner,
                 command_actions=entry.command_actions,
-                upstream_trace=entry.upstream_trace.append(f"reroute:{new_owner}:{reason}"),
+                upstream_trace=entry.upstream_trace.append(
+                    f"reroute:{new_owner}:{reason}"
+                ),
                 dependency_state=entry.dependency_state,
             )
         )
     if not found:
         raise ValueError(f"object_ref={object_ref} is not present in the current queue")
-    rebuilt = _rebuild_queue_surface(queue_surface=queue_surface, ordered_entries=tuple(updated))
+    rebuilt = _rebuild_queue_surface(
+        queue_surface=queue_surface, ordered_entries=tuple(updated)
+    )
     return rebuilt, object_ref
 
 
@@ -326,9 +374,15 @@ def escalate_queue_entry(
         upstream_trace=mapping[object_ref].upstream_trace.append(f"escalate:{reason}"),
         dependency_state=mapping[object_ref].dependency_state,
     )
-    ordered_refs = (object_ref,) + tuple(entry.object_ref for entry in queue_surface.entries if entry.object_ref != object_ref)
+    ordered_refs = (object_ref,) + tuple(
+        entry.object_ref
+        for entry in queue_surface.entries
+        if entry.object_ref != object_ref
+    )
     ordered_entries = [front] + [mapping[ref] for ref in ordered_refs[1:]]
-    rebuilt = _rebuild_queue_surface(queue_surface=queue_surface, ordered_entries=tuple(ordered_entries))
+    rebuilt = _rebuild_queue_surface(
+        queue_surface=queue_surface, ordered_entries=tuple(ordered_entries)
+    )
     return rebuilt, object_ref
 
 
@@ -347,7 +401,9 @@ def _rebuild_queue_surface(
     )
 
 
-def _entries_from_cards(cards: tuple[PriorityStackCard, ...]) -> tuple[ReviewQueueEntry, ...]:
+def _entries_from_cards(
+    cards: tuple[PriorityStackCard, ...],
+) -> tuple[ReviewQueueEntry, ...]:
     provisional = tuple(
         ReviewQueueEntry(
             object_ref=card.object_ref,
@@ -372,10 +428,14 @@ def _entries_from_cards(cards: tuple[PriorityStackCard, ...]) -> tuple[ReviewQue
     return _reindex_entries(provisional)
 
 
-def _reindex_entries(entries: tuple[ReviewQueueEntry, ...]) -> tuple[ReviewQueueEntry, ...]:
+def _reindex_entries(
+    entries: tuple[ReviewQueueEntry, ...],
+) -> tuple[ReviewQueueEntry, ...]:
     rebuilt: list[ReviewQueueEntry] = []
     for index, entry in enumerate(entries):
-        waiting_on_refs = _derive_waiting_refs(index=index, rebuilt=tuple(rebuilt), current=entry)
+        waiting_on_refs = _derive_waiting_refs(
+            index=index, rebuilt=tuple(rebuilt), current=entry
+        )
         rebuilt.append(
             ReviewQueueEntry(
                 object_ref=entry.object_ref,
@@ -415,7 +475,9 @@ def _derive_waiting_refs(
     shared_surface_predecessors = [
         entry.object_ref
         for entry in rebuilt
-        if set(entry.dependency_state.impacted_surfaces).intersection(current.dependency_state.impacted_surfaces)
+        if set(entry.dependency_state.impacted_surfaces).intersection(
+            current.dependency_state.impacted_surfaces
+        )
     ]
     if shared_surface_predecessors:
         return (shared_surface_predecessors[-1],)
@@ -439,7 +501,9 @@ def _urgency_rank(urgency: UrgencyLevel) -> int:
     }[urgency]
 
 
-def _validate_full_order(*, queue_surface: ReviewQueueSurface, ordered_refs: tuple[str, ...]) -> None:
+def _validate_full_order(
+    *, queue_surface: ReviewQueueSurface, ordered_refs: tuple[str, ...]
+) -> None:
     current_refs = tuple(entry.object_ref for entry in queue_surface.entries)
     if tuple(ordered_refs) != current_refs and set(ordered_refs) != set(current_refs):
         raise ValueError("ordered_refs must contain the exact queue object refs")

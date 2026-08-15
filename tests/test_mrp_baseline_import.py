@@ -62,7 +62,9 @@ MRP_PIPELINE_PHASE_MARKERS = [
 
 def test_mrp_baseline_files_exist() -> None:
     for relative_path in MRP_BASELINE_FILES:
-        assert Path(relative_path).is_file(), f"missing mirrored MRP file: {relative_path}"
+        assert Path(relative_path).is_file(), (
+            f"missing mirrored MRP file: {relative_path}"
+        )
 
 
 def test_mrp_baseline_files_are_syntax_valid() -> None:
@@ -84,14 +86,20 @@ def test_mrp_baseline_modules_import_and_expose_upstream_entrypoints() -> None:
 
         for symbol in symbols:
             value = getattr(module, symbol, None)
-            assert value is not None, f"{module_name} missing upstream MRP symbol: {symbol}"
+            assert value is not None, (
+                f"{module_name} missing upstream MRP symbol: {symbol}"
+            )
             assert inspect.isclass(value) or callable(value), (
                 f"{module_name}.{symbol} should remain an importable MRP entrypoint"
             )
 
 
-def test_mrp_pipeline_preserves_map_reduce_review_refine_verify_commit_markers() -> None:
-    pipeline_source = Path("cygnus/runtime/ai/mrp/pipeline.py").read_text(encoding="utf-8")
+def test_mrp_pipeline_preserves_map_reduce_review_refine_verify_commit_markers() -> (
+    None
+):
+    pipeline_source = Path("cygnus/runtime/ai/mrp/pipeline.py").read_text(
+        encoding="utf-8"
+    )
 
     for marker in MRP_PIPELINE_PHASE_MARKERS:
         assert marker in pipeline_source, f"MRP pipeline lost phase marker: {marker}"
@@ -117,6 +125,8 @@ def test_mrp_writer_uses_mirrored_upstream_prompt_helper() -> None:
     writer_source = Path("cygnus/runtime/ai/mrp/writer.py").read_text(encoding="utf-8")
     prompt_helper = Path("cygnus/runtime/ai/prompt_library.py")
 
-    assert prompt_helper.is_file(), "MRP writer's upstream prompt helper must be mirrored"
+    assert prompt_helper.is_file(), (
+        "MRP writer's upstream prompt helper must be mirrored"
+    )
     assert "build_wiki_writer_system_prompt" in writer_source
     assert "cygnus.runtime.ai.prompt_library" in writer_source

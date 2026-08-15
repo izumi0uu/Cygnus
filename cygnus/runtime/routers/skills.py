@@ -26,10 +26,13 @@ router = APIRouter()
 
 def _assert_not_system(skill: Skill) -> None:
     if skill.is_system:
-        raise HTTPException(403, "System skills are read-only and cannot be modified or deleted")
+        raise HTTPException(
+            403, "System skills are read-only and cannot be modified or deleted"
+        )
 
 
 # --- Pydantic Models ---
+
 
 class SkillResponse(BaseModel):
     id: uuid.UUID
@@ -68,8 +71,6 @@ class SkillDeleteRequest(BaseModel):
     ids: List[uuid.UUID]
 
 
-
-
 class SkillBulkVisibilityRequest(BaseModel):
     skill_ids: List[uuid.UUID]
     scope_type: str
@@ -86,9 +87,8 @@ class SkillUpdateRequest(BaseModel):
     increment_version: bool = False
 
 
-
-
 # --- Skill Routes ---
+
 
 @router.post("/skills/upload")
 async def upload_skills(
@@ -106,29 +106,39 @@ async def upload_skills(
     if user.role != "admin" and "skill:create:all" not in perms:
         if "skill:create:own_dept" not in perms:
             raise HTTPException(403, "Permission required: skill:create")
-        
+
         # User only has own_dept scope — must overlap user's dept set.
         user_depts = set(user.department_ids)
         if department_ids and any(d_id not in user_depts for d_id in department_ids):
-            raise HTTPException(403, "You can only assign skills to your own departments")
+            raise HTTPException(
+                403, "You can only assign skills to your own departments"
+            )
         if scope_type == "department" and scope_id not in user_depts:
-            raise HTTPException(403, "You can only assign skills to your own departments")
+            raise HTTPException(
+                403, "You can only assign skills to your own departments"
+            )
         if scope_type == "global":
             # Auto-force to own department if trying to create global without :all permission?
             # Or just deny. Let's deny for now to be safe.
-            raise HTTPException(403, "You do not have permission to create global skills")
+            raise HTTPException(
+                403, "You do not have permission to create global skills"
+            )
 
     if user.role != "admin":
         # Create contributions instead of direct skills
         results = []
         for file in files:
-            contribution = await SkillService.create_contribution_from_zip(db, file, user)
-            results.append({
-                "name": file.filename, 
-                "status": "contribution_pending", 
-                "contribution_id": str(contribution.id),
-                "message": "Submitted contribution for review"
-            })
+            contribution = await SkillService.create_contribution_from_zip(
+                db, file, user
+            )
+            results.append(
+                {
+                    "name": file.filename,
+                    "status": "contribution_pending",
+                    "contribution_id": str(contribution.id),
+                    "message": "Submitted contribution for review",
+                }
+            )
         return {"results": results, "message": "Skills submitted for review."}
     logger.info(f"[Router] Uploading skills for user {department_ids}")
     results = await SkillService.upload_skills(
@@ -157,9 +167,9 @@ async def reupload_skill(
             db, file, user, skill_id=skill.id, base_version=skill.current_version
         )
         return {
-            "status": "contribution_pending", 
+            "status": "contribution_pending",
             "contribution_id": str(contribution.id),
-            "message": "Update submitted for review."
+            "message": "Update submitted for review.",
         }
 
     result = await SkillService.reupload_skill(db, slug, file, user.id)
@@ -198,10 +208,17 @@ async def list_skills(
     # Pass allowed_depts to service for filtering
     # Note: If allowed_depts is [], it means user can see Global (dept=None)
     # The service needs to handle this logic: (department_id IN allowed_depts) OR (department_id IS NULL)
-    
+
     skills, total = await SkillService.list_skills(
-        db, q, department_id, scope_type, scope_id, ids, cursor, limit,
-        allowed_department_ids=allowed_depts if needs_filter else None
+        db,
+        q,
+        department_id,
+        scope_type,
+        scope_id,
+        ids,
+        cursor,
+        limit,
+        allowed_department_ids=allowed_depts if needs_filter else None,
     )
     items = []
     for s in skills:
@@ -222,19 +239,38 @@ async def list_skills(
     return {"items": items, "total": total}
 
 
-
-
 # --- Skill File Exploration ---
 
 TEXT_EXTENSIONS = {
-    ".py", ".md", ".txt", ".json", ".yaml", ".yml", ".sh", ".js", ".ts", ".tsx", 
-    ".html", ".css", ".sql", ".env", ".cfg", ".ini", ".xml", ".csv", ".bat", ".ps1"
+    ".py",
+    ".md",
+    ".txt",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".sh",
+    ".js",
+    ".ts",
+    ".tsx",
+    ".html",
+    ".css",
+    ".sql",
+    ".env",
+    ".cfg",
+    ".ini",
+    ".xml",
+    ".csv",
+    ".bat",
+    ".ps1",
 }
+
 
 def is_text_file(filename: str) -> bool:
     import os
+
     _, ext = os.path.splitext(filename.lower())
     return ext in TEXT_EXTENSIONS
+
 
 @router.get("/skills/{skill_id}/files")
 async def list_skill_files(
@@ -246,19 +282,23 @@ async def list_skill_files(
     """List all files within a skill's storage prefix in MinIO."""
     from cygnus.runtime.database.models import SkillVersion
     from cygnus.runtime.services.storage_service import storage_service
-    
+
     skill = await db.get(Skill, skill_id)
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
-    
+
     if not await can_access_skill(db, user, skill, "read"):
         raise HTTPException(status_code=403, detail="Access denied")
-    
-    logger.info(f"Listing files for skill {skill_id} (slug: {skill.slug}), version: {version}")
+
+    logger.info(
+        f"Listing files for skill {skill_id} (slug: {skill.slug}), version: {version}"
+    )
 
     # Determine prefix
     if version:
-        stmt = select(SkillVersion).where(SkillVersion.skill_id == skill_id, SkillVersion.version_number == version)
+        stmt = select(SkillVersion).where(
+            SkillVersion.skill_id == skill_id, SkillVersion.version_number == version
+        )
         v_res = await db.execute(stmt)
         v_obj = v_res.scalars().first()
         if not v_obj:
@@ -273,26 +313,37 @@ async def list_skill_files(
 
     # List objects in MinIO
     from cygnus.runtime.config import settings
-    logger.info(f"Listing MinIO objects with bucket={settings.minio_bucket} prefix={prefix}")
+
+    logger.info(
+        f"Listing MinIO objects with bucket={settings.minio_bucket} prefix={prefix}"
+    )
     # Ensure prefix ends with / for clean relative path replacement
     prefix_for_list = prefix if prefix.endswith("/") else f"{prefix}/"
-    logger.info(f"[Debug] Listing files: skill_id={skill_id}, version={version}, prefix_for_list={prefix_for_list}")
-    objects = storage_service.client.list_objects(settings.minio_bucket, prefix=prefix_for_list, recursive=True)
-    
+    logger.info(
+        f"[Debug] Listing files: skill_id={skill_id}, version={version}, prefix_for_list={prefix_for_list}"
+    )
+    objects = storage_service.client.list_objects(
+        settings.minio_bucket, prefix=prefix_for_list, recursive=True
+    )
+
     files = []
     for obj in objects:
         # Extract relative path from full object name
         rel_path = (obj.object_name or "").replace(prefix_for_list, "", 1)
         if not rel_path:
             continue
-        
-        files.append({
-            "path": rel_path,
-            "size": obj.size,
-            "last_modified": obj.last_modified.isoformat() if obj.last_modified else None,
-            "is_text": is_text_file(rel_path)
-        })
-        
+
+        files.append(
+            {
+                "path": rel_path,
+                "size": obj.size,
+                "last_modified": obj.last_modified.isoformat()
+                if obj.last_modified
+                else None,
+                "is_text": is_text_file(rel_path),
+            }
+        )
+
     return sorted(files, key=lambda x: x["path"])
 
 
@@ -307,17 +358,19 @@ async def get_skill_file_content(
     """Fetch text content for a specific file within a skill."""
     from cygnus.runtime.database.models import SkillVersion
     from cygnus.runtime.services.storage_service import storage_service
-    
+
     skill = await db.get(Skill, skill_id)
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
-    
+
     if not await can_access_skill(db, user, skill, "read"):
         raise HTTPException(status_code=403, detail="Access denied")
-    
+
     # Determine prefix
     if version:
-        stmt = select(SkillVersion).where(SkillVersion.skill_id == skill_id, SkillVersion.version_number == version)
+        stmt = select(SkillVersion).where(
+            SkillVersion.skill_id == skill_id, SkillVersion.version_number == version
+        )
         v_res = await db.execute(stmt)
         v_obj = v_res.scalars().first()
         if not v_obj:
@@ -330,24 +383,28 @@ async def get_skill_file_content(
         raise HTTPException(status_code=404, detail="Skill storage path not found")
 
     if not is_text_file(path):
-        raise HTTPException(status_code=400, detail="Only text-based files can be viewed.")
+        raise HTTPException(
+            status_code=400, detail="Only text-based files can be viewed."
+        )
 
     # Ensure exactly one slash between prefix and path
     p = prefix.rstrip("/")
     f = path.lstrip("/")
     full_path = f"{p}/{f}"
-    
-    logger.info(f"[Debug] Fetching content: skill_id={skill_id}, version={version}, prefix={prefix}, path={path}, full_path={full_path}")
-    
+
+    logger.info(
+        f"[Debug] Fetching content: skill_id={skill_id}, version={version}, prefix={prefix}, path={path}, full_path={full_path}"
+    )
+
     try:
         # Helper to clean path parts
         def join_paths(*parts):
             res = ""
             for p in parts:
-                if not p: 
+                if not p:
                     continue
                 p = p.strip("/")
-                if not p: 
+                if not p:
                     continue
                 res = f"{res}/{p}" if res else p
             return res
@@ -357,21 +414,23 @@ async def get_skill_file_content(
         alt_prefix = base_prefix
         if not base_prefix.endswith("/content"):
             alt_prefix = f"{base_prefix}/content"
-        
+
         # Potential paths to try
         paths_to_try = [path]
         if "/" in path:
             paths_to_try.append("/".join(path.split("/")[1:]))
-        
+
         # Unique combinations of (prefix, path)
-        combinations = []
+        combinations: list[tuple[str, str]] = []
         for pfx in [base_prefix, alt_prefix]:
             for pth in paths_to_try:
                 full = join_paths(pfx, pth)
                 if full not in [c[0] for c in combinations]:
                     combinations.append((full, pth))
 
-        logger.info(f"[Debug] Attempting to find skill file. Combinations: {[c[0] for c in combinations]}")
+        logger.info(
+            f"[Debug] Attempting to find skill file. Combinations: {[c[0] for c in combinations]}"
+        )
 
         for full_p, pth in combinations:
             try:
@@ -382,27 +441,39 @@ async def get_skill_file_content(
                 continue
 
         # If all fail, list objects to find it (Fuzzy match)
-        logger.info(f"[Debug] All standard paths failed, listing objects to find match for: {path}")
+        logger.info(
+            f"[Debug] All standard paths failed, listing objects to find match for: {path}"
+        )
         from cygnus.runtime.config import settings
+
         # Use client directly as StorageService doesn't have list_objects
-        objects = storage_service.client.list_objects(settings.minio_bucket, prefix=prefix, recursive=True)
+        objects = storage_service.client.list_objects(
+            settings.minio_bucket, prefix=prefix, recursive=True
+        )
         target_suffix = path.split("/")[-1]
         for obj in objects:
-            if obj.object_name.endswith(path) or (obj.object_name.endswith(target_suffix) and path in obj.object_name):
+            if obj.object_name.endswith(path) or (
+                obj.object_name.endswith(target_suffix) and path in obj.object_name
+            ):
                 logger.info(f"[Debug] Found fuzzy match: {obj.object_name}")
                 content_bytes = storage_service.download_file(obj.object_name)
                 return {"content": content_bytes.decode("utf-8", errors="ignore")}
 
-        raise HTTPException(status_code=404, detail=f"File {path} not found in skill storage.")
+        raise HTTPException(
+            status_code=404, detail=f"File {path} not found in skill storage."
+        )
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"[Debug] Failed to read skill file {path}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to read file content: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to read file content: {str(e)}"
+        )
 
 
 # --- Individual Skill Routes (MUST BE LAST) ---
+
 
 @router.get("/skills/{slug}", response_model=SkillResponse)
 async def get_skill(
@@ -413,7 +484,7 @@ async def get_skill(
 ):
     """Get detailed information for a single skill."""
     skill = await SkillService.get_skill(db, slug, version_number=version)
-    
+
     # Check access using permission engine
     if not await can_access_skill(db, user, skill, "read"):
         raise HTTPException(status_code=403, detail="Access denied")
@@ -448,7 +519,10 @@ async def set_latest_version(
     _assert_not_system(skill)
 
     skill = await SkillService.set_latest_version(db, slug, version)
-    return {"message": f"Version {version} set as latest", "current_version": skill.current_version}
+    return {
+        "message": f"Version {version} set as latest",
+        "current_version": skill.current_version,
+    }
 
 
 @router.delete("/skills/{slug}")
@@ -485,19 +559,25 @@ async def update_skill(
     if user.role != "admin" and "skill:edit:all" not in perms:
         # User only has own_dept scope — must overlap user's dept set.
         user_depts = set(user.department_ids)
-        if req.department_ids and any(d_id not in user_depts for d_id in req.department_ids):
-            raise HTTPException(403, "You can only assign skills to your own departments")
+        if req.department_ids and any(
+            d_id not in user_depts for d_id in req.department_ids
+        ):
+            raise HTTPException(
+                403, "You can only assign skills to your own departments"
+            )
         if req.scope_type == "department" and req.scope_id not in user_depts:
-            raise HTTPException(403, "You can only assign skills to your own departments")
+            raise HTTPException(
+                403, "You can only assign skills to your own departments"
+            )
         if req.scope_type == "global":
             raise HTTPException(403, "You do not have permission to make skills global")
 
     # Pass explicit fields so service knows if department_id was explicitly set to None
     req_data = req.model_dump()
     req_data["_explicit_fields"] = req.model_fields_set
-    
+
     updated_skill = await SkillService.update_skill(db, slug, req_data)
-    
+
     resp = SkillResponse.model_validate(updated_skill)
     resp.department_ids = [sd.department_id for sd in updated_skill.departments]
     resp.department_names = [sd.department.name for sd in updated_skill.departments]

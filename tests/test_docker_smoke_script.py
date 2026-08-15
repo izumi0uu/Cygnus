@@ -30,7 +30,9 @@ class DockerSmokeScriptTests(unittest.TestCase):
         for fragment in required_fragments:
             self.assertIn(fragment, text)
 
-    def test_repo_check_documents_shell_syntax_validation_for_smoke_script(self) -> None:
+    def test_repo_check_documents_shell_syntax_validation_for_smoke_script(
+        self,
+    ) -> None:
         text = Path("scripts/repo_check.sh").read_text(encoding="utf-8")
         self.assertIn("sh -n scripts/docker_smoke.sh", text)
 

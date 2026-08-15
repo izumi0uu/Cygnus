@@ -1,14 +1,51 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from typing import Protocol, cast
 import unittest
 import uuid
 from unittest.mock import AsyncMock, patch
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from cygnus.runtime.database.models import WikiPageDraft
+
+
+class _DraftFixture(Protocol):
+    """Structural shape of the SimpleNamespace draft double."""
+
+    id: uuid.UUID
+    status: str
+    version: int
+    revision_round: int
+    ai_check_status: str
+    ai_check_results: dict[str, object] | None
+    ai_checked_at: datetime | None
+
+
+class _DispatchRowFixture(Protocol):
+    """Structural shape of the SimpleNamespace outbox-row double."""
+
+    id: uuid.UUID
+    draft_id: uuid.UUID
+    draft_version: int
+    revision_round: int
+    job_id: str
+    dispatch_status: str
+    attempt_count: int
+    last_error: str | None
+    terminal_reason: str | None
+    next_attempt_at: datetime | None
+    lease_expires_at: datetime | None
+    enqueued_at: datetime | None
+    completed_at: datetime | None
+    created_at: datetime
+
 
 class _Result:
-    def __init__(self, values: list[object]):
+    def __init__(self, values: Sequence[object]):
         self._values = list(values)
 
     def scalars(self) -> "_Result":
@@ -43,7 +80,11 @@ class _SessionFactory:
 class _DispatchSession:
     """Small transaction-aware session double for the outbox state machine."""
 
-    def __init__(self, records: list[object], drafts: dict[uuid.UUID, object]):
+    def __init__(
+        self,
+        records: list[_DispatchRowFixture],
+        drafts: dict[uuid.UUID, _DraftFixture],
+    ):
         self.records = records
         self.drafts = drafts
         self.statements: list[object] = []
@@ -55,7 +96,9 @@ class _DispatchSession:
             return _Result(self.records)
         return _Result(self.records[:1])
 
-    async def get(self, _model: object, identifier: uuid.UUID, **_kwargs) -> object:
+    async def get(
+        self, _model: object, identifier: uuid.UUID, **_kwargs
+    ) -> _DraftFixture | _DispatchRowFixture | None:
         draft = self.drafts.get(identifier)
         if draft is not None:
             return draft
@@ -86,7 +129,7 @@ def _draft(
     version: int = 1,
     revision_round: int = 0,
     ai_check_status: str = "pending",
-) -> object:
+) -> _DraftFixture:
     return SimpleNamespace(
         id=draft_id or uuid.uuid4(),
         status="pending",
@@ -100,12 +143,12 @@ def _draft(
 
 def _dispatch_row(
     dispatch_module,
-    draft: object,
+    draft: _DraftFixture,
     *,
     status: str = "pending",
     attempt_count: int = 0,
     lease_expires_at: datetime | None = None,
-) -> object:
+) -> _DispatchRowFixture:
     staged = dispatch_module.PendingAiPreReview(
         draft_id=draft.id,
         draft_version=draft.version,
@@ -135,7 +178,10 @@ class CommittedAiPreReviewDispatchTests(unittest.IsolatedAsyncioTestCase):
 
         draft = _draft(version=4, revision_round=2)
         session = _LifecycleSession()
-        await dispatch.stage_ai_pre_review(session, draft)
+        await dispatch.stage_ai_pre_review(
+            cast(AsyncSession, session),
+            cast(WikiPageDraft, draft),
+        )
 
         # The stage operation never commits; the lifecycle owner controls the
         # same transaction as the draft and can roll it back atomically.
@@ -187,7 +233,10 @@ class CommittedAiPreReviewDispatchTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(
             dispatch, "_ai_pre_review_enabled", AsyncMock(return_value=True)
         ):
-            claims = await dispatch._claim_due_dispatches(session, limit=10)
+            claims = await dispatch._claim_due_dispatches(
+                cast(AsyncSession, session),
+                limit=10,
+            )
         self.assertEqual(len(claims), 1)
 
         # Redis accepted the first call, then the dispatcher died before its

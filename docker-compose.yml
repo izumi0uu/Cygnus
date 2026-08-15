@@ -1,3 +1,7 @@
+# DEVELOPMENT ONLY — this build/mount/default-credential profile is never a production deployment.
+# Production operators MUST use deploy/docker-compose.prod.yml with digest-pinned
+# release metadata and externally supplied secrets/TLS material.
+
 x-cygnus-runtime: &cygnus-runtime
   build:
     context: .
@@ -10,7 +14,7 @@ x-cygnus-runtime: &cygnus-runtime
 
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:0.8.6-pg16-trixie@sha256:c8483555ce48101872f888c1df8a895ff689d6c7c7a5f7ac266475f9dfe89e0b
     restart: unless-stopped
     environment:
       POSTGRES_DB: cygnus
@@ -27,21 +31,26 @@ services:
       retries: 20
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4-alpine3.21@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    environment:
+      # Password is mandatory; keep in sync with redis_password in
+      # .env.docker.example (default: cygnus_redis_secret).
+      REDIS_PASSWORD: ${CYGNUS_DOCKER_REDIS_PASSWORD:-cygnus_redis_secret}
+    command: ["sh", "-c", 'exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"']
     ports:
-      - "${CYGNUS_DOCKER_REDIS_HOST_PORT:-6379}:6379"
+      # Loopback-only by default: never publish the queue to the LAN.
+      - "${CYGNUS_DOCKER_REDIS_HOST_PORT:-127.0.0.1:6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", 'redis-cli --no-auth-warning -a "$$REDIS_PASSWORD" ping | grep -q PONG']
       interval: 5s
       timeout: 5s
       retries: 20
 
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     restart: unless-stopped
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -76,18 +85,20 @@ services:
     command: ["uvicorn", "cygnus.runtime.main:app", "--host", "0.0.0.0", "--port", "8077"]
     ports:
       - "${CYGNUS_DOCKER_API_HOST_PORT:-8077}:8077"
+    # Gate "healthy" on full readiness (DB + exact Alembic head, Redis, MinIO,
+    # config, fresh heartbeats from BOTH workers). /health stays for compatibility.
     healthcheck:
       test:
         [
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://localhost:8077/health', timeout=3).read()",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8077/readyz', timeout=3).read()",
         ]
       interval: 10s
       timeout: 5s
       retries: 12
-      start_period: 15s
+      start_period: 30s
 
   worker:
     <<: *cygnus-runtime
@@ -99,7 +110,18 @@ services:
         condition: service_healthy
       migrator:
         condition: service_completed_successfully
-    command: ["arq", "cygnus.runtime.worker.WorkerSettings"]
+    # Graceful drain runner: SIGTERM publishes a draining heartbeat, stops
+    # claiming jobs, waits WORKER_DRAIN_GRACE_SECONDS (default 30) for
+    # in-flight work, then closes resources. stop_grace_period must stay
+    # above the drain grace so SIGKILL never truncates the drain.
+    command: ["python", "-m", "cygnus.runtime.worker"]
+    stop_grace_period: "${CYGNUS_WORKER_STOP_GRACE_SECONDS:-45}s"
+    healthcheck:
+      test: ["CMD", "python", "/opt/cygnus/worker_healthcheck.py", "default"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
 
   worker-skills:
     <<: *cygnus-runtime
@@ -111,7 +133,14 @@ services:
         condition: service_healthy
       migrator:
         condition: service_completed_successfully
-    command: ["arq", "cygnus.runtime.worker.SkillWorkerSettings"]
+    command: ["python", "-m", "cygnus.runtime.worker", "SkillWorkerSettings"]
+    stop_grace_period: "${CYGNUS_WORKER_STOP_GRACE_SECONDS:-45}s"
+    healthcheck:
+      test: ["CMD", "python", "/opt/cygnus/worker_healthcheck.py", "skills"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
 
   frontend:
     build:

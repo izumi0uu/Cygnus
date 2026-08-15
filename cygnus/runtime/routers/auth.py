@@ -6,18 +6,20 @@ Two system roles:
   - employee: Access governed by custom_role scoped permissions
 """
 
-
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.runtime.database import get_db
 from cygnus.runtime.database.models import Employee
 from cygnus.runtime.services.auth_service import (
-    authenticate_employee,
+    LoginRateLimitExceeded,
+    LoginRateLimitUnavailable,
+    authenticate_employee_with_rate_limit,
     create_access_token,
+    get_client_ip,
     get_current_user,
     hash_password,
     verify_password,
@@ -30,6 +32,7 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 # DTOs
 # ---------------------------------------------------------------------------
+
 
 class LoginRequest(BaseModel):
     email: str
@@ -67,19 +70,26 @@ class ProfileResponse(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 async def _get_workspace_memberships(db, employee_id) -> list:
     """Workspace memberships have been deprecated and removed."""
     return []
 
 
-def _build_user_dict(employee: Employee, permissions: list[str], workspace_memberships: Optional[list] = None) -> dict:
+def _build_user_dict(
+    employee: Employee,
+    permissions: list[str],
+    workspace_memberships: Optional[list] = None,
+) -> dict:
     """Build user dict for login/me responses."""
     return {
         "id": str(employee.id),
         "name": employee.name,
         "email": employee.email,
         "role": employee.role,
-        "department_ids": [str(ed.department_id) for ed in employee.employee_departments],
+        "department_ids": [
+            str(ed.department_id) for ed in employee.employee_departments
+        ],
         "department_names": [
             ed.department.name for ed in employee.employee_departments if ed.department
         ],
@@ -92,13 +102,30 @@ def _build_user_dict(employee: Employee, permissions: list[str], workspace_membe
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.post("/auth/login", response_model=LoginResponse)
-async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
-    """
-    Authenticate with email + password. Returns JWT token.
-    Works for both admin and employee roles.
-    """
-    employee = await authenticate_employee(db, req.email, req.password)
+async def login(
+    req: LoginRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Authenticate with a shared Redis-backed abuse budget."""
+    client_ip = get_client_ip(request)
+    try:
+        employee = await authenticate_employee_with_rate_limit(
+            db,
+            req.email,
+            req.password,
+            client_ip=client_ip,
+        )
+    except LoginRateLimitExceeded:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    except LoginRateLimitUnavailable:
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication service temporarily unavailable",
+        )
+
     if not employee:
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
@@ -130,9 +157,13 @@ async def get_profile(
         name=current_user.name,
         email=current_user.email,
         role=current_user.role,
-        department_ids=[str(ed.department_id) for ed in current_user.employee_departments],
+        department_ids=[
+            str(ed.department_id) for ed in current_user.employee_departments
+        ],
         department_names=[
-            ed.department.name for ed in current_user.employee_departments if ed.department
+            ed.department.name
+            for ed in current_user.employee_departments
+            if ed.department
         ],
         is_active=current_user.is_active,
         has_mcp_token=bool(current_user.mcp_token_hash),

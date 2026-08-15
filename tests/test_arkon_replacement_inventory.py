@@ -8,8 +8,14 @@ from pathlib import Path
 
 
 def _load_module():
-    module_path = Path(__file__).resolve().parents[1] / "scripts" / "arkon_replacement_inventory.py"
-    spec = importlib.util.spec_from_file_location("arkon_replacement_inventory", module_path)
+    module_path = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "arkon_replacement_inventory.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "arkon_replacement_inventory", module_path
+    )
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -56,12 +62,16 @@ class ArkonReplacementInventoryTests(unittest.TestCase):
                 kept_paths,
             )
 
-            removed_by_path = {item["path"]: item for item in inventory["removed_surfaces"]}
+            removed_by_path = {
+                item["path"]: item for item in inventory["removed_surfaces"]
+            }
             self.assertFalse(removed_by_path["cygnus/api/__init__.py"]["exists"])
             self.assertFalse(removed_by_path["cygnus/api/app.py"]["exists"])
             self.assertTrue(removed_by_path["cygnus/api/auth.py"]["exists"])
             self.assertFalse(removed_by_path["cygnus/api/config.py"]["exists"])
-            self.assertFalse(removed_by_path["cygnus/api/governance_router.py"]["exists"])
+            self.assertFalse(
+                removed_by_path["cygnus/api/governance_router.py"]["exists"]
+            )
 
             residue = inventory["unexpected_runtime_residue"]
             self.assertEqual(len(residue), 1)

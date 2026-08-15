@@ -8,14 +8,21 @@ Ownership:
 from __future__ import annotations
 
 import uuid
-from typing import Optional
+from typing import Optional, cast
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.runtime.ai.embedding_catalog import get_spec
 from cygnus.runtime.ai.registry import ProviderRegistry
-from cygnus.runtime.database.models import WikiPage, get_embedding_model_for_dim
+from cygnus.runtime.database.models import (
+    WikiPage,
+    WikiPageEmbedding1024,
+    WikiPageEmbedding1536,
+    WikiPageEmbedding3072,
+    WikiPageEmbedding768,
+    get_embedding_model_for_dim,
+)
 from cygnus.runtime.services.wiki_service import (
     HOT_SLUG,
     INDEX_SLUG,
@@ -24,6 +31,16 @@ from cygnus.runtime.services.wiki_service import (
     _scope_filter,
     _scope_filter_for_identity,
 )
+
+# The registry lookup returns the bare class; bind the union of concrete
+# per-dimension tables so column access stays typed.
+_WikiPageEmbeddingModel = (
+    type[WikiPageEmbedding768]
+    | type[WikiPageEmbedding1024]
+    | type[WikiPageEmbedding1536]
+    | type[WikiPageEmbedding3072]
+)
+
 
 async def search_pages_semantic(
     session: AsyncSession,
@@ -64,7 +81,7 @@ async def search_pages_semantic(
         return []
 
     spec = get_spec(spec_id)
-    Emb = get_embedding_model_for_dim(spec.dimension)
+    Emb = cast(_WikiPageEmbeddingModel, get_embedding_model_for_dim(spec.dimension))
 
     if all_scopes and not inverse_scope:
         scope_clause = None
@@ -98,6 +115,6 @@ async def search_pages_semantic(
                 WikiPage.knowledge_type_slugs.overlap(allowed_kt_slugs),
                 func.cardinality(WikiPage.knowledge_type_slugs) == 0,
             )
-    )
+        )
     result = await session.execute(stmt)
     return [(row[0], float(row[1])) for row in result.all()]

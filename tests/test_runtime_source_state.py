@@ -23,10 +23,16 @@ class RuntimeSourceStateTests(unittest.TestCase):
         self.assertIs(result, source)
         self.assertEqual(source.status, "processing")
         self.assertEqual(source.progress, 56)
-        self.assertEqual(source.progress_message, "Extracting knowledge from document...")
+        self.assertEqual(
+            source.progress_message, "Extracting knowledge from document..."
+        )
 
-    def test_mark_source_requeued_after_department_change_sets_runtime_fields(self) -> None:
-        from cygnus.runtime.source_state import mark_source_requeued_after_department_change
+    def test_mark_source_requeued_after_department_change_sets_runtime_fields(
+        self,
+    ) -> None:
+        from cygnus.runtime.source_state import (
+            mark_source_requeued_after_department_change,
+        )
 
         source = types.SimpleNamespace(
             status="ready",
@@ -41,7 +47,9 @@ class RuntimeSourceStateTests(unittest.TestCase):
         self.assertIs(result, source)
         self.assertEqual(source.status, "processing")
         self.assertEqual(source.progress, 0)
-        self.assertEqual(source.progress_message, "Re-queued after department change...")
+        self.assertEqual(
+            source.progress_message, "Re-queued after department change..."
+        )
         self.assertIsNone(source.error_message)
         self.assertEqual(source.job_id, "job-1")
 
@@ -85,7 +93,9 @@ class RuntimeSourceStateTests(unittest.TestCase):
         self.assertIsNone(source.error_message)
         self.assertEqual(source.job_id, "job-ingest-1")
 
-    def test_mark_source_post_extraction_resume_covers_caption_and_direct_paths(self) -> None:
+    def test_mark_source_post_extraction_resume_covers_caption_and_direct_paths(
+        self,
+    ) -> None:
         from cygnus.runtime.source_state import mark_source_post_extraction_resume
 
         image_source = types.SimpleNamespace(
@@ -102,7 +112,9 @@ class RuntimeSourceStateTests(unittest.TestCase):
         self.assertIs(result, image_source)
         self.assertEqual(image_source.status, "processing")
         self.assertEqual(image_source.progress, 56)
-        self.assertEqual(image_source.progress_message, "Captioning images before extraction...")
+        self.assertEqual(
+            image_source.progress_message, "Captioning images before extraction..."
+        )
         self.assertEqual(image_source.job_id, "job-3")
 
         direct_source = types.SimpleNamespace(
@@ -137,7 +149,9 @@ class RuntimeSourceStateTests(unittest.TestCase):
         self.assertIs(result, source)
         self.assertEqual(source.status, "processing")
         self.assertEqual(source.progress, 78)
-        self.assertEqual(source.progress_message, "Plan approved — compiling wiki pages...")
+        self.assertEqual(
+            source.progress_message, "Plan approved — compiling wiki pages..."
+        )
         self.assertEqual(source.job_id, "job-5")
 
     def test_mark_source_awaiting_approval_formats_threshold_message(self) -> None:
@@ -184,7 +198,9 @@ class RuntimeSourceStateTests(unittest.TestCase):
         self.assertEqual(source.error_message, "Unable to fetch content from URL")
         self.assertEqual(source.progress_message, "Unable to fetch content from URL")
 
-    def test_mark_source_plan_ready_and_ready_reset_runtime_recovery_state(self) -> None:
+    def test_mark_source_plan_ready_and_ready_reset_runtime_recovery_state(
+        self,
+    ) -> None:
         from cygnus.runtime.source_state import (
             mark_source_plan_ready_for_review,
             mark_source_ready,
@@ -201,7 +217,9 @@ class RuntimeSourceStateTests(unittest.TestCase):
         mark_source_plan_ready_for_review(source)
         self.assertEqual(source.status, "plan_ready")
         self.assertEqual(source.progress, 80)
-        self.assertEqual(source.progress_message, "Compilation plan ready — awaiting review")
+        self.assertEqual(
+            source.progress_message, "Compilation plan ready — awaiting review"
+        )
         self.assertEqual(source.auto_recover_count, 0)
 
         mark_source_ready(source)

@@ -15,7 +15,10 @@ from cygnus.recovery.window import (
     ResidualRisk,
     build_recovery_window_surface,
 )
-from cygnus.recovery.overview import GovernanceOverviewSurface, build_governance_overview_surface
+from cygnus.recovery.overview import (
+    GovernanceOverviewSurface,
+    build_governance_overview_surface,
+)
 
 
 def build_downstream_reality_check(

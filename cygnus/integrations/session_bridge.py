@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, final
 
-from cygnus.domain import AudienceContext
+from cygnus.domain import AudienceContext, AudienceFilter, Visibility
 from cygnus.domain.objects import (
     AnswerCard,
     EscalationRoute,
@@ -14,15 +15,23 @@ from cygnus.domain.objects import (
     TroubleshootingFlow,
 )
 from cygnus.evidence.records import FreshnessState
-from cygnus.integrations.governed_session_tools import (
-    governed_session_tool_definitions,
-)
 from cygnus.integrations.nanobot_tools import (
     GovernedKnowledgeTools,
     allowed_channels_for,
 )
+from cygnus.publish.propagation import PropagationStatus
 from cygnus.retrieval import SubstrateKnowledgeSnapshot
 from cygnus.retrieval.contracts import KnowledgeObjectHit, SourceTrace
+from cygnus.substrate.agent_protocol import (
+    SessionManifest,
+    session_tool_manifest_result_envelope,
+)
+from cygnus.substrate.tool_runtime import session_tool_manifest
+
+# The dispatcher owns the one cached canonical manifest. Every session-facing
+# projection reads that same immutable instance; no REST, OpenAPI, MCP, or
+# Nanobot surface re-builds tool fields independently.
+_SESSION_MANIFEST: SessionManifest = session_tool_manifest()
 
 
 class GovernanceDisposition(str, Enum):
@@ -54,6 +63,7 @@ class GovernedQueryRequest:
     request_ref: str
     query: str
     audience_context: AudienceContext
+    channel: str
     session_ref: str | None = None
     object_types: tuple[str, ...] = ()
     limit: int = 5
@@ -64,28 +74,254 @@ class GovernedQueryRequest:
             raise ValueError("request_ref must not be blank")
         if not self.query.strip():
             raise ValueError("query must not be blank")
+        channel = self.channel.strip()
+        if not channel:
+            raise ValueError("channel must not be blank")
         if self.session_ref is not None and not self.session_ref.strip():
             raise ValueError("session_ref must not be blank when provided")
         if not 1 <= self.limit <= 10:
             raise ValueError("limit must be between 1 and 10")
+        object.__setattr__(self, "channel", channel)
         object.__setattr__(self, "object_types", tuple(self.object_types))
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PropagationDeliveryRecord:
+    """One downstream propagation record for a publication surface."""
+
+    surface_id: str
+    status: str
+    audiences: tuple[AudienceFilter, ...]
+
+    def __post_init__(self) -> None:
+        surface_id = self.surface_id.strip()
+        if not surface_id:
+            raise ValueError("propagation surface_id must not be blank")
+        if self.status not in {state.value for state in PropagationStatus}:
+            raise ValueError(
+                f"propagation status must be one of {[s.value for s in PropagationStatus]}"
+            )
+        object.__setattr__(self, "surface_id", surface_id)
+        object.__setattr__(self, "audiences", tuple(self.audiences))
+
+
+@dataclass(frozen=True, slots=True)
+class DeliveryVerdict:
+    """Strict outcome of the channel/audience propagation delivery check."""
+
+    delivered: bool
+    code: str
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class PropagationDeliveryTruth:
+    """Pure view of synced propagation truth keyed by governed object ref.
+
+    Answerability in a governed session requires an exact channel/audience
+    match on a SYNCED propagation record; anything else (missing record,
+    pending/failed status, or an audience the record does not cover) is a
+    denial. There is no union across channels, statuses, or audiences.
+    """
+
+    _by_object: Mapping[str, tuple[PropagationDeliveryRecord, ...]]
+
+    @classmethod
+    def empty(cls) -> "PropagationDeliveryTruth":
+        return cls(_by_object={})
+
+    @classmethod
+    def from_propagation_rows(
+        cls,
+        rows: Iterable[tuple[str, str, str, Iterable[object]]],
+    ) -> "PropagationDeliveryTruth":
+        """Build truth from (object_ref, surface_id, status, binding_refs) rows.
+
+        ``binding_refs`` entries are publish binding dicts shaped like
+        ``PublishBinding.to_dict()`` (audience_filter + channel).
+        """
+        by_object: dict[str, list[PropagationDeliveryRecord]] = {}
+        for object_ref, surface_id, status, binding_refs in rows:
+            audiences: list[AudienceFilter] = []
+            for binding_payload in binding_refs:
+                audience_payload = _audience_payload_from_binding(binding_payload)
+                if audience_payload is not None:
+                    audiences.append(audience_payload)
+            by_object.setdefault(object_ref, []).append(
+                PropagationDeliveryRecord(
+                    surface_id=surface_id,
+                    status=status,
+                    audiences=tuple(audiences),
+                )
+            )
+        return cls(
+            _by_object={
+                object_ref: tuple(records) for object_ref, records in by_object.items()
+            }
+        )
+
+    def records_for(self, object_id: str) -> tuple[PropagationDeliveryRecord, ...]:
+        return self._by_object.get(object_id, ())
+
+    def delivery_verdict(
+        self,
+        object_id: str,
+        channel: str,
+        audience_context: AudienceContext,
+    ) -> DeliveryVerdict:
+        """Exact channel/audience synced-record check (no fallback)."""
+        records = self.records_for(object_id)
+        channel_records = tuple(
+            record for record in records if record.surface_id == channel
+        )
+        if not channel_records:
+            return DeliveryVerdict(
+                delivered=False,
+                code="channel_not_synced",
+                reason=(
+                    f"No propagation record exists for channel={channel} on "
+                    f"object={object_id}."
+                ),
+            )
+        for record in channel_records:
+            if record.status != PropagationStatus.SYNCED.value:
+                continue
+            if any(audience.matches(audience_context) for audience in record.audiences):
+                return DeliveryVerdict(
+                    delivered=True,
+                    code="delivered",
+                    reason=(
+                        f"Channel={channel} propagation is synced for the "
+                        f"requested audience on object={object_id}."
+                    ),
+                )
+        synced = any(
+            record.status == PropagationStatus.SYNCED.value
+            for record in channel_records
+        )
+        if not synced:
+            statuses = sorted({record.status for record in channel_records})
+            return DeliveryVerdict(
+                delivered=False,
+                code="propagation_pending",
+                reason=(
+                    f"Channel={channel} propagation is not synced for "
+                    f"object={object_id} (statuses={statuses})."
+                ),
+            )
+        return DeliveryVerdict(
+            delivered=False,
+            code="audience_not_delivered",
+            reason=(
+                f"Channel={channel} is synced for object={object_id} but does "
+                f"not cover the requested audience."
+            ),
+        )
+
+
+def delivered_truth_for_objects(
+    objects: Iterable[KnowledgeObject],
+) -> PropagationDeliveryTruth:
+    """Fixture/eval truth: every published object is delivered on its allowed
+    channels for its supported audiences.
+
+    Never used for live REST handoffs — the runtime router builds truth from
+    the durable propagation table.
+    """
+    from cygnus.domain.lifecycle import LifecycleState
+
+    by_object: dict[str, tuple[PropagationDeliveryRecord, ...]] = {}
+    for object_ in objects:
+        if object_.lifecycle_state is not LifecycleState.PUBLISHED:
+            continue
+        audiences = tuple(object_.supported_audiences)
+        records = tuple(
+            PropagationDeliveryRecord(
+                surface_id=channel,
+                status=PropagationStatus.SYNCED.value,
+                audiences=audiences,
+            )
+            for channel in allowed_channels_for(object_)
+        )
+        if records:
+            by_object[object_.object_id] = records
+    return PropagationDeliveryTruth(_by_object=by_object)
+
+
+def _audience_payload_from_binding(payload: object) -> AudienceFilter | None:
+    """Decode one publish binding dict into the audience it delivered to."""
+    if not isinstance(payload, dict):
+        return None
+    audience_payload = payload.get("audience_filter")
+    if not isinstance(audience_payload, dict):
+        return None
+    visibility = audience_payload.get("visibility")
+    if not isinstance(visibility, str):
+        return None
+
+    def _dimension(name: str) -> tuple[str, ...]:
+        value = audience_payload.get(name, [])
+        if not isinstance(value, list) or not all(
+            isinstance(item, str) for item in value
+        ):
+            return ()
+        return tuple(value)
+
+    try:
+        return AudienceFilter(
+            visibility=Visibility(visibility),
+            brands=_dimension("brands"),
+            product_lines=_dimension("product_lines"),
+            plans=_dimension("plans"),
+            regions=_dimension("regions"),
+            languages=_dimension("languages"),
+            product_versions=_dimension("product_versions"),
+        )
+    except ValueError:
+        return None
 
 
 @final
 class GovernedSessionBridge:
     """Cygnus-owned query handoff; Nanobot remains the session owner."""
 
-    __slots__ = ("_tools",)
+    __slots__ = ("_snapshot", "_tools")
+    _snapshot: SubstrateKnowledgeSnapshot
     _tools: GovernedKnowledgeTools
 
     def __init__(self, snapshot: SubstrateKnowledgeSnapshot) -> None:
+        self._snapshot = snapshot
         self._tools = GovernedKnowledgeTools(snapshot)
 
     def query(self, request: GovernedQueryRequest) -> dict[str, Any]:
+        """Resolve one runtime query only from its canonical snapshot truth."""
+        return self._query(request, fixture_delivery_truth=None)
+
+    def query_with_fixture_delivery(
+        self,
+        request: GovernedQueryRequest,
+        *,
+        delivery_truth: PropagationDeliveryTruth,
+    ) -> dict[str, Any]:
+        """Evaluation/test-only adapter for synthetic delivery fixtures.
+
+        Runtime routers must call :meth:`query`, whose delivery predicate is
+        database-backed and request-scoped. This isolated seam keeps legacy
+        scenario fixtures out of the production path.
+        """
+        return self._query(request, fixture_delivery_truth=delivery_truth)
+
+    def _query(
+        self,
+        request: GovernedQueryRequest,
+        *,
+        fixture_delivery_truth: PropagationDeliveryTruth | None,
+    ) -> dict[str, Any]:
         hits = self._tools.search_hits(
             query=request.query,
             audience_context=request.audience_context,
             object_types=list(request.object_types),
+            channel=request.channel,
             limit=request.limit,
         )
         if not hits:
@@ -93,15 +329,29 @@ class GovernedSessionBridge:
 
         selected = hits[0]
         object_ = self._tools.read_object(selected.object_id)
-        trace = self._tools.read_trace(selected.object_id)
+        trace = self._tools.read_trace(
+            selected.object_id,
+            audience_context=request.audience_context,
+            channel=request.channel,
+        )
         if object_ is None or trace is None:
             raise RuntimeError(
                 "governed retrieval returned an unresolved object reference"
             )
 
+        verdict = (
+            fixture_delivery_truth.delivery_verdict(
+                selected.object_id,
+                request.channel,
+                request.audience_context,
+            )
+            if fixture_delivery_truth is not None
+            else self._snapshot_delivery_verdict(selected.object_id, request)
+        )
         disposition, codes, directives, expose_content = _governance_decision(
             selected,
             trace,
+            verdict,
         )
         current_context = _governance_context(
             request.audience_context,
@@ -122,6 +372,7 @@ class GovernedSessionBridge:
             request.audience_context,
             expose_content=expose_content,
             disposition=disposition,
+            allowed_channels=(request.channel,) if verdict.delivered else (),
         )
         tool_trace = (
             _tool_trace("search_knowledge_objects"),
@@ -145,26 +396,57 @@ class GovernedSessionBridge:
             trace_ref=selected.trace_ref,
         )
 
-    def _no_answer_response(self, request: GovernedQueryRequest) -> dict[str, Any]:
+    def _snapshot_delivery_verdict(
+        self,
+        object_id: str,
+        request: GovernedQueryRequest,
+    ) -> DeliveryVerdict:
+        try:
+            delivered = self._snapshot.delivery_verdict(
+                object_id,
+                channel=request.channel,
+                audience_context=request.audience_context,
+            )
+        except Exception:
+            delivered = False
+        if delivered:
+            return DeliveryVerdict(
+                delivered=True,
+                code="delivered",
+                reason="Current signed delivery receipt covers this channel and audience.",
+            )
+        return DeliveryVerdict(
+            delivered=False,
+            code="propagation_pending",
+            reason="Current signed delivery receipt is unavailable for this channel and audience.",
+        )
+
+    def _no_answer_response(
+        self,
+        request: GovernedQueryRequest,
+    ) -> dict[str, Any]:
         unpublished_hits = self._tools.search_hits(
             query=request.query,
             audience_context=request.audience_context,
             object_types=list(request.object_types),
+            channel=request.channel,
             limit=request.limit,
             include_unpublished=True,
         )
         any_audience_hits = self._tools.search_hits(
             query=request.query,
-            audience_context=None,
             object_types=list(request.object_types),
+            channel=request.channel,
             limit=request.limit,
+            match_audience=False,
         )
 
         if unpublished_hits:
             disposition = GovernanceDisposition.RESTRICTED
-            codes = ("pending_review",)
+            codes: tuple[str, ...] = ("pending_review",)
             directives = ("wait_for_review", "do_not_present_as_answered")
             summary = "A matching knowledge object exists but is not published."
+            answer: dict[str, object] | None = None
         elif any_audience_hits:
             disposition = GovernanceDisposition.RESTRICTED
             codes = ("audience_restricted",)
@@ -172,11 +454,18 @@ class GovernedSessionBridge:
             summary = (
                 "Matching knowledge exists outside the requested audience boundary."
             )
+            # Object-level denial: the matched object does not cover the
+            # requested audience, so no restricted metadata or trace may be
+            # projected — even when propagation truth exists for the object.
+            # Delivery coupling applies only to audience-matched objects
+            # selected in the main query path, which remains fail-closed here.
+            answer = None
         else:
             disposition = GovernanceDisposition.FALLBACK
             codes = ("no_governed_match", "fallback_suggested")
             directives = ("offer_human_escalation", "do_not_present_as_answered")
             summary = "No governed knowledge object can answer this query."
+            answer = None
 
         current_context = _governance_context(
             request.audience_context,
@@ -194,7 +483,7 @@ class GovernedSessionBridge:
             disposition=disposition,
             codes=codes,
             directives=directives,
-            answer=None,
+            answer=answer,
             source_trace=None,
             alternatives=(),
             continuity=continuity,
@@ -206,10 +495,18 @@ class GovernedSessionBridge:
 
 def session_bridge_capabilities(
     _snapshot: SubstrateKnowledgeSnapshot,
+    *,
+    actor: object | None = None,
 ) -> dict[str, object]:
-    definitions = governed_session_tool_definitions()
+    """Nanobot-facing session contract, derived only from the canonical manifest.
+
+    ``actor`` is an optional permission view (e.g. an authenticated employee or
+    a :class:`SessionActorScope`); availability per tool is projected truthfully
+    from it. With no actor, every governed tool is reported denied.
+    """
+    capabilities = _SESSION_MANIFEST.capabilities(actor)
     return {
-        "contract_version": "2026-08-10",
+        **capabilities,
         "owners": {
             "session_continuity": "nanobot",
             "knowledge_truth": "cygnus",
@@ -218,31 +515,42 @@ def session_bridge_capabilities(
         "query_handoff": {
             "endpoint": "/api/session-bridge/query",
             "audience_context_required": True,
+            "channel_required": True,
+            "answerability_requires_synced_propagation": True,
             "revalidates_every_query": True,
             "session_memory_is_truth": False,
         },
-        "governed_tools": [
-            {
-                "name": definition.name,
-                "description": definition.description,
-                "risk_level": definition.risk_level,
-                "parameters": definition.parameters,
-                "availability": "ready",
-            }
-            for definition in definitions
-        ],
         "not_exposed": [],
     }
+
+
+def session_bridge_openapi_projection() -> dict[str, object]:
+    """OpenAPI session-contract projection, derived from the canonical manifest."""
+    return _SESSION_MANIFEST.openapi_projection()
+
+
+_SOURCE_BLINDNESS_TRACE_SPOTS = frozenset(
+    {
+        "object_has_no_evidence",
+        "object_has_no_readable_evidence",
+        "object_identity_mismatch",
+        "source_evidence_incomplete",
+    }
+)
+_DELIVERY_TRACE_BLIND_SPOTS = frozenset(
+    {"signed_delivery_not_current", "publication_delivery_trace_mismatch"}
+)
 
 
 def _governance_decision(
     hit: KnowledgeObjectHit,
     trace: SourceTrace,
+    delivery_verdict: DeliveryVerdict,
 ) -> tuple[GovernanceDisposition, tuple[str, ...], tuple[str, ...], bool]:
     severe_blind_spots = tuple(
         blind_spot
         for blind_spot in trace.blind_spots
-        if blind_spot == "object_has_no_evidence"
+        if blind_spot in _SOURCE_BLINDNESS_TRACE_SPOTS
         or blind_spot.startswith("missing_evidence:")
     )
     if severe_blind_spots:
@@ -250,6 +558,38 @@ def _governance_decision(
             GovernanceDisposition.ESCALATE,
             ("source_blindness", *severe_blind_spots, "escalate_required"),
             ("withhold_answer_content", "escalate_to_human"),
+            False,
+        )
+
+    delivery_codes = tuple(
+        blind_spot
+        for blind_spot in trace.blind_spots
+        if blind_spot in _DELIVERY_TRACE_BLIND_SPOTS
+    )
+    if not delivery_verdict.delivered:
+        delivery_codes = (*delivery_codes, delivery_verdict.code)
+    if delivery_codes:
+        # Answerability is coupled to an exact channel/audience synced receipt
+        # and its matching publication trace. Neither may authorize content
+        # independently, and both failures retain the restricted status.
+        return (
+            GovernanceDisposition.RESTRICTED,
+            tuple(
+                dict.fromkeys(
+                    (
+                        *delivery_codes,
+                        "not_delivered_to_channel",
+                        "propagation_pending",
+                        "do_not_present_as_answered",
+                    )
+                )
+            ),
+            (
+                "withhold_answer_content",
+                "do_not_present_as_answered",
+                "offer_human_escalation",
+                "check_propagation_status",
+            ),
             False,
         )
 
@@ -262,16 +602,24 @@ def _governance_decision(
         return (
             GovernanceDisposition.RESTRICTED,
             tuple(codes),
-            ("show_governance_warning", "require_human_check_before_external_use"),
-            True,
+            (
+                "withhold_answer_content",
+                "show_governance_warning",
+                "require_human_check_before_external_use",
+            ),
+            False,
         )
     if trace.freshness is FreshnessState.UNKNOWN:
         codes.extend(("freshness_unknown", "fallback_suggested"))
         return (
             GovernanceDisposition.RESTRICTED,
             tuple(codes),
-            ("show_governance_warning", "require_human_check_before_external_use"),
-            True,
+            (
+                "withhold_answer_content",
+                "show_governance_warning",
+                "require_human_check_before_external_use",
+            ),
+            False,
         )
 
     return (
@@ -289,12 +637,13 @@ def _answer_projection(
     *,
     expose_content: bool,
     disposition: GovernanceDisposition,
+    allowed_channels: tuple[str, ...],
 ) -> dict[str, object]:
     content = _object_content(object_, audience_context) if expose_content else None
     return {
         **hit.to_dict(),
         "content": content,
-        "allowed_channels": list(allowed_channels_for(object_)),
+        "allowed_channels": list(allowed_channels),
         "usage": (
             "direct"
             if disposition is GovernanceDisposition.ANSWERABLE
@@ -441,7 +790,7 @@ def _audience_payload(context: AudienceContext) -> dict[str, str | None]:
 def _tool_trace(name: str, *, result_ref: str | None = None) -> dict[str, object]:
     return {
         "name": name,
-        "risk_level": "R0",
+        "risk_level": _SESSION_MANIFEST.tool(name).risk_class,
         "owner": "cygnus",
         "result_ref": result_ref,
     }
@@ -481,10 +830,10 @@ def _envelope(
     tool_trace: tuple[dict[str, object], ...],
     trace_ref: str | None,
 ) -> dict[str, Any]:
-    return {
-        "status": status,
-        "summary": summary,
-        "data": {
+    payload = session_tool_manifest_result_envelope(
+        status=status,
+        summary=summary,
+        data={
             "request_ref": request.request_ref,
             "session_ref": request.session_ref,
             "query": request.query,
@@ -501,7 +850,9 @@ def _envelope(
             "governance_context": current_context,
             "tool_trace": list(tool_trace),
         },
-        "trace_ref": trace_ref,
-        "warnings": list(codes),
-        "errors": [],
-    }
+        trace_ref=trace_ref,
+        warnings=list(codes),
+        errors=[],
+    )
+    payload["trace_ref"] = trace_ref
+    return payload

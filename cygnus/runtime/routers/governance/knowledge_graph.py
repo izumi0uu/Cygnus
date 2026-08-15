@@ -133,6 +133,7 @@ async def traceability(
 
     trace = resolver.build_trace_for_object(selected)
     object_dict = selected.to_dict()
+    projection: dict[str, object] | None
     if durable_projection is not None:
         projection = durable_projection
     else:

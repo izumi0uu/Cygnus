@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+import uuid
 from typing import Any, Iterable
 
 from cygnus.domain.audience import AudienceFilter
@@ -14,6 +15,17 @@ class KnowledgeObjectType(str, Enum):
     POLICY_RULE = "policy_rule"
     KNOWN_ISSUE_PAGE = "known_issue_page"
     ESCALATION_ROUTE = "escalation_route"
+
+
+def governed_object_ref(page_id: uuid.UUID) -> str:
+    """Return the immutable identity of one governed WikiPage object.
+
+    Slugs are user-facing paths and may repeat across scope and language. They
+    are never a publication, delivery, binding, or retrieval identity.
+    """
+    if not isinstance(page_id, uuid.UUID):
+        raise TypeError("governed object identity requires a WikiPage UUID")
+    return f"ko-page-{page_id}"
 
 
 def _normalize_strings(values: Iterable[str] | None, *, label: str) -> tuple[str, ...]:
@@ -48,7 +60,9 @@ class AudienceVariant:
             self, "caveats", _normalize_strings(self.caveats, label="caveat")
         )
         object.__setattr__(
-            self, "evidence_ids", _normalize_strings(self.evidence_ids, label="evidence")
+            self,
+            "evidence_ids",
+            _normalize_strings(self.evidence_ids, label="evidence"),
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -171,7 +185,10 @@ class TroubleshootingFlow(KnowledgeObject):
         )
         if not self.steps:
             raise ValueError("troubleshooting flow must contain at least one step")
-        if self.escalation_route_id is not None and not self.escalation_route_id.strip():
+        if (
+            self.escalation_route_id is not None
+            and not self.escalation_route_id.strip()
+        ):
             raise ValueError("escalation_route_id must not be blank when provided")
 
     @property
@@ -260,7 +277,10 @@ class KnownIssuePage(KnowledgeObject):
         self.affected_versions = _normalize_strings(
             self.affected_versions, label="affected version"
         )
-        if self.expected_next_update is not None and not self.expected_next_update.strip():
+        if (
+            self.expected_next_update is not None
+            and not self.expected_next_update.strip()
+        ):
             raise ValueError("expected_next_update must not be blank when provided")
 
     @property
@@ -302,7 +322,9 @@ class EscalationRoute(KnowledgeObject):
             self.blocked_domains, label="blocked domain"
         )
         if not self.trigger_conditions:
-            raise ValueError("escalation route must define at least one trigger condition")
+            raise ValueError(
+                "escalation route must define at least one trigger condition"
+            )
         if not self.destination_team.strip():
             raise ValueError("destination_team must not be blank")
         if self.severity_hint is not None and not self.severity_hint.strip():

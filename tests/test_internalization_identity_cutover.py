@@ -25,9 +25,13 @@ def test_runtime_identity_residue_is_removed_from_target_files() -> None:
     for relative_path, expected_snippets in checks.items():
         text = Path(relative_path).read_text(encoding="utf-8")
         for snippet in expected_snippets:
-            assert snippet in text, f"missing expected snippet `{snippet}` in {relative_path}"
+            assert snippet in text, (
+                f"missing expected snippet `{snippet}` in {relative_path}"
+            )
 
     for relative_path, forbidden_snippets in forbidden.items():
         text = Path(relative_path).read_text(encoding="utf-8")
         for snippet in forbidden_snippets:
-            assert snippet not in text, f"found forbidden snippet `{snippet}` in {relative_path}"
+            assert snippet not in text, (
+                f"found forbidden snippet `{snippet}` in {relative_path}"
+            )

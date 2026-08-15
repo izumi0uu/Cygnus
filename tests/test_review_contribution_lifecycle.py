@@ -3,13 +3,16 @@ from __future__ import annotations
 import types
 import unittest
 import uuid
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 from cygnus.runtime.database.models import SkillContributionStatus
 
 
 class SkillContributionLifecycleTests(unittest.IsolatedAsyncioTestCase):
-    async def test_submit_skill_contribution_promotes_contributor_draft_to_pending(self) -> None:
+    async def test_submit_skill_contribution_promotes_contributor_draft_to_pending(
+        self,
+    ) -> None:
         import cygnus.review.contributions as contribution_module
 
         contribution = types.SimpleNamespace(
@@ -28,7 +31,9 @@ class SkillContributionLifecycleTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch.object(contribution_module, "log_audit", AsyncMock()) as log_audit:
-            await contribution_module.submit_skill_contribution(object(), contribution, author)
+            await contribution_module.submit_skill_contribution(
+                cast(Any, object()), cast(Any, contribution), cast(Any, author)
+            )
 
         self.assertEqual(contribution.status, SkillContributionStatus.PENDING.value)
         log_audit.assert_awaited_once()
@@ -52,7 +57,9 @@ class SkillContributionLifecycleTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with self.assertRaises(contribution_module.InvalidTransition):
-            await contribution_module.submit_skill_contribution(object(), contribution, other_user)
+            await contribution_module.submit_skill_contribution(
+                cast(Any, object()), cast(Any, contribution), cast(Any, other_user)
+            )
 
     async def test_approve_skill_contribution_marks_terminal_approved(self) -> None:
         import cygnus.review.contributions as contribution_module
@@ -75,10 +82,15 @@ class SkillContributionLifecycleTests(unittest.IsolatedAsyncioTestCase):
         skill = types.SimpleNamespace(id=uuid.uuid4(), current_version=3)
 
         with (
-            patch("cygnus.runtime.services.skill_service.SkillService.materialize_approved_contribution", AsyncMock(return_value=skill)) as materialize,
+            patch(
+                "cygnus.runtime.services.skill_service.SkillService.materialize_approved_contribution",
+                AsyncMock(return_value=skill),
+            ) as materialize,
             patch.object(contribution_module, "log_audit", AsyncMock()) as log_audit,
         ):
-            result = await contribution_module.approve_skill_contribution(object(), contribution, reviewer)
+            result = await contribution_module.approve_skill_contribution(
+                cast(Any, object()), cast(Any, contribution), cast(Any, reviewer)
+            )
 
         self.assertIs(result, skill)
         self.assertEqual(contribution.status, SkillContributionStatus.APPROVED.value)
@@ -105,7 +117,9 @@ class SkillContributionLifecycleTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch.object(contribution_module, "log_audit", AsyncMock()) as log_audit:
-            await contribution_module.reject_skill_contribution(object(), contribution, reviewer)
+            await contribution_module.reject_skill_contribution(
+                cast(Any, object()), cast(Any, contribution), cast(Any, reviewer)
+            )
 
         self.assertEqual(contribution.status, SkillContributionStatus.REJECTED.value)
         log_audit.assert_awaited_once()

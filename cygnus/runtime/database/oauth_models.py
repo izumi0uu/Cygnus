@@ -19,6 +19,7 @@ from cygnus.runtime.database.models import Base
 
 class OAuthClient(Base):
     """A registered OAuth client (e.g. Claude Desktop)."""
+
     __tablename__ = "oauth_clients"
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -38,6 +39,7 @@ class OAuthClient(Base):
 
 class OAuthAuthCode(Base):
     """A short-lived authorization code issued during the OAuth flow."""
+
     __tablename__ = "oauth_auth_codes"
 
     id: Mapped[uuid.UUID] = mapped_column(

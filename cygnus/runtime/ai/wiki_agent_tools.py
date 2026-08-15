@@ -21,7 +21,9 @@ from cygnus.runtime.services import wiki_service
 _IMAGE_MARKER_RE = re.compile(r"!\[[^\]]*\]\(image://([0-9a-fA-F-]{36})\)")
 
 
-async def _load_allowed_image_ids(session: AsyncSession, source_id: uuid.UUID) -> set[str]:
+async def _load_allowed_image_ids(
+    session: AsyncSession, source_id: uuid.UUID
+) -> set[str]:
     result = await session.execute(
         select(SourceImage.id).where(SourceImage.source_id == source_id)
     )
@@ -85,7 +87,10 @@ TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "Natural language search query"},
+                    "query": {
+                        "type": "string",
+                        "description": "Natural language search query",
+                    },
                     "top_k": {
                         "type": "integer",
                         "description": "Number of results to return (1-10, default 5)",
@@ -136,7 +141,10 @@ TOOL_SCHEMAS = [
                         "type": "string",
                         "description": "URL-safe, lowercase, hyphenated, type-prefixed slug. E.g. 'concept/fire-safety'",
                     },
-                    "title": {"type": "string", "description": "Human-readable page title"},
+                    "title": {
+                        "type": "string",
+                        "description": "Human-readable page title",
+                    },
                     "page_type": {
                         "type": "string",
                         "enum": ["entity", "concept", "topic", "source"],
@@ -176,7 +184,10 @@ TOOL_SCHEMAS = [
                         "type": "string",
                         "description": "Updated one-sentence summary (optional)",
                     },
-                    "title": {"type": "string", "description": "Updated title (optional)"},
+                    "title": {
+                        "type": "string",
+                        "description": "Updated title (optional)",
+                    },
                 },
                 "required": ["slug", "new_content_md"],
             },
@@ -223,6 +234,7 @@ TOOL_SCHEMAS = [
 # Agent state
 # ---------------------------------------------------------------------------
 
+
 class AgentState:
     """Tracks pages created/updated and signals when the agent is done."""
 
@@ -248,7 +260,8 @@ class AgentState:
         return {
             "pages_created": len(self.pages_created),
             "pages_updated": len(self.pages_updated),
-            "log_entry": self.report or (
+            "log_entry": self.report
+            or (
                 f"ingested {doc_name}: +{len(self.pages_created)} created, "
                 f"~{len(self.pages_updated)} updated"
             ),
@@ -277,6 +290,7 @@ def _check_slug(slug: str) -> Optional[str]:
 # Tool handler factory
 # ---------------------------------------------------------------------------
 
+
 def build_tool_handlers(
     session: AsyncSession,
     source: Source,
@@ -295,7 +309,9 @@ def build_tool_handlers(
 
     async def _allowed_image_ids() -> set[str]:
         if "ids" not in _allowed_image_ids_cache:
-            _allowed_image_ids_cache["ids"] = await _load_allowed_image_ids(session, source.id)
+            _allowed_image_ids_cache["ids"] = await _load_allowed_image_ids(
+                session, source.id
+            )
         return _allowed_image_ids_cache["ids"]
 
     async def _embed(text: str) -> Optional[list[float]]:
@@ -311,12 +327,20 @@ def build_tool_handlers(
 
     async def read_wiki_index() -> dict:
         pages = await wiki_service.list_pages(
-            session, limit=300, scope_type=_scope_type, scope_id=_scope_id,
+            session,
+            limit=300,
+            scope_type=_scope_type,
+            scope_id=_scope_id,
         )
         return {
             "count": len(pages),
             "pages": [
-                {"slug": p.slug, "page_type": p.page_type, "title": p.title, "summary": p.summary or ""}
+                {
+                    "slug": p.slug,
+                    "page_type": p.page_type,
+                    "title": p.title,
+                    "summary": p.summary or "",
+                }
                 for p in pages
             ],
         }
@@ -326,7 +350,10 @@ def build_tool_handlers(
     async def read_wiki_page(slug: str) -> dict:
         slug = slug.strip().lower()
         page = await wiki_service.get_page_by_slug(
-            session, slug, scope_type=_scope_type, scope_id=_scope_id,
+            session,
+            slug,
+            scope_type=_scope_type,
+            scope_id=_scope_id,
         )
         if page is None:
             return {"error": f"Page not found: '{slug}'"}
@@ -352,8 +379,11 @@ def build_tool_handlers(
         except Exception as e:
             return {"error": f"Embedding failed: {e}"}
         hits = await wiki_search.search_pages_semantic(
-            session, query_emb, top_k=top_k,
-            scope_type=_scope_type, scope_id=_scope_id,
+            session,
+            query_emb,
+            top_k=top_k,
+            scope_type=_scope_type,
+            scope_id=_scope_id,
         )
         return {
             "results": [
@@ -392,10 +422,15 @@ def build_tool_handlers(
     ) -> dict:
         clean = _check_slug(slug)
         if not clean:
-            return {"error": f"Invalid slug: '{slug}'. Use 'type/kebab-case-name' format."}
+            return {
+                "error": f"Invalid slug: '{slug}'. Use 'type/kebab-case-name' format."
+            }
 
         existing = await wiki_service.get_page_by_slug(
-            session, clean, scope_type=_scope_type, scope_id=_scope_id,
+            session,
+            clean,
+            scope_type=_scope_type,
+            scope_id=_scope_id,
         )
         if existing is not None:
             return {"error": f"Slug '{clean}' already exists. Use update_page instead."}
@@ -403,7 +438,9 @@ def build_tool_handlers(
         if page_type not in wiki_service.PAGE_TYPES:
             page_type = "concept"
 
-        content_md = _strip_invalid_image_markers(content_md, await _allowed_image_ids())
+        content_md = _strip_invalid_image_markers(
+            content_md, await _allowed_image_ids()
+        )
 
         embedding = await _embed(f"{title}\n\n{summary}\n\n{content_md}")
 
@@ -435,16 +472,23 @@ def build_tool_handlers(
     ) -> dict:
         clean = slug.strip().lower()
         existing = await wiki_service.get_page_by_slug(
-            session, clean, scope_type=_scope_type, scope_id=_scope_id,
+            session,
+            clean,
+            scope_type=_scope_type,
+            scope_id=_scope_id,
         )
         if existing is None:
             return {"error": f"Page '{clean}' not found. Use create_page to create it."}
 
-        new_content_md = _strip_invalid_image_markers(new_content_md, await _allowed_image_ids())
+        new_content_md = _strip_invalid_image_markers(
+            new_content_md, await _allowed_image_ids()
+        )
 
         embed_title = title or existing.title or ""
         embed_summary = summary or existing.summary or ""
-        embedding = await _embed(f"{embed_title}\n\n{embed_summary}\n\n{new_content_md}")
+        embedding = await _embed(
+            f"{embed_title}\n\n{embed_summary}\n\n{new_content_md}"
+        )
 
         await wiki_service.apply_update(
             session,
@@ -467,7 +511,10 @@ def build_tool_handlers(
 
     async def append_log(entry: str) -> dict:
         await wiki_service.append_log(
-            session, entry, scope_type=_scope_type, scope_id=_scope_id,
+            session,
+            entry,
+            scope_type=_scope_type,
+            scope_id=_scope_id,
         )
         return {"logged": entry[:120]}
 

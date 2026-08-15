@@ -33,6 +33,7 @@ router = APIRouter(prefix="/admin/stats")
 # Schemas
 # ---------------------------------------------------------------------------
 
+
 class TimeSeriesPoint(BaseModel):
     date: date
     value: Optional[float] = None
@@ -64,6 +65,7 @@ class RollupTriggerResponse(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _parse_range(from_q: Optional[str], to_q: Optional[str]) -> tuple[date, date]:
     """Default: last 30 days ending yesterday (UTC)."""
     today = datetime.now(timezone.utc).date()
@@ -83,13 +85,21 @@ async def _fetch_rows(
     to_date: date,
 ) -> list[StatsDailyRollup]:
     win_start = datetime.combine(from_date, datetime.min.time(), tzinfo=timezone.utc)
-    win_end = datetime.combine(to_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
-    stmt = select(StatsDailyRollup).where(and_(
-        StatsDailyRollup.date >= win_start,
-        StatsDailyRollup.date < win_end,
-        StatsDailyRollup.metric_key.in_(metric_keys),
-    )).order_by(StatsDailyRollup.date.asc())
-    return (await session.execute(stmt)).scalars().all()
+    win_end = datetime.combine(
+        to_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
+    )
+    stmt = (
+        select(StatsDailyRollup)
+        .where(
+            and_(
+                StatsDailyRollup.date >= win_start,
+                StatsDailyRollup.date < win_end,
+                StatsDailyRollup.metric_key.in_(metric_keys),
+            )
+        )
+        .order_by(StatsDailyRollup.date.asc())
+    )
+    return list((await session.execute(stmt)).scalars().all())
 
 
 def _to_section_response(
@@ -113,7 +123,9 @@ def _to_section_response(
         )
         series.setdefault(row.metric_key, []).append(point)
         if row.metric_key in scalar_keys and row.value_numeric is not None:
-            latest[row.metric_key] = row.value_numeric  # rows are date-ordered ASC, last wins
+            latest[row.metric_key] = (
+                row.value_numeric
+            )  # rows are date-ordered ASC, last wins
         if row.metric_key in list_keys and row.value_json:
             latest_lists[row.metric_key] = row.value_json.get("items", [])
 
@@ -172,7 +184,9 @@ async def get_overview(
         if items:
             top_gap = items[0]
 
-    contributor_rows = await _fetch_rows(db, ["draft.top_contributors"], from_date, to_date)
+    contributor_rows = await _fetch_rows(
+        db, ["draft.top_contributors"], from_date, to_date
+    )
     top_contributor: Optional[dict] = None
     if contributor_rows:
         latest_c = contributor_rows[-1]
@@ -210,7 +224,11 @@ CONTRIBUTION_SCALAR = [
     "draft.time_to_review_avg_seconds",
     "compile_plan.pending_review",
 ]
-CONTRIBUTION_LIST = ["draft.top_contributors", "draft.top_reviewers", "draft.created.by_source"]
+CONTRIBUTION_LIST = [
+    "draft.top_contributors",
+    "draft.top_reviewers",
+    "draft.created.by_source",
+]
 
 USAGE_SCALAR = [
     "mcp.queries.total",
@@ -283,12 +301,15 @@ async def get_gaps(
             key = item.get("normalized")
             if not key:
                 continue
-            bucket = merged.setdefault(key, {
-                "normalized": key,
-                "count": 0,
-                "samples": [],
-                "requester_ids": set(),
-            })
+            bucket = merged.setdefault(
+                key,
+                {
+                    "normalized": key,
+                    "count": 0,
+                    "samples": [],
+                    "requester_ids": set(),
+                },
+            )
             bucket["count"] += int(item.get("count", 0))
             for s in item.get("samples", []):
                 if s not in bucket["samples"] and len(bucket["samples"]) < 5:
@@ -297,8 +318,7 @@ async def get_gaps(
                 bucket["requester_ids"].add(rid)
 
     items = [
-        {**v, "requester_ids": sorted(v["requester_ids"])}
-        for v in merged.values()
+        {**v, "requester_ids": sorted(v["requester_ids"])} for v in merged.values()
     ]
     items.sort(key=lambda x: x["count"], reverse=True)
     return {"from_date": f, "to_date": t, "items": items[:limit]}
@@ -331,22 +351,33 @@ async def export_section(
 
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["date", "metric_key", "dimensions_json", "value_numeric", "value_json"])
+    writer.writerow(
+        ["date", "metric_key", "dimensions_json", "value_numeric", "value_json"]
+    )
     for row in rows:
-        d = row.date.date().isoformat() if isinstance(row.date, datetime) else str(row.date)
+        d = (
+            row.date.date().isoformat()
+            if isinstance(row.date, datetime)
+            else str(row.date)
+        )
         import json as _json
-        writer.writerow([
-            d,
-            row.metric_key,
-            _json.dumps(row.dimensions) if row.dimensions else "",
-            row.value_numeric if row.value_numeric is not None else "",
-            _json.dumps(row.value_json) if row.value_json else "",
-        ])
+
+        writer.writerow(
+            [
+                d,
+                row.metric_key,
+                _json.dumps(row.dimensions) if row.dimensions else "",
+                row.value_numeric if row.value_numeric is not None else "",
+                _json.dumps(row.value_json) if row.value_json else "",
+            ]
+        )
     buf.seek(0)
     return StreamingResponse(
         iter([buf.getvalue()]),
         media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=stats_{section}_{f}_{t}.csv"},
+        headers={
+            "Content-Disposition": f"attachment; filename=stats_{section}_{f}_{t}.csv"
+        },
     )
 
 
@@ -354,9 +385,12 @@ async def export_section(
 # Backfill / manual trigger
 # ---------------------------------------------------------------------------
 
+
 @router.post("/rollup", response_model=RollupTriggerResponse)
 async def trigger_rollup(
-    target: Optional[str] = Query(None, description="ISO date to rollup; default = yesterday UTC"),
+    target: Optional[str] = Query(
+        None, description="ISO date to rollup; default = yesterday UTC"
+    ),
     _user: Employee = require_permission("org:settings:manage"),
 ):
     """Run (or re-run) the daily rollup for one date. Idempotent."""
@@ -364,7 +398,9 @@ async def trigger_rollup(
         try:
             target_date = date.fromisoformat(target)
         except ValueError:
-            raise HTTPException(status_code=400, detail="target must be ISO date YYYY-MM-DD")
+            raise HTTPException(
+                status_code=400, detail="target must be ISO date YYYY-MM-DD"
+            )
     else:
         target_date = (datetime.now(timezone.utc) - timedelta(days=1)).date()
     result = await run_daily_rollup(target_date)

@@ -42,18 +42,21 @@ async def run(
     out: list[dict] = []
     try:
         from cygnus.runtime.ai.registry import ProviderRegistry
+
         registry = ProviderRegistry(db)
         llm = await registry.get_llm()
     except Exception as e:
         logger.warning(f"AI L4 provider load failed: {e}")
-        return [{
-            "id": "llm.judgment",
-            "layer": "L4",
-            "severity": "warn",
-            "status": "skipped",
-            "message": f"LLM provider unavailable: {e}",
-            "matches": [],
-        }]
+        return [
+            {
+                "id": "llm.judgment",
+                "layer": "L4",
+                "severity": "warn",
+                "status": "skipped",
+                "message": f"LLM provider unavailable: {e}",
+                "matches": [],
+            }
+        ]
 
     # Cap input to keep cost predictable (~3-4k tokens).
     prompt = _PROMPT_TEMPLATE.format(
@@ -63,62 +66,78 @@ async def run(
     )
     try:
         raw = await llm.generate(
-            prompt=prompt, system=_SYSTEM,
-            max_tokens=400, temperature=0.0,
+            prompt=prompt,
+            system=_SYSTEM,
+            max_tokens=400,
+            temperature=0.0,
         )
     except Exception as e:
         logger.warning(f"AI L4 generate failed: {e}")
-        return [{
-            "id": "llm.judgment",
-            "layer": "L4",
-            "severity": "warn",
-            "status": "skipped",
-            "message": f"LLM call failed: {e}",
-            "matches": [],
-        }]
+        return [
+            {
+                "id": "llm.judgment",
+                "layer": "L4",
+                "severity": "warn",
+                "status": "skipped",
+                "message": f"LLM call failed: {e}",
+                "matches": [],
+            }
+        ]
 
     parsed = _safe_json(raw)
     if parsed is None:
-        return [{
-            "id": "llm.judgment",
-            "layer": "L4",
-            "severity": "warn",
-            "status": "skipped",
-            "message": "LLM returned unparseable response",
-            "matches": [],
-        }]
+        return [
+            {
+                "id": "llm.judgment",
+                "layer": "L4",
+                "severity": "warn",
+                "status": "skipped",
+                "message": "LLM returned unparseable response",
+                "matches": [],
+            }
+        ]
 
     tone_ok = bool(parsed.get("tone_consistent", True))
     scope_ok = bool(parsed.get("scope_fit", True))
     concerns = [str(c) for c in (parsed.get("factual_concerns") or [])][:5]
     notes = str(parsed.get("notes") or "")[:200]
 
-    out.append({
-        "id": "llm.tone",
-        "layer": "L4",
-        "severity": "warn",
-        "status": "pass" if tone_ok else "warn",
-        "message": notes if tone_ok else f"Tone may be off: {notes}",
-        "matches": [],
-    })
-    out.append({
-        "id": "llm.scope_fit",
-        "layer": "L4",
-        "severity": "warn",
-        "status": "pass" if scope_ok else "warn",
-        "message": None if scope_ok else f"Content may not fit page_type='{page_type}'",
-        "matches": [],
-    })
-    out.append({
-        "id": "llm.factual",
-        "layer": "L4",
-        "severity": "warn",
-        "status": "warn" if concerns else "pass",
-        "message": (
-            f"{len(concerns)} claim(s) flagged for verification" if concerns else None
-        ),
-        "matches": concerns,
-    })
+    out.append(
+        {
+            "id": "llm.tone",
+            "layer": "L4",
+            "severity": "warn",
+            "status": "pass" if tone_ok else "warn",
+            "message": notes if tone_ok else f"Tone may be off: {notes}",
+            "matches": [],
+        }
+    )
+    out.append(
+        {
+            "id": "llm.scope_fit",
+            "layer": "L4",
+            "severity": "warn",
+            "status": "pass" if scope_ok else "warn",
+            "message": None
+            if scope_ok
+            else f"Content may not fit page_type='{page_type}'",
+            "matches": [],
+        }
+    )
+    out.append(
+        {
+            "id": "llm.factual",
+            "layer": "L4",
+            "severity": "warn",
+            "status": "warn" if concerns else "pass",
+            "message": (
+                f"{len(concerns)} claim(s) flagged for verification"
+                if concerns
+                else None
+            ),
+            "matches": concerns,
+        }
+    )
     return out
 
 
@@ -141,7 +160,7 @@ def _safe_json(raw: str) -> Optional[dict]:
         end = text.rfind("}")
         if start >= 0 and end > start:
             try:
-                return json.loads(text[start:end + 1])
+                return json.loads(text[start : end + 1])
             except json.JSONDecodeError:
                 return None
         return None

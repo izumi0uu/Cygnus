@@ -122,9 +122,22 @@ class PipelineCheckpoint:
 
     @classmethod
     def from_dict(cls, payload: dict[str, object]) -> PipelineCheckpoint:
+        raw_completed_phases = payload.get("completed_phases", ())
+        if not isinstance(raw_completed_phases, Iterable):
+            raise ValueError("completed_phases must be a sequence of phase names")
+        completed_phases: list[PipelinePhase] = []
+        for raw_phase in raw_completed_phases:
+            if isinstance(raw_phase, PipelinePhase):
+                completed_phases.append(raw_phase)
+            elif isinstance(raw_phase, str):
+                completed_phases.append(_coerce_phase(raw_phase))
+            else:
+                raise ValueError(
+                    f"completed_phases entries must be phase names, got {raw_phase!r}"
+                )
         return cls(
             workflow_id=str(payload["workflow_id"]),
             current_phase=_coerce_phase(str(payload["current_phase"])),
-            completed_phases=tuple(payload.get("completed_phases", ())),
+            completed_phases=tuple(completed_phases),
             is_complete=bool(payload.get("is_complete", False)),
         )

@@ -11,10 +11,10 @@ from typing import Optional
 
 @dataclass(frozen=True)
 class VisionModelSpec:
-    id: str                          # canonical "<provider>/<model_id>"
-    provider: str                    # "openai" | "google"
-    model_id: str                    # ID sent to the provider API
-    max_image_size_mb: int           # provider's per-image size cap
+    id: str  # canonical "<provider>/<model_id>"
+    provider: str  # "openai" | "google"
+    model_id: str  # ID sent to the provider API
+    max_image_size_mb: int  # provider's per-image size cap
     label: str
     cost_per_1m_input_tokens: Optional[float]
     cost_per_image: Optional[float]  # USD per image when provider charges flat

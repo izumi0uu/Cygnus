@@ -11,7 +11,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Iterable
 
-from cygnus.publish.propagation import PublishPropagationLedger, SurfacePropagationRecord
+from cygnus.publish.propagation import (
+    PublishPropagationLedger,
+    SurfacePropagationRecord,
+)
 from cygnus.publish.surface import (
     PublishActionEcho,
     PublishActionPreset,
@@ -162,9 +165,15 @@ class RecoveryProofSurface:
         if self.total_items <= 0:
             raise ValueError("total_items must be positive")
         object.__setattr__(self, "signals", tuple(self.signals))
-        object.__setattr__(self, "continue_commands", _normalize(self.continue_commands, label="continue command"))
+        object.__setattr__(
+            self,
+            "continue_commands",
+            _normalize(self.continue_commands, label="continue command"),
+        )
         object.__setattr__(self, "action_presets", tuple(self.action_presets))
-        object.__setattr__(self, "context_notes", _normalize(self.context_notes, label="context note"))
+        object.__setattr__(
+            self, "context_notes", _normalize(self.context_notes, label="context note")
+        )
         if self.selected_action is not None and not self.selected_action.strip():
             raise ValueError("selected_action must not be blank when provided")
 
@@ -181,7 +190,9 @@ class RecoveryProofSurface:
             "continue_commands": list(self.continue_commands),
             "action_presets": [preset.to_dict() for preset in self.action_presets],
             "selected_action": self.selected_action,
-            "action_echo": self.action_echo.to_dict() if self.action_echo is not None else None,
+            "action_echo": self.action_echo.to_dict()
+            if self.action_echo is not None
+            else None,
             "selected_position": self.selected_position,
             "total_items": self.total_items,
             "previous_object_ref": self.previous_object_ref,
@@ -196,14 +207,20 @@ def get_pressure_intake_recovery_proof_surface(
     records: Iterable[PressureIntakeRecord] | None = None,
     action_key: str | None = None,
 ) -> RecoveryProofSurface:
-    source_records = tuple(records) if records is not None else sample_pressure_intake_records()
+    source_records = (
+        tuple(records) if records is not None else sample_pressure_intake_records()
+    )
     propagation_surface = get_pressure_intake_publish_propagation_surface(
         selected_object_ref,
         records=source_records,
         action_key=action_key,
     )
-    bundle = _require_bundle(source_records, propagation_surface.selected_card.object_ref)
-    signals = _build_recovery_signals(bundle=bundle, propagation_surface=propagation_surface)
+    bundle = _require_bundle(
+        source_records, propagation_surface.selected_card.object_ref
+    )
+    signals = _build_recovery_signals(
+        bundle=bundle, propagation_surface=propagation_surface
+    )
     continue_commands = _normalize(
         (
             *propagation_surface.propagation_ledger.continue_commands,
@@ -228,7 +245,9 @@ def get_pressure_intake_recovery_proof_surface(
         total_items=propagation_surface.total_items,
         previous_object_ref=propagation_surface.previous_object_ref,
         next_object_ref=propagation_surface.next_object_ref,
-        context_notes=_build_context_notes(bundle=bundle, propagation_surface=propagation_surface, signals=signals),
+        context_notes=_build_context_notes(
+            bundle=bundle, propagation_surface=propagation_surface, signals=signals
+        ),
     )
 
 
@@ -285,7 +304,10 @@ def _build_recovery_signals(
                 headline="Live session feedback is the first proof of whether the hold or narrower path is being respected.",
                 evidence_note="If rewrites or agent overrides continue here, the policy boundary still has not fully converged.",
                 affected_audience_labels=audience_labels,
-                follow_up_commands=("inspect_feedback_sessions", "resolve_surface_hold"),
+                follow_up_commands=(
+                    "inspect_feedback_sessions",
+                    "resolve_surface_hold",
+                ),
             ),
         )
 
@@ -358,7 +380,10 @@ def _build_recovery_signals(
             headline="Frontline sessions still need watching until the repeated verification workaround stops being rewritten by hand.",
             evidence_note="This signal is the mirror of whether the new troubleshooting flow is actually lowering support effort.",
             affected_audience_labels=audience_labels,
-            follow_up_commands=("inspect_feedback_sessions", "check_propagation_status"),
+            follow_up_commands=(
+                "inspect_feedback_sessions",
+                "check_propagation_status",
+            ),
         ),
     )
 
@@ -383,9 +408,13 @@ def _signal_from_record(
         behavior_type=behavior_type,
         status=status,
         headline=headline,
-        evidence_note=(f"{evidence_note} {record.reason}" if record is not None else evidence_note),
+        evidence_note=(
+            f"{evidence_note} {record.reason}" if record is not None else evidence_note
+        ),
         affected_audience_labels=affected_audience_labels,
-        follow_up_commands=record.follow_up_commands if record is not None and record.follow_up_commands else follow_up_commands,
+        follow_up_commands=record.follow_up_commands
+        if record is not None and record.follow_up_commands
+        else follow_up_commands,
     )
 
 
@@ -410,10 +439,18 @@ def _status_from_propagation_record(
 
 def _build_recovery_window(signals: tuple[RecoverySignal, ...]) -> RecoveryProofWindow:
     counts = {
-        RecoverySignalStatus.CONFIRMED: sum(1 for signal in signals if signal.status is RecoverySignalStatus.CONFIRMED),
-        RecoverySignalStatus.WATCHING: sum(1 for signal in signals if signal.status is RecoverySignalStatus.WATCHING),
-        RecoverySignalStatus.AT_RISK: sum(1 for signal in signals if signal.status is RecoverySignalStatus.AT_RISK),
-        RecoverySignalStatus.BLOCKED: sum(1 for signal in signals if signal.status is RecoverySignalStatus.BLOCKED),
+        RecoverySignalStatus.CONFIRMED: sum(
+            1 for signal in signals if signal.status is RecoverySignalStatus.CONFIRMED
+        ),
+        RecoverySignalStatus.WATCHING: sum(
+            1 for signal in signals if signal.status is RecoverySignalStatus.WATCHING
+        ),
+        RecoverySignalStatus.AT_RISK: sum(
+            1 for signal in signals if signal.status is RecoverySignalStatus.AT_RISK
+        ),
+        RecoverySignalStatus.BLOCKED: sum(
+            1 for signal in signals if signal.status is RecoverySignalStatus.BLOCKED
+        ),
     }
     if counts[RecoverySignalStatus.BLOCKED] > 0:
         verdict = "Recovery is blocked by at least one frontline surface that still cannot reflect trusted truth."
@@ -425,8 +462,12 @@ def _build_recovery_window(signals: tuple[RecoverySignal, ...]) -> RecoveryProof
         verdict = "Recovery is moving in the right direction, but downstream observation is still required."
         operator_note = "Use this window to decide whether to keep observing or close the command loop."
     else:
-        verdict = "Recovery is currently reflected across the selected frontline mirrors."
-        operator_note = "The most visible branches appear aligned with the new governance state."
+        verdict = (
+            "Recovery is currently reflected across the selected frontline mirrors."
+        )
+        operator_note = (
+            "The most visible branches appear aligned with the new governance state."
+        )
     return RecoveryProofWindow(
         verdict=verdict,
         operator_note=operator_note,
@@ -438,11 +479,18 @@ def _build_recovery_window(signals: tuple[RecoverySignal, ...]) -> RecoveryProof
 
 
 def _build_surface_summary(signals: tuple[RecoverySignal, ...]) -> str:
-    confirmed = sum(1 for signal in signals if signal.status is RecoverySignalStatus.CONFIRMED)
+    confirmed = sum(
+        1 for signal in signals if signal.status is RecoverySignalStatus.CONFIRMED
+    )
     unresolved = sum(
         1
         for signal in signals
-        if signal.status in (RecoverySignalStatus.WATCHING, RecoverySignalStatus.AT_RISK, RecoverySignalStatus.BLOCKED)
+        if signal.status
+        in (
+            RecoverySignalStatus.WATCHING,
+            RecoverySignalStatus.AT_RISK,
+            RecoverySignalStatus.BLOCKED,
+        )
     )
     return (
         f"{confirmed} frontline signal(s) already reflect the command; "
@@ -456,7 +504,11 @@ def _build_context_notes(
     propagation_surface: PublishPropagationSurface,
     signals: tuple[RecoverySignal, ...],
 ) -> tuple[str, ...]:
-    at_risk = [signal.surface_id for signal in signals if signal.status in (RecoverySignalStatus.AT_RISK, RecoverySignalStatus.BLOCKED)]
+    at_risk = [
+        signal.surface_id
+        for signal in signals
+        if signal.status in (RecoverySignalStatus.AT_RISK, RecoverySignalStatus.BLOCKED)
+    ]
     notes = [
         bundle.proposal.summary,
         f"Command under review: {propagation_surface.selected_action or 'none'}.",

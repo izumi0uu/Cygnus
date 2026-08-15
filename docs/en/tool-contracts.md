@@ -470,6 +470,7 @@ Record authenticated consumption feedback as a durable fact and, for the two rou
 }
 ```
 - `command_id` is required, nonblank, and at most 220 characters.
+- When provided, `object_id` must be the exact canonical immutable governed object ref `ko-page-<WikiPage UUID>` returned by governed retrieval. The resolver parses that UUID and applies the current actor's SQL read scope to `WikiPage.id`; it never falls back to a mutable slug.
 
 ### Output and truth boundary
 
@@ -482,7 +483,7 @@ Record authenticated consumption feedback as a durable fact and, for the two rou
 - Non-routed responses expose `route_id:null`, `route_ref:null`, `route_kind:null`, `route_state:null`, `routing_state:"recorded_only"`, `review_queued:false`, and `refresh_queued:false`.
 - `actor_id` and resolved `page_id` / `draft_id` are `RESTRICT` foreign keys. `object_id` and `source_context_ref` are stored context rather than database foreign keys; `source_context_ref` is not resolved to a `Source` row.
 - `persisted:true` and `rehearsal:false`; `trace_ref` identifies the durable feedback row, while the route fields identify the durable route row. Neither claims downstream work has completed.
-- Hidden, absent, or ambiguous object/draft refs share a structured `not_found`; conflicting object/draft refs return structured `conflict` without resource disclosure or a write.
+- Hidden or absent object/draft refs, and noncanonical object refs, share a structured `not_found`; conflicting object/draft refs return structured `conflict` without resource disclosure or a write.
 
 #### Route execution lifecycle (CYG-119)
 - CYG-118 fixed the replay-safe queue-intent seam above; CYG-119 adds bounded execution on top of it. `GovernanceFeedbackRoute.lifecycle_state` advances through `queued / running / completed / blocked / failed`: a worker claims due routes (up to `limit=25`) under a 60s lease, retryable failures return the route to `queued` (at most 3 attempts, 30s base retry), and routes whose target object is missing, draft-only, or ineligible for governed review end in `blocked` without guessing at a target.

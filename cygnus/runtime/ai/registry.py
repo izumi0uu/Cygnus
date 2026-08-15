@@ -23,6 +23,7 @@ Usage:
         caption = await vision.analyze_image(image_bytes)
 """
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Optional
 
@@ -133,16 +134,20 @@ class CustomLLMSettings:
             notes=f"Custom relay via {self.base_url}",
         )
 
+
 # ---------------------------------------------------------------------------
 # Provider class mappings — add new providers here
 # ---------------------------------------------------------------------------
 
+
 def _get_embedding_class(provider: ProviderType) -> type[EmbeddingProvider]:
     if provider == ProviderType.GOOGLE:
         from cygnus.runtime.ai.providers.google import GoogleEmbedding
+
         return GoogleEmbedding
     elif provider == ProviderType.OPENAI:
         from cygnus.runtime.ai.providers.openai_provider import OpenAIEmbedding
+
         return OpenAIEmbedding
     raise ValueError(f"Unsupported embedding provider: {provider}")
 
@@ -150,12 +155,15 @@ def _get_embedding_class(provider: ProviderType) -> type[EmbeddingProvider]:
 def _get_llm_class(provider: ProviderType) -> type[LLMProvider]:
     if provider == ProviderType.GOOGLE:
         from cygnus.runtime.ai.providers.google import GoogleLLM
+
         return GoogleLLM
     elif provider == ProviderType.OPENAI:
         from cygnus.runtime.ai.providers.openai_provider import OpenAILLM
+
         return OpenAILLM
     elif provider == ProviderType.ANTHROPIC:
         from cygnus.runtime.ai.providers.anthropic_provider import AnthropicLLM
+
         return AnthropicLLM
     raise ValueError(f"Unsupported LLM provider: {provider}")
 
@@ -163,9 +171,11 @@ def _get_llm_class(provider: ProviderType) -> type[LLMProvider]:
 def _get_vision_class(provider: ProviderType) -> type[VisionProvider]:
     if provider == ProviderType.GOOGLE:
         from cygnus.runtime.ai.providers.google import GoogleVision
+
         return GoogleVision
     elif provider == ProviderType.OPENAI:
         from cygnus.runtime.ai.providers.openai_provider import OpenAIVision
+
         return OpenAIVision
     raise ValueError(f"Unsupported vision provider: {provider}")
 
@@ -173,6 +183,7 @@ def _get_vision_class(provider: ProviderType) -> type[VisionProvider]:
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
+
 
 class ProviderRegistry:
     """
@@ -231,7 +242,10 @@ class ProviderRegistry:
     async def get_active_llm_spec_id(self) -> Optional[str]:
         """Return the spec_id currently active for LLM, or None if unset."""
         from cygnus.runtime.ai.llm_catalog import LLM_CATALOG, derive_spec_id
-        from cygnus.runtime.services.config_service import ACTIVE_LLM_MODEL_KEY, ConfigService
+        from cygnus.runtime.services.config_service import (
+            ACTIVE_LLM_MODEL_KEY,
+            ConfigService,
+        )
 
         svc = ConfigService(self.db)
         spec_id = await svc.get(ACTIVE_LLM_MODEL_KEY)
@@ -260,7 +274,7 @@ class ProviderRegistry:
 
         svc = ConfigService(self.db)
 
-        provider = (await svc.get(LLM_CUSTOM_PROVIDER_KEY) or ProviderType.OPENAI.value)
+        provider = await svc.get(LLM_CUSTOM_PROVIDER_KEY) or ProviderType.OPENAI.value
         provider = provider.strip().lower()
         if provider not in CUSTOM_LLM_PROVIDER_IDS:
             provider = ProviderType.OPENAI.value
@@ -322,7 +336,16 @@ class ProviderRegistry:
         Returns: {"embedding": (True, "OK"), "llm": (False, "error"), ...}
         """
         results: dict[str, tuple[bool, str]] = {}
-        loaders = {
+        loaders: dict[
+            str,
+            tuple[
+                Callable[[], Awaitable[ProviderConfig]],
+                Callable[
+                    [ProviderType],
+                    type[EmbeddingProvider] | type[LLMProvider] | type[VisionProvider],
+                ],
+            ],
+        ] = {
             "embedding": (self._load_embedding_config, _get_embedding_class),
             "llm": (self._load_llm_config, _get_llm_class),
             "vision": (self._load_vision_config, _get_vision_class),

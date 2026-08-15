@@ -44,7 +44,9 @@ class PublishGovernanceAction:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "audiences", tuple(self.audiences))
-        object.__setattr__(self, "channels", _normalize_strings(self.channels, label="channel"))
+        object.__setattr__(
+            self, "channels", _normalize_strings(self.channels, label="channel")
+        )
         if not self.reason.strip():
             raise ValueError("reason must not be blank")
 
@@ -62,14 +64,18 @@ class PublishGovernanceResult:
         object.__setattr__(self, "opened_bindings", tuple(self.opened_bindings))
         object.__setattr__(self, "removed_bindings", tuple(self.removed_bindings))
         object.__setattr__(self, "held_bindings", tuple(self.held_bindings))
-        object.__setattr__(self, "action_log", _normalize_strings(self.action_log, label="action log"))
+        object.__setattr__(
+            self, "action_log", _normalize_strings(self.action_log, label="action log")
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {
             "updated_candidate": self.updated_candidate.to_dict(),
             "preview": self.preview.to_dict(),
             "opened_bindings": [binding.to_dict() for binding in self.opened_bindings],
-            "removed_bindings": [binding.to_dict() for binding in self.removed_bindings],
+            "removed_bindings": [
+                binding.to_dict() for binding in self.removed_bindings
+            ],
             "held_bindings": [binding.to_dict() for binding in self.held_bindings],
             "action_log": list(self.action_log),
         }
@@ -99,13 +105,17 @@ def apply_publish_governance_actions(
             continue
 
         if action.action_type is PublishGovernanceActionType.SPLIT_VARIANT:
-            for binding in _resolve_action_bindings(candidate, action, require_explicit_audiences=True):
+            for binding in _resolve_action_bindings(
+                candidate, action, require_explicit_audiences=True
+            ):
                 binding_map[binding.key] = binding
             action_log.append(f"split_variant:{action.reason}")
             continue
 
         if action.action_type is PublishGovernanceActionType.HOLD_EXTERNAL:
-            for binding in _resolve_action_bindings(candidate, action, external_only=True):
+            for binding in _resolve_action_bindings(
+                candidate, action, external_only=True
+            ):
                 blocked_map[binding.key] = PublishConflict(
                     audience_filter=binding.audience_filter,
                     channel=binding.channel,
@@ -122,7 +132,9 @@ def apply_publish_governance_actions(
                 if binding.audience_filter.visibility is Visibility.INTERNAL
             ]
             if action.audiences and not internal_bindings:
-                raise ValueError("republish_internal_only requires internal audiences when explicit audiences are provided")
+                raise ValueError(
+                    "republish_internal_only requires internal audiences when explicit audiences are provided"
+                )
             binding_map = {
                 key: binding
                 for key, binding in binding_map.items()
@@ -154,8 +166,14 @@ def apply_publish_governance_actions(
     preview = build_publish_blast_radius_preview(updated_candidate)
     updated_keys = {binding.key for binding in updated_candidate.target_bindings}
     original_keys = {binding.key for binding in original_bindings}
-    opened_bindings = tuple(binding for binding in updated_candidate.target_bindings if binding.key not in original_keys)
-    removed_bindings = tuple(binding for binding in original_bindings if binding.key not in updated_keys)
+    opened_bindings = tuple(
+        binding
+        for binding in updated_candidate.target_bindings
+        if binding.key not in original_keys
+    )
+    removed_bindings = tuple(
+        binding for binding in original_bindings if binding.key not in updated_keys
+    )
     held_bindings = tuple(
         blocked
         for blocked in updated_candidate.blocked_bindings

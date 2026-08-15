@@ -52,6 +52,7 @@ from cygnus.integrations.session_bridge import (
     GovernedSessionBridge,
     PriorGovernanceContext,
     session_bridge_capabilities,
+    session_bridge_openapi_projection,
 )
 
 __all__ = [
@@ -84,4 +85,5 @@ __all__ = [
     "dispatch_external",
     "hash_token",
     "session_bridge_capabilities",
+    "session_bridge_openapi_projection",
 ]

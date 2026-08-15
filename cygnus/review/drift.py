@@ -13,7 +13,11 @@ from cygnus.publish.actions import (
     PublishGovernanceResult,
     apply_publish_governance_actions,
 )
-from cygnus.publish.preview import PublishActionType, PublishBinding, PublishPreviewCandidate
+from cygnus.publish.preview import (
+    PublishActionType,
+    PublishBinding,
+    PublishPreviewCandidate,
+)
 from cygnus.review.briefing import ReviewRiskType
 from cygnus.review.fixtures import sample_review_bundles
 from cygnus.review.providers import build_review_command_surface_from_bundles
@@ -63,12 +67,30 @@ class DriftContext:
             raise ValueError("title must not be blank")
         if not self.why_now.strip():
             raise ValueError("why_now must not be blank")
-        object.__setattr__(self, "evidence_ids", _normalize(self.evidence_ids, label="evidence id"))
-        object.__setattr__(self, "event_refs", _normalize(self.event_refs, label="event ref"))
-        object.__setattr__(self, "event_types", _normalize(self.event_types, label="event type"))
-        object.__setattr__(self, "trigger_signals", _normalize(self.trigger_signals, label="trigger signal"))
-        object.__setattr__(self, "affected_audience_labels", _normalize(self.affected_audience_labels, label="audience label"))
-        object.__setattr__(self, "affected_surfaces", _normalize(self.affected_surfaces, label="affected surface"))
+        object.__setattr__(
+            self, "evidence_ids", _normalize(self.evidence_ids, label="evidence id")
+        )
+        object.__setattr__(
+            self, "event_refs", _normalize(self.event_refs, label="event ref")
+        )
+        object.__setattr__(
+            self, "event_types", _normalize(self.event_types, label="event type")
+        )
+        object.__setattr__(
+            self,
+            "trigger_signals",
+            _normalize(self.trigger_signals, label="trigger signal"),
+        )
+        object.__setattr__(
+            self,
+            "affected_audience_labels",
+            _normalize(self.affected_audience_labels, label="audience label"),
+        )
+        object.__setattr__(
+            self,
+            "affected_surfaces",
+            _normalize(self.affected_surfaces, label="affected surface"),
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -96,7 +118,9 @@ class DriftGovernanceSurface:
     contexts: tuple[DriftContext, ...]
     available_commands: tuple[str, ...] = field(default_factory=tuple)
     proposal_lane: tuple[str, ...] = field(default_factory=tuple)
-    bundles: tuple[ProposalBundle, ...] = field(default_factory=tuple, repr=False, compare=False)
+    bundles: tuple[ProposalBundle, ...] = field(
+        default_factory=tuple, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         if not self.surface_id.strip():
@@ -106,8 +130,14 @@ class DriftGovernanceSurface:
         if not self.summary.strip():
             raise ValueError("summary must not be blank")
         object.__setattr__(self, "contexts", tuple(self.contexts))
-        object.__setattr__(self, "available_commands", _normalize(self.available_commands, label="available command"))
-        object.__setattr__(self, "proposal_lane", _normalize(self.proposal_lane, label="proposal lane"))
+        object.__setattr__(
+            self,
+            "available_commands",
+            _normalize(self.available_commands, label="available command"),
+        )
+        object.__setattr__(
+            self, "proposal_lane", _normalize(self.proposal_lane, label="proposal lane")
+        )
         object.__setattr__(self, "bundles", tuple(self.bundles))
 
     def to_dict(self) -> dict[str, object]:
@@ -145,14 +175,24 @@ class DriftGovernanceResult:
     command_log: tuple[str, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "audience_recheck_labels", _normalize(self.audience_recheck_labels, label="audience recheck label"))
-        object.__setattr__(self, "command_log", _normalize(self.command_log, label="command log"))
+        object.__setattr__(
+            self,
+            "audience_recheck_labels",
+            _normalize(self.audience_recheck_labels, label="audience recheck label"),
+        )
+        object.__setattr__(
+            self, "command_log", _normalize(self.command_log, label="command log")
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {
             "drift_surface": self.drift_surface.to_dict(),
-            "urgent_review_queue": self.urgent_review_queue.to_dict() if self.urgent_review_queue is not None else None,
-            "publish_freeze_result": self.publish_freeze_result.to_dict() if self.publish_freeze_result is not None else None,
+            "urgent_review_queue": self.urgent_review_queue.to_dict()
+            if self.urgent_review_queue is not None
+            else None,
+            "publish_freeze_result": self.publish_freeze_result.to_dict()
+            if self.publish_freeze_result is not None
+            else None,
             "audience_recheck_labels": list(self.audience_recheck_labels),
             "context_trail": list(self.context_trail),
             "command_log": list(self.command_log),
@@ -224,7 +264,10 @@ def apply_drift_governance_commands(
         if command.command_type is DriftGovernanceCommandType.OPEN_URGENT_REVIEW:
             current_bundles = _replace_bundle(
                 current_bundles,
-                replace(bundle, proposal=replace(bundle.proposal, urgency=UrgencyLevel.URGENT)),
+                replace(
+                    bundle,
+                    proposal=replace(bundle.proposal, urgency=UrgencyLevel.URGENT),
+                ),
             )
             updated_bundle = _require_bundle(current_bundles, command.target_ref)
             urgent_review_queue = build_review_queue_surface(
@@ -235,8 +278,14 @@ def apply_drift_governance_commands(
                     bundles=(updated_bundle,),
                 )
             )
-            context_trail.append(_phase_context(phase="urgent_review", context=context, reason=command.reason))
-            command_log.append(f"open_urgent_review:{command.target_ref}:{command.reason}")
+            context_trail.append(
+                _phase_context(
+                    phase="urgent_review", context=context, reason=command.reason
+                )
+            )
+            command_log.append(
+                f"open_urgent_review:{command.target_ref}:{command.reason}"
+            )
             continue
 
         if command.command_type is DriftGovernanceCommandType.FREEZE_EXTERNAL_PUBLISH:
@@ -255,17 +304,31 @@ def apply_drift_governance_commands(
                     ),
                 ),
             )
-            context_trail.append(_phase_context(phase="publish_freeze", context=context, reason=command.reason))
-            command_log.append(f"freeze_external_publish:{command.target_ref}:{command.reason}")
+            context_trail.append(
+                _phase_context(
+                    phase="publish_freeze", context=context, reason=command.reason
+                )
+            )
+            command_log.append(
+                f"freeze_external_publish:{command.target_ref}:{command.reason}"
+            )
             continue
 
         if command.command_type is DriftGovernanceCommandType.FORCE_AUDIENCE_RECHECK:
             audience_recheck_labels.extend(context.affected_audience_labels)
-            context_trail.append(_phase_context(phase="audience_recheck", context=context, reason=command.reason))
-            command_log.append(f"force_audience_recheck:{command.target_ref}:{command.reason}")
+            context_trail.append(
+                _phase_context(
+                    phase="audience_recheck", context=context, reason=command.reason
+                )
+            )
+            command_log.append(
+                f"force_audience_recheck:{command.target_ref}:{command.reason}"
+            )
             continue
 
-        raise ValueError(f"unsupported drift governance command: {command.command_type.value}")
+        raise ValueError(
+            f"unsupported drift governance command: {command.command_type.value}"
+        )
 
     next_surface = build_drift_governance_surface(current_bundles)
     return DriftGovernanceResult(
@@ -295,7 +358,8 @@ def _context_from_bundle(bundle: ProposalBundle) -> DriftContext:
     event_records = tuple(
         record
         for record in bundle.evidence
-        if record.source_type in (EvidenceSourceType.RELEASE_NOTE, EvidenceSourceType.INCIDENT_UPDATE)
+        if record.source_type
+        in (EvidenceSourceType.RELEASE_NOTE, EvidenceSourceType.INCIDENT_UPDATE)
     )
     return DriftContext(
         proposal_ref=bundle.proposal.proposal_id,
@@ -308,14 +372,20 @@ def _context_from_bundle(bundle: ProposalBundle) -> DriftContext:
         event_refs=_dedupe(record.source_ref for record in event_records),
         event_types=_dedupe(record.source_type.value for record in event_records),
         trigger_signals=bundle.signal.trigger_signals,
-        affected_audience_labels=tuple(_audience_label(audience) for audience in bundle.signal.affected_audiences),
+        affected_audience_labels=tuple(
+            _audience_label(audience) for audience in bundle.signal.affected_audiences
+        ),
         affected_surfaces=_dedupe(bundle.signal.affected_surfaces),
     )
 
 
 def _build_summary(contexts: tuple[DriftContext, ...]) -> str:
-    release_events = sum(1 for context in contexts if "release_note" in context.event_types)
-    incident_events = sum(1 for context in contexts if "incident_update" in context.event_types)
+    release_events = sum(
+        1 for context in contexts if "release_note" in context.event_types
+    )
+    incident_events = sum(
+        1 for context in contexts if "incident_update" in context.event_types
+    )
     return (
         f"{len(contexts)} drift path(s) can now force governance; "
         f"{release_events} release-linked and {incident_events} incident-linked path(s) "
@@ -341,7 +411,9 @@ def _build_freeze_candidate(bundle: ProposalBundle) -> PublishPreviewCandidate:
     )
 
 
-def _phase_context(*, phase: str, context: DriftContext, reason: str) -> dict[str, object]:
+def _phase_context(
+    *, phase: str, context: DriftContext, reason: str
+) -> dict[str, object]:
     return {
         "phase": phase,
         "proposal_ref": context.proposal_ref,
@@ -353,16 +425,22 @@ def _phase_context(*, phase: str, context: DriftContext, reason: str) -> dict[st
     }
 
 
-def _require_bundle(bundles: tuple[ProposalBundle, ...], proposal_ref: str) -> ProposalBundle:
+def _require_bundle(
+    bundles: tuple[ProposalBundle, ...], proposal_ref: str
+) -> ProposalBundle:
     for bundle in bundles:
         if bundle.proposal.proposal_id == proposal_ref:
             return bundle
     raise ValueError(f"proposal_ref={proposal_ref} is not present in drift governance")
 
 
-def _replace_bundle(bundles: tuple[ProposalBundle, ...], updated_bundle: ProposalBundle) -> tuple[ProposalBundle, ...]:
+def _replace_bundle(
+    bundles: tuple[ProposalBundle, ...], updated_bundle: ProposalBundle
+) -> tuple[ProposalBundle, ...]:
     return tuple(
-        updated_bundle if bundle.proposal.proposal_id == updated_bundle.proposal.proposal_id else bundle
+        updated_bundle
+        if bundle.proposal.proposal_id == updated_bundle.proposal.proposal_id
+        else bundle
         for bundle in bundles
     )
 

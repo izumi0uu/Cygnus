@@ -164,16 +164,22 @@ class EvaluationContractTests(unittest.TestCase):
             list(first),
             ["suite_name", "passed", "totals", "results"],
         )
+        totals = first["totals"]
+        assert isinstance(totals, dict)
         self.assertEqual(
-            list(first["totals"]),
+            list(totals),
             ["cases", "passed_cases", "failed_cases", "checks", "failed_checks"],
         )
+        results = first["results"]
+        assert isinstance(results, list)
         self.assertEqual(
-            list(first["results"][0]),
+            list(results[0]),
             ["case_id", "family", "passed", "failed_check_ids", "checks"],
         )
+        checks = results[0]["checks"]
+        assert isinstance(checks, list)
         self.assertEqual(
-            list(first["results"][0]["checks"][0]),
+            list(checks[0]),
             ["check_id", "passed", "detail"],
         )
 

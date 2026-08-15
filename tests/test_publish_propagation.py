@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import cast
 import unittest
 
 from cygnus.domain import AnswerCard, AudienceFilter, AudienceVariant, Visibility
@@ -17,8 +18,12 @@ from cygnus.publish import (
 
 class PublishPropagationLedgerTests(unittest.TestCase):
     def test_ledger_reports_surface_states_and_follow_up_commands(self) -> None:
-        external = AudienceFilter(visibility=Visibility.EXTERNAL, product_lines=("billing",))
-        internal = AudienceFilter(visibility=Visibility.INTERNAL, product_lines=("billing",))
+        external = AudienceFilter(
+            visibility=Visibility.EXTERNAL, product_lines=("billing",)
+        )
+        internal = AudienceFilter(
+            visibility=Visibility.INTERNAL, product_lines=("billing",)
+        )
         enterprise_eu = AudienceFilter(
             visibility=Visibility.EXTERNAL,
             product_lines=("billing",),
@@ -41,7 +46,9 @@ class PublishPropagationLedgerTests(unittest.TestCase):
                 ),
             ),
         )
-        base_candidate = build_publish_preview_candidate(answer, action_type=PublishActionType.PUBLISH)
+        base_candidate = build_publish_preview_candidate(
+            answer, action_type=PublishActionType.PUBLISH
+        )
         candidate = build_publish_preview_candidate(
             answer,
             action_type=PublishActionType.PUBLISH,
@@ -100,17 +107,26 @@ class PublishPropagationLedgerTests(unittest.TestCase):
                 "manual_action_required": 1,
             },
         )
-        record_map = {record["surface_id"]: record for record in ledger["records"]}
+        record_map = {
+            record["surface_id"]: record
+            for record in cast(list[dict[str, object]], ledger["records"])
+        }
         self.assertEqual(record_map["copilot"]["status"], "synced")
         self.assertEqual(record_map["review_queue"]["status"], "failed")
         self.assertEqual(record_map["feedback"]["status"], "manual_action_required")
         self.assertEqual(record_map["help_center"]["status"], "pending")
         self.assertEqual(record_map["queue_sidebar"]["status"], "pending")
-        self.assertIn("retry_review_queue_sync", ledger["continue_commands"])
-        self.assertIn("inspect_feedback_sessions", ledger["continue_commands"])
+        self.assertIn(
+            "retry_review_queue_sync", cast(list[str], ledger["continue_commands"])
+        )
+        self.assertIn(
+            "inspect_feedback_sessions", cast(list[str], ledger["continue_commands"])
+        )
 
     def test_default_channel_record_uses_manual_action_when_hold_exists(self) -> None:
-        external = AudienceFilter(visibility=Visibility.EXTERNAL, product_lines=("billing",))
+        external = AudienceFilter(
+            visibility=Visibility.EXTERNAL, product_lines=("billing",)
+        )
         enterprise_eu = AudienceFilter(
             visibility=Visibility.EXTERNAL,
             product_lines=("billing",),
@@ -133,7 +149,9 @@ class PublishPropagationLedgerTests(unittest.TestCase):
                 ),
             ),
         )
-        base_candidate = build_publish_preview_candidate(answer, action_type=PublishActionType.REPUBLISH)
+        base_candidate = build_publish_preview_candidate(
+            answer, action_type=PublishActionType.REPUBLISH
+        )
         governance_result = apply_publish_governance_actions(
             build_publish_preview_candidate(
                 answer,
@@ -151,9 +169,15 @@ class PublishPropagationLedgerTests(unittest.TestCase):
         )
 
         ledger = build_publish_propagation_ledger(governance_result).to_dict()
-        record_map = {record["surface_id"]: record for record in ledger["records"]}
+        record_map = {
+            record["surface_id"]: record
+            for record in cast(list[dict[str, object]], ledger["records"])
+        }
         self.assertEqual(record_map["copilot"]["status"], "manual_action_required")
-        self.assertIn("resolve_surface_hold", record_map["copilot"]["follow_up_commands"])
+        self.assertIn(
+            "resolve_surface_hold",
+            cast(list[str], record_map["copilot"]["follow_up_commands"]),
+        )
 
 
 if __name__ == "__main__":

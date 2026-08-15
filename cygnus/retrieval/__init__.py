@@ -7,16 +7,26 @@ Ownership:
 """
 
 from cygnus.retrieval.contracts import (
+    RETRIEVAL_ENVELOPE_VERSION,
+    AnswerabilityVerdict,
+    AudienceVerdict,
     EvidenceHit,
+    GovernedReadEnvelope,
     KnowledgeObjectHit,
+    PersistedDeliveryRecord,
+    PersistedObjectTruth,
     SourceTrace,
+    audience_verdict_for,
     excerpt_ref_for,
     freshness_rollup,
     slugify,
 )
 from cygnus.retrieval.evidence_index import EvidenceIndex
 from cygnus.retrieval.object_index import KnowledgeObjectIndex
-from cygnus.retrieval.sample_data import sample_knowledge_objects, sample_support_evidence
+from cygnus.retrieval.sample_data import (
+    sample_knowledge_objects,
+    sample_support_evidence,
+)
 from cygnus.retrieval.semantic_search import search_pages_semantic
 from cygnus.retrieval.source_chunks import (
     VerbatimChunk,
@@ -35,13 +45,20 @@ from cygnus.retrieval.substrate_provider import (
 )
 
 __all__ = [
+    "RETRIEVAL_ENVELOPE_VERSION",
+    "AnswerabilityVerdict",
+    "AudienceVerdict",
     "EvidenceHit",
     "EvidenceIndex",
+    "GovernedReadEnvelope",
     "KnowledgeObjectHit",
     "KnowledgeObjectIndex",
+    "PersistedDeliveryRecord",
+    "PersistedObjectTruth",
     "SourceTrace",
     "SourceTraceResolver",
     "SubstrateKnowledgeSnapshot",
+    "audience_verdict_for",
     "build_substrate_snapshot",
     "collect_evidence_links",
     "excerpt_ref_for",

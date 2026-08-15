@@ -139,6 +139,10 @@ class GovernedPublishToolTests(unittest.TestCase):
             self._tools(is_admin=False).publish_knowledge_object(
                 draft_id=str(uuid.uuid4()),
                 approval_ref=str(uuid.uuid4()),
+                approval_digest="a" * 64,
+                scope_digest="b" * 64,
+                signal_id=str(uuid.uuid4()),
+                signal_freshness="fresh",
                 command_id="publish-command",
                 action_key="publish",
                 target_channels=["internal-copilot"],
@@ -185,6 +189,10 @@ class GovernedPublishToolTests(unittest.TestCase):
                 tools.publish_knowledge_object(
                     draft_id=str(draft_id),
                     approval_ref=str(approval_id),
+                    approval_digest="a" * 64,
+                    scope_digest="b" * 64,
+                    signal_id=str(uuid.uuid4()),
+                    signal_freshness="fresh",
                     command_id="publish-command",
                     action_key="publish",
                     target_channels=["internal-copilot"],
@@ -206,6 +214,9 @@ class GovernedPublishToolTests(unittest.TestCase):
         command = cast(DurablePublishCommand, call.kwargs["command"])
         self.assertEqual(command.expected_version, 7)
         self.assertEqual(command.approval_ref, approval_id)
+        self.assertEqual(command.approval_digest, "a" * 64)
+        self.assertEqual(command.scope_digest, "b" * 64)
+        self.assertEqual(command.signal_freshness, "fresh")
         self.assertEqual(call.kwargs["actor_id"], actor_id)
 
 

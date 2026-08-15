@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from typing import cast
 
 from cygnus.domain import AudienceFilter, Visibility
 from cygnus.domain.objects import KnowledgeObjectType
@@ -47,5 +48,7 @@ class ReviewQueryTests(unittest.TestCase):
         )
 
         payload = brief.to_dict()
-        self.assertEqual(payload["priority_items"][0]["risk_id"], "risk-high")
-        self.assertEqual(payload["summary_counts"]["source_blindness"], 1)
+        priority_items = cast(list[dict[str, object]], payload["priority_items"])
+        summary_counts = cast(dict[str, int], payload["summary_counts"])
+        self.assertEqual(priority_items[0]["risk_id"], "risk-high")
+        self.assertEqual(summary_counts["source_blindness"], 1)

@@ -19,14 +19,20 @@ from cygnus.substrate.agent_protocol import (
     tool_results_message,
 )
 from cygnus.runtime.ai.registry import ProviderRegistry
-from cygnus.runtime.ai.wiki_agent_tools import TOOL_SCHEMAS, AgentState, build_tool_handlers
+from cygnus.runtime.ai.wiki_agent_tools import (
+    TOOL_SCHEMAS,
+    AgentState,
+    build_tool_handlers,
+)
 from cygnus.runtime.ai.wiki_analyzer import analyze_source, format_analysis_section
 from cygnus.runtime.database.models import Source
 from cygnus.runtime.services import wiki_service
 
 MAX_STEPS = 50
 WARN_STEPS = 40
-LLM_CALL_TIMEOUT = 180  # seconds per LLM call — prevents a single hung call from blocking forever
+LLM_CALL_TIMEOUT = (
+    180  # seconds per LLM call — prevents a single hung call from blocking forever
+)
 INITIAL_EXCERPT_CHARS = 30_000
 
 
@@ -240,6 +246,7 @@ Compile the following source document into the wiki.
 # Agent loop
 # ---------------------------------------------------------------------------
 
+
 def _short_args(arguments: dict) -> str:
     """Format tool arguments for progress display (truncated)."""
     try:
@@ -285,7 +292,10 @@ async def compile_source_with_agent(
     _scope_type = source.scope_type or "global"
     _scope_id = source.scope_id
     existing_pages_raw = await wiki_service.list_pages(
-        session, limit=300, scope_type=_scope_type, scope_id=_scope_id,
+        session,
+        limit=300,
+        scope_type=_scope_type,
+        scope_id=_scope_id,
     )
     existing_pages = [
         {"slug": p.slug, "title": p.title, "page_type": p.page_type}
@@ -304,7 +314,9 @@ async def compile_source_with_agent(
             timeout=LLM_CALL_TIMEOUT,
         )
     except asyncio.TimeoutError:
-        logger.warning(f"WikiAgent: pre-analysis timed out (>{LLM_CALL_TIMEOUT}s), skipping")
+        logger.warning(
+            f"WikiAgent: pre-analysis timed out (>{LLM_CALL_TIMEOUT}s), skipping"
+        )
         analysis = None
     analysis_section = format_analysis_section(analysis)
     if analysis_section:
@@ -337,7 +349,9 @@ async def compile_source_with_agent(
                 timeout=LLM_CALL_TIMEOUT,
             )
         except asyncio.TimeoutError:
-            logger.warning(f"WikiAgent: LLM call timed out at step {step} (>{LLM_CALL_TIMEOUT}s), stopping")
+            logger.warning(
+                f"WikiAgent: LLM call timed out at step {step} (>{LLM_CALL_TIMEOUT}s), stopping"
+            )
             break
         except NotImplementedError:
             logger.error(
@@ -352,7 +366,9 @@ async def compile_source_with_agent(
         messages.append(assistant_message_from_turn(turn))
 
         if not turn.tool_calls:
-            logger.debug(f"WikiAgent: no tool calls at step {step} (finish_reason={turn.finish_reason})")
+            logger.debug(
+                f"WikiAgent: no tool calls at step {step} (finish_reason={turn.finish_reason})"
+            )
             break
 
         results: list[tuple[str, str, Any]] = []
@@ -384,7 +400,9 @@ async def compile_source_with_agent(
 
     if not state.finished:
         if step >= WARN_STEPS:
-            logger.warning(f"WikiAgent: reached {step + 1} steps for source {source.id} without finish()")
+            logger.warning(
+                f"WikiAgent: reached {step + 1} steps for source {source.id} without finish()"
+            )
         else:
             logger.debug(f"WikiAgent: loop ended at step {step} without finish()")
 
@@ -394,7 +412,9 @@ async def compile_source_with_agent(
         _scope_type = source.scope_type or "global"
         _scope_id = source.scope_id
         await wiki_service.regenerate_index(
-            session, scope_type=_scope_type, scope_id=_scope_id,
+            session,
+            scope_type=_scope_type,
+            scope_id=_scope_id,
         )
 
     summary = state.summary()

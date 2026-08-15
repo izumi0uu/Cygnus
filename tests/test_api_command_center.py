@@ -102,6 +102,7 @@ class CommandCenterApiTests(unittest.TestCase):
             json={
                 "request_ref": "unauthenticated-query",
                 "query": "cancel subscription",
+                "channel": "copilot",
                 "audience_context": {
                     "visibility": "external",
                     "product_line": "billing",
@@ -115,10 +116,12 @@ class CommandCenterApiTests(unittest.TestCase):
         self.enable_auth()
         response = self.client.post(
             "/api/session-bridge/query",
+            headers={"X-Cygnus-Session-Contract-Version": "1.0"},
             json={
                 "request_ref": "main-app-query",
                 "session_ref": "main-app-session",
                 "query": "cancel subscription",
+                "channel": "copilot",
                 "audience_context": {
                     "visibility": "external",
                     "product_line": "billing",
@@ -129,7 +132,8 @@ class CommandCenterApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["data"]["governance"]["state"], "answerable")
+        self.assertEqual(payload["contract_version"], "1.0")
+        self.assertEqual(payload["data"]["governance"]["state"], "restricted")
         self.assertEqual(payload["data"]["session_ref"], "main-app-session")
 
     def test_command_center_payload_shape(self) -> None:

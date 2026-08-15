@@ -6,6 +6,7 @@ Ownership:
 - this is a development convenience, not a replacement for production migrations
 """
 
+from typing import Protocol
 import asyncio
 from pathlib import Path
 
@@ -58,10 +59,43 @@ async def _ensure_object_storage_ready(
     raise last_error
 
 
-def _migration_config(app_settings: Settings) -> Config:
-    repository_root = Path(__file__).resolve().parents[3]
-    config = Config(str(repository_root / "alembic.ini"))
-    config.set_main_option("script_location", str(repository_root / "migrations"))
+def _resolve_migration_root() -> Path:
+    """Locate the directory holding the Alembic runtime assets.
+
+    The installed package lives under a virtualenv's site-packages, so
+    module-relative ancestry cannot find ``alembic.ini``/``migrations/``.
+    Prefer the runtime working directory (the image sets ``WORKDIR /app`` and
+    ships both assets there); fall back to the source-checkout repository
+    root; fail with a clear error when neither holds the assets.
+    """
+    runtime_root = Path.cwd()
+    if (runtime_root / "alembic.ini").is_file() and (
+        runtime_root / "migrations"
+    ).is_dir():
+        return runtime_root
+
+    source_root = Path(__file__).resolve().parents[3]
+    if (source_root / "alembic.ini").is_file() and (
+        source_root / "migrations"
+    ).is_dir():
+        return source_root
+
+    raise RuntimeError(
+        "Cygnus Alembic assets (alembic.ini and migrations/) not found in the "
+        f"runtime working directory {runtime_root} or the source checkout {source_root}"
+    )
+
+
+class _DatabaseSettings(Protocol):
+    """Narrow settings dependency for Alembic configuration."""
+
+    database_url: str
+
+
+def _migration_config(app_settings: _DatabaseSettings) -> Config:
+    migration_root = _resolve_migration_root()
+    config = Config(str(migration_root / "alembic.ini"))
+    config.set_main_option("script_location", str(migration_root / "migrations"))
     config.attributes["database_url"] = app_settings.database_url
     return config
 
@@ -76,6 +110,10 @@ def _upgrade_existing_schema(connection: Connection, config: Config) -> None:
 
 
 def _stamp_fresh_schema(connection: Connection, config: Config) -> None:
+    # The only sanctioned in-process create_all+stamp adoption. env.py refuses
+    # to run migrations (including stamp) against an unversioned non-empty
+    # schema unless this narrow marker is set; it is set nowhere else.
+    config.attributes["init_local_stack_bypass"] = True
     config.attributes["connection"] = connection
     command.stamp(config, "head")
 
@@ -92,6 +130,10 @@ async def bootstrap_local_stack(app_settings: Settings | None = None) -> None:
             _ = await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             has_existing_schema = await conn.run_sync(_has_existing_application_schema)
             if has_existing_schema:
+                # Only governed (versioned) schemas upgrade in place. An
+                # unversioned non-empty schema — e.g. a legacy create_all-only
+                # dev database — is rejected by migrations/env.py with a clear
+                # error; recreate the dev database volume instead.
                 await conn.run_sync(_upgrade_existing_schema, migration_config)
                 # Local/dev keeps create_all as a convenience for unrelated
                 # substrate tables that predate the migration baseline.

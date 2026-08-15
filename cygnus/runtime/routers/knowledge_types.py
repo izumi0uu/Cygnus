@@ -25,6 +25,7 @@ router = APIRouter()
 # DTOs
 # ---------------------------------------------------------------------------
 
+
 class KnowledgeTypeCreate(BaseModel):
     name: str
     slug: Optional[str] = None
@@ -57,6 +58,7 @@ class KnowledgeTypeOut(BaseModel):
 # CRUD
 # ---------------------------------------------------------------------------
 
+
 @router.get("/knowledge-types", response_model=list[KnowledgeTypeOut])
 async def list_knowledge_types(db: AsyncSession = Depends(get_db)):
     """List all knowledge types, ordered by sort_order."""
@@ -69,9 +71,8 @@ async def list_knowledge_types(db: AsyncSession = Depends(get_db)):
     types = result.scalars().all()
 
     # Count sources per type
-    count_stmt = (
-        select(Source.knowledge_type_id, func.count(Source.id))
-        .group_by(Source.knowledge_type_id)
+    count_stmt = select(Source.knowledge_type_id, func.count(Source.id)).group_by(
+        Source.knowledge_type_id
     )
     count_result = await db.execute(count_stmt)
     counts = {str(row[0]): row[1] for row in count_result.all() if row[0]}
@@ -91,7 +92,11 @@ async def list_knowledge_types(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/knowledge-types", status_code=201, response_model=KnowledgeTypeOut)
-async def create_knowledge_type(body: KnowledgeTypeCreate, db: AsyncSession = Depends(get_db), _user: Employee = require_permission("documents.create")):
+async def create_knowledge_type(
+    body: KnowledgeTypeCreate,
+    db: AsyncSession = Depends(get_db),
+    _user: Employee = require_permission("documents.create"),
+):
     """Create a new knowledge type."""
     # Generate slug from name if not provided
     slug = body.slug or re.sub(r"[^a-z0-9-]", "", body.name.lower().replace(" ", "-"))
@@ -103,7 +108,9 @@ async def create_knowledge_type(body: KnowledgeTypeCreate, db: AsyncSession = De
 
     # Get next sort_order
     max_order_result = await db.execute(
-        select(KnowledgeType.sort_order).order_by(KnowledgeType.sort_order.desc()).limit(1)
+        select(KnowledgeType.sort_order)
+        .order_by(KnowledgeType.sort_order.desc())
+        .limit(1)
     )
     max_order = max_order_result.scalar() or 0
 
@@ -159,7 +166,11 @@ async def update_knowledge_type(
 
 
 @router.delete("/knowledge-types/{kt_id}")
-async def delete_knowledge_type(kt_id: str, db: AsyncSession = Depends(get_db), _user: Employee = require_permission("documents.delete")):
+async def delete_knowledge_type(
+    kt_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: Employee = require_permission("documents.delete"),
+):
     """Delete a knowledge type. Sources using it will have their type set to NULL."""
     kt = await db.get(KnowledgeType, uuid.UUID(kt_id))
     if not kt:

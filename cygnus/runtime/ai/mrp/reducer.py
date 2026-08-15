@@ -30,10 +30,10 @@ if TYPE_CHECKING:
 # Constants
 # ---------------------------------------------------------------------------
 
-MERGE_THRESHOLD = 0.90      # cosine sim → auto-merge entities
-AMBIGUOUS_LOW = 0.75        # cosine sim → send to LLM for disambiguation
+MERGE_THRESHOLD = 0.90  # cosine sim → auto-merge entities
+AMBIGUOUS_LOW = 0.75  # cosine sim → send to LLM for disambiguation
 KB_UPDATE_THRESHOLD = 0.85  # sim → UPDATE existing wiki page
-KB_MAYBE_THRESHOLD = 0.60   # sim → MAYBE update (LLM confirms)
+KB_MAYBE_THRESHOLD = 0.60  # sim → MAYBE update (LLM confirms)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -59,6 +59,7 @@ def _cosine(a: list[float], b: list[float]) -> float:
 # Step 2.1 — Collect entities and concepts from chunk extracts
 # ---------------------------------------------------------------------------
 
+
 def collect_raw_items(chunk_extracts) -> tuple[list[dict], list[dict], list[dict]]:
     """
     Flatten entities, concepts, and claims from all SourceChunkExtract rows.
@@ -76,12 +77,14 @@ def collect_raw_items(chunk_extracts) -> tuple[list[dict], list[dict], list[dict
         chunk_idx = row.chunk_index
 
         for e in extract.get("entities", []):
-            concepts.append({
-                "term": e.get("name", ""),
-                "definition_excerpt": e.get("type", "other"),
-                "absolute_offset": e.get("absolute_offset"),
-                "_chunk_index": chunk_idx
-            })
+            concepts.append(
+                {
+                    "term": e.get("name", ""),
+                    "definition_excerpt": e.get("type", "other"),
+                    "absolute_offset": e.get("absolute_offset"),
+                    "_chunk_index": chunk_idx,
+                }
+            )
 
         for c in extract.get("concepts", []):
             concepts.append({**c, "_chunk_index": chunk_idx})
@@ -95,6 +98,7 @@ def collect_raw_items(chunk_extracts) -> tuple[list[dict], list[dict], list[dict
 # ---------------------------------------------------------------------------
 # Step 2.2 — Exact deduplication
 # ---------------------------------------------------------------------------
+
 
 def exact_dedup_entities(raw_entities: list[dict]) -> list[dict]:
     """Deprecated: General pages use exact_dedup_concepts. Returns [] for compatibility."""
@@ -122,15 +126,21 @@ def exact_dedup_concepts(raw_concepts: list[dict]) -> list[dict]:
             key=len,
             default="",
         )
-        offsets = [c.get("absolute_offset", 0) for c in group if c.get("absolute_offset") is not None]
+        offsets = [
+            c.get("absolute_offset", 0)
+            for c in group
+            if c.get("absolute_offset") is not None
+        ]
 
-        canonical.append({
-            "term": best_term,
-            "definition_excerpt": best_def,
-            "mention_count": len(group),
-            "absolute_offsets": offsets,
-            "_norm": norm_term,
-        })
+        canonical.append(
+            {
+                "term": best_term,
+                "definition_excerpt": best_def,
+                "mention_count": len(group),
+                "absolute_offsets": offsets,
+                "_norm": norm_term,
+            }
+        )
 
     return canonical
 
@@ -139,10 +149,14 @@ def exact_dedup_concepts(raw_concepts: list[dict]) -> list[dict]:
 # Step 2.3 — Embedding-based deduplication
 # ---------------------------------------------------------------------------
 
+
 async def embedding_dedup_entities(
     entities: list[dict],
     embedding_provider: EmbeddingProvider,
-) -> Union[list[dict], tuple[dict[int, int], list[tuple[int, int]], list[list[float]], list[dict]]]:
+) -> Union[
+    list[dict],
+    tuple[dict[int, int], list[tuple[int, int]], list[list[float]], list[dict]],
+]:
     """Deprecated: General pages use embedding_dedup_concepts. Returns [] for compatibility."""
     return []
 
@@ -150,7 +164,10 @@ async def embedding_dedup_entities(
 async def embedding_dedup_concepts(
     concepts: list[dict],
     embedding_provider: EmbeddingProvider,
-) -> Union[list[dict], tuple[dict[int, int], list[tuple[int, int]], list[list[float]], list[dict]]]:
+) -> Union[
+    list[dict],
+    tuple[dict[int, int], list[tuple[int, int]], list[list[float]], list[dict]],
+]:
     """
     Merge concepts whose term embeddings are very similar (> MERGE_THRESHOLD).
     Returns a reduced list of canonical concepts.
@@ -195,9 +212,7 @@ async def embedding_dedup_concepts(
                 merged_into[ri] = rj
 
     # Collect ambiguous pairs not already merged
-    still_ambiguous = [
-        (i, j) for i, j in ambiguous_pairs if _root(i) != _root(j)
-    ]
+    still_ambiguous = [(i, j) for i, j in ambiguous_pairs if _root(i) != _root(j)]
 
     return merged_into, still_ambiguous, vectors, concepts
 
@@ -232,9 +247,7 @@ async def resolve_ambiguous_concepts(
 
     lines = []
     for k, (i, j) in enumerate(ambiguous_pairs):
-        lines.append(
-            f"{k + 1}. \"{concepts[i]['term']}\" vs \"{concepts[j]['term']}\""
-        )
+        lines.append(f'{k + 1}. "{concepts[i]["term"]}" vs "{concepts[j]["term"]}"')
 
     prompt = (
         "For each pair below, determine if they refer to the same real-world concept or term.\n"
@@ -245,10 +258,15 @@ async def resolve_ambiguous_concepts(
 
     try:
         raw = await asyncio.wait_for(
-            llm.generate(prompt, system="You are a concept resolution assistant. Return only JSON.", temperature=0.0),
+            llm.generate(
+                prompt,
+                system="You are a concept resolution assistant. Return only JSON.",
+                temperature=0.0,
+            ),
             timeout=60,
         )
         from cygnus.runtime.utils.text import parse_json_loose
+
         decisions: list[bool] = parse_json_loose(raw)
         for k, (i, j) in enumerate(ambiguous_pairs):
             if k < len(decisions) and decisions[k]:
@@ -259,7 +277,9 @@ async def resolve_ambiguous_concepts(
                     else:
                         merged_into[ri] = rj
     except Exception as exc:
-        logger.warning(f"MRP REDUCE ambiguous concept resolution failed: {exc}. Skipping.")
+        logger.warning(
+            f"MRP REDUCE ambiguous concept resolution failed: {exc}. Skipping."
+        )
 
     return merged_into
 
@@ -269,8 +289,11 @@ def _apply_merges(entities: list[dict], merged_into: dict[int, int]) -> list[dic
     return []
 
 
-def _apply_merges_concepts(concepts: list[dict], merged_into: dict[int, int]) -> list[dict]:
+def _apply_merges_concepts(
+    concepts: list[dict], merged_into: dict[int, int]
+) -> list[dict]:
     """Apply merge map to produce final deduplicated concept list."""
+
     def _root(i):
         while i in merged_into:
             i = merged_into[i]
@@ -283,9 +306,15 @@ def _apply_merges_concepts(concepts: list[dict], merged_into: dict[int, int]) ->
         # Merge all mention_counts and absolute_offsets
         for i, c in enumerate(concepts):
             if i != ri and _root(i) == ri:
-                canonical["mention_count"] = canonical.get("mention_count", 0) + c.get("mention_count", 0)
-                canonical["absolute_offsets"] = canonical.get("absolute_offsets", []) + c.get("absolute_offsets", [])
-                if len(c.get("definition_excerpt", "")) > len(canonical.get("definition_excerpt", "")):
+                canonical["mention_count"] = canonical.get("mention_count", 0) + c.get(
+                    "mention_count", 0
+                )
+                canonical["absolute_offsets"] = canonical.get(
+                    "absolute_offsets", []
+                ) + c.get("absolute_offsets", [])
+                if len(c.get("definition_excerpt", "")) > len(
+                    canonical.get("definition_excerpt", "")
+                ):
                     canonical["definition_excerpt"] = c["definition_excerpt"]
         result.append(canonical)
     return result
@@ -294,6 +323,7 @@ def _apply_merges_concepts(concepts: list[dict], merged_into: dict[int, int]) ->
 # ---------------------------------------------------------------------------
 # Step 2.5 — KB reconciliation
 # ---------------------------------------------------------------------------
+
 
 async def reconcile_with_kb(
     session: AsyncSession,
@@ -309,10 +339,12 @@ async def reconcile_with_kb(
     """
     from cygnus.runtime.ai.mrp.pipeline import _resolve_wiki_scopes
     from cygnus.retrieval import semantic_search as wiki_search
+
     wiki_scopes = await _resolve_wiki_scopes(session, source)
 
-    all_items = [("entity", e["name"], e) for e in entities] + \
-                [("concept", c["term"], c) for c in concepts]
+    all_items = [("entity", e["name"], e) for e in entities] + [
+        ("concept", c["term"], c) for c in concepts
+    ]
 
     reconciliation: dict[str, dict] = {}
 
@@ -322,14 +354,23 @@ async def reconcile_with_kb(
     # Batch-embed all query texts in a single API call, then search DB sequentially.
     # Sequential DB access avoids concurrent AsyncSession errors.
     query_texts = [
-        (f"{name}: {item['definition_excerpt'][:200]}" if itype == "concept" and item.get("definition_excerpt") else name)[:4000]
+        (
+            f"{name}: {item['definition_excerpt'][:200]}"
+            if itype == "concept" and item.get("definition_excerpt")
+            else name
+        )[:4000]
         for itype, name, item in all_items
     ]
     try:
         vectors = await embedding_provider.embed_batch(query_texts)
     except Exception as exc:
-        logger.warning(f"MRP REDUCE kb reconcile embed_batch failed: {exc}. All items → CREATE.")
-        return {name: {"action": "CREATE", "page_slug": None, "similarity": 0.0} for _, name, _ in all_items}
+        logger.warning(
+            f"MRP REDUCE kb reconcile embed_batch failed: {exc}. All items → CREATE."
+        )
+        return {
+            name: {"action": "CREATE", "page_slug": None, "similarity": 0.0}
+            for _, name, _ in all_items
+        }
 
     for (_, name, _), vec in zip(all_items, vectors):
         # Search across ALL scopes the source belongs to and keep the best hit.
@@ -339,10 +380,16 @@ async def reconcile_with_kb(
         for scope_type, scope_id in wiki_scopes:
             try:
                 hits = await wiki_search.search_pages_semantic(
-                    session, vec, top_k=3, scope_type=scope_type, scope_id=scope_id,
+                    session,
+                    vec,
+                    top_k=3,
+                    scope_type=scope_type,
+                    scope_id=scope_id,
                 )
             except Exception as exc:
-                logger.debug(f"MRP REDUCE kb reconcile failed for '{name}' scope={scope_type}: {exc}")
+                logger.debug(
+                    f"MRP REDUCE kb reconcile failed for '{name}' scope={scope_type}: {exc}"
+                )
                 continue
             if not hits:
                 continue
@@ -351,22 +398,42 @@ async def reconcile_with_kb(
                 best_hit = (page, sim)
 
         if best_hit is None:
-            reconciliation[name] = {"action": "CREATE", "page_slug": None, "similarity": 0.0}
+            reconciliation[name] = {
+                "action": "CREATE",
+                "page_slug": None,
+                "similarity": 0.0,
+            }
             continue
 
         top_page, top_sim = best_hit
         if top_sim >= KB_UPDATE_THRESHOLD:
-            reconciliation[name] = {"action": "UPDATE", "page_slug": top_page.slug, "similarity": top_sim}
+            reconciliation[name] = {
+                "action": "UPDATE",
+                "page_slug": top_page.slug,
+                "similarity": top_sim,
+            }
         elif top_sim >= KB_MAYBE_THRESHOLD:
-            reconciliation[name] = {"action": "MAYBE", "page_slug": top_page.slug, "similarity": top_sim,
-                                    "_page_title": top_page.title}
+            reconciliation[name] = {
+                "action": "MAYBE",
+                "page_slug": top_page.slug,
+                "similarity": top_sim,
+                "_page_title": top_page.title,
+            }
         else:
-            reconciliation[name] = {"action": "CREATE", "page_slug": None, "similarity": top_sim}
+            reconciliation[name] = {
+                "action": "CREATE",
+                "page_slug": None,
+                "similarity": top_sim,
+            }
 
     # Batch-resolve MAYBE items with LLM
-    maybe_items = [(name, rec) for name, rec in reconciliation.items() if rec["action"] == "MAYBE"]
+    maybe_items = [
+        (name, rec) for name, rec in reconciliation.items() if rec["action"] == "MAYBE"
+    ]
     if maybe_items:
-        await _resolve_maybe_items(reconciliation, maybe_items, embedding_provider, llm=llm)
+        await _resolve_maybe_items(
+            reconciliation, maybe_items, embedding_provider, llm=llm
+        )
 
     return reconciliation
 
@@ -390,7 +457,7 @@ async def _resolve_maybe_items(
     for k, (name, rec) in enumerate(maybe_items):
         page_title = rec.get("_page_title") or rec.get("page_slug", "")
         lines.append(
-            f"{k + 1}. Entity: \"{name}\" — existing wiki page: \"{page_title}\" "
+            f'{k + 1}. Entity: "{name}" — existing wiki page: "{page_title}" '
             f"(slug: {rec['page_slug']}, similarity: {rec['similarity']:.2f})"
         )
 
@@ -410,6 +477,7 @@ async def _resolve_maybe_items(
             timeout=30,
         )
         from cygnus.runtime.utils.text import parse_json_loose
+
         decisions: list[bool] = parse_json_loose(raw)
         for k, (name, rec) in enumerate(maybe_items):
             if k < len(decisions) and decisions[k]:
@@ -417,7 +485,9 @@ async def _resolve_maybe_items(
             else:
                 reconciliation[name]["action"] = "CREATE"
     except Exception as exc:
-        logger.warning(f"MRP REDUCE MAYBE LLM resolution failed: {exc}. Defaulting to CREATE.")
+        logger.warning(
+            f"MRP REDUCE MAYBE LLM resolution failed: {exc}. Defaulting to CREATE."
+        )
         for name, _ in maybe_items:
             reconciliation[name]["action"] = "CREATE"
 
@@ -488,7 +558,7 @@ async def run_planning_call(
     """Single LLM call to produce the Compilation Plan JSON."""
     # Calculate target based on the actual number of extracted concepts rather than just document length
     total_extracted_items = len(canonical_concepts)
-    
+
     if strategy == "single_pass":
         target_pages = max(3, min(30, total_extracted_items // 2))
     elif strategy == "standard":
@@ -506,13 +576,19 @@ async def run_planning_call(
         return f"  - {c['term']} ({c['mention_count']} mentions) {kb_info}"
 
     # Sort by mention count descending to ensure the planner sees the most important items
-    sorted_concepts = sorted(canonical_concepts, key=lambda x: x.get("mention_count", 0), reverse=True)
-    concepts_summary = "\n".join(_fmt_concept(c) for c in sorted_concepts[:300]) or "  (none)"
+    sorted_concepts = sorted(
+        canonical_concepts, key=lambda x: x.get("mention_count", 0), reverse=True
+    )
+    concepts_summary = (
+        "\n".join(_fmt_concept(c) for c in sorted_concepts[:300]) or "  (none)"
+    )
 
     kb_lines = []
     for name, rec in reconciliation.items():
         if rec["action"] == "UPDATE":
-            kb_lines.append(f"  - UPDATE: {name} → {rec['page_slug']} (sim={rec['similarity']:.2f})")
+            kb_lines.append(
+                f"  - UPDATE: {name} → {rec['page_slug']} (sim={rec['similarity']:.2f})"
+            )
     kb_reconciliation = "\n".join(kb_lines) if kb_lines else "  (all items are new)"
 
     user_note_section = ""
@@ -539,12 +615,14 @@ async def run_planning_call(
     )
 
     from cygnus.runtime.utils.text import parse_json_loose
+
     return parse_json_loose(raw)
 
 
 # ---------------------------------------------------------------------------
 # Phase 2 orchestrator
 # ---------------------------------------------------------------------------
+
 
 async def run_reduce_phase(
     session: AsyncSession,
@@ -568,7 +646,9 @@ async def run_reduce_phase(
 
     # 2.1 Collect raw items
     raw_entities, raw_concepts, raw_claims = collect_raw_items(chunk_extracts)
-    logger.info(f"MRP REDUCE: {len(raw_entities)} raw entities, {len(raw_concepts)} concepts, {len(raw_claims)} claims")
+    logger.info(
+        f"MRP REDUCE: {len(raw_entities)} raw entities, {len(raw_concepts)} concepts, {len(raw_claims)} claims"
+    )
 
     # 2.2 Exact dedup (canonical_entities is empty)
     canonical_entities = exact_dedup_entities(raw_entities)
@@ -580,15 +660,25 @@ async def run_reduce_phase(
     # 2.3 Embedding-based dedup for concepts
     if len(canonical_concepts) > 1 and embedding_provider is not None:
         try:
-            result = await embedding_dedup_concepts(canonical_concepts, embedding_provider)
+            result = await embedding_dedup_concepts(
+                canonical_concepts, embedding_provider
+            )
             if isinstance(result, tuple):
                 merged_into, ambiguous_pairs, vectors, canonical_concepts = result
                 # 2.4 LLM resolution for ambiguous pairs
-                merged_into = await resolve_ambiguous_concepts(llm, canonical_concepts, ambiguous_pairs, merged_into)
-                canonical_concepts = _apply_merges_concepts(canonical_concepts, merged_into)
-                logger.info(f"MRP REDUCE after embedding-dedup: {len(canonical_concepts)} concepts")
+                merged_into = await resolve_ambiguous_concepts(
+                    llm, canonical_concepts, ambiguous_pairs, merged_into
+                )
+                canonical_concepts = _apply_merges_concepts(
+                    canonical_concepts, merged_into
+                )
+                logger.info(
+                    f"MRP REDUCE after embedding-dedup: {len(canonical_concepts)} concepts"
+                )
         except Exception as exc:
-            logger.warning(f"MRP REDUCE embedding dedup error: {exc}. Continuing with exact-dedup result.")
+            logger.warning(
+                f"MRP REDUCE embedding dedup error: {exc}. Continuing with exact-dedup result."
+            )
 
     await tracker.update(72, "Reconciling with knowledge base...")
 
@@ -597,10 +687,17 @@ async def run_reduce_phase(
     if embedding_provider is not None:
         try:
             reconciliation = await reconcile_with_kb(
-                session, canonical_entities, canonical_concepts, embedding_provider, source, llm=llm,
+                session,
+                canonical_entities,
+                canonical_concepts,
+                embedding_provider,
+                source,
+                llm=llm,
             )
         except Exception as exc:
-            logger.warning(f"MRP REDUCE KB reconciliation failed: {exc}. All items will be CREATE.")
+            logger.warning(
+                f"MRP REDUCE KB reconciliation failed: {exc}. All items will be CREATE."
+            )
 
     await tracker.update(76, "Generating compilation plan...")
 
@@ -621,12 +718,22 @@ async def run_reduce_phase(
     plan_dict["_claims"] = raw_claims
     plan_dict["_entities"] = canonical_entities
     plan_dict["_concepts"] = canonical_concepts
+    # Carry the source's explicit language tag on the plan so review surfaces
+    # and downstream phases see the canonical identity pages are written under.
+    # Always the persisted source truth, never auto-detected.
+    from cygnus.substrate.source_language import resolve_source_language
+
+    plan_dict["language"] = resolve_source_language(source)
 
     # 2.8 Persist plan (upsert: safe to re-run)
 
-    existing = (await session.execute(
-        select(SourceCompilationPlan).where(SourceCompilationPlan.source_id == source.id)
-    )).scalar_one_or_none()
+    existing = (
+        await session.execute(
+            select(SourceCompilationPlan).where(
+                SourceCompilationPlan.source_id == source.id
+            )
+        )
+    ).scalar_one_or_none()
 
     if existing:
         existing.plan_json = plan_dict
@@ -648,6 +755,8 @@ async def run_reduce_phase(
         src.pipeline_phase = "plan_review"
 
     await session.commit()
-    logger.info(f"MRP REDUCE complete: plan with {len(plan_dict.get('pages', []))} pages for source={source.id}")
+    logger.info(
+        f"MRP REDUCE complete: plan with {len(plan_dict.get('pages', []))} pages for source={source.id}"
+    )
 
     return plan_row

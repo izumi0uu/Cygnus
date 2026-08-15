@@ -110,61 +110,86 @@ def _feedback_record(
     )
 
 
+def _preview_surface_payload(
+    selected_object_ref: str | None = None,
+    *,
+    action_key: str | None = None,
+) -> dict[str, object]:
+    return get_pressure_intake_publish_preview_surface(
+        selected_object_ref, action_key=action_key
+    ).to_dict()
+
+
+def _propagation_surface_payload(
+    selected_object_ref: str | None = None,
+    *,
+    action_key: str | None = None,
+) -> dict[str, object]:
+    return get_pressure_intake_publish_propagation_surface(
+        selected_object_ref, action_key=action_key
+    ).to_dict()
+
+
 class PublishSurfaceTests(unittest.TestCase):
     def test_default_surface_selects_top_queue_item_and_exposes_blast_radius(
         self,
     ) -> None:
-        payload = get_pressure_intake_publish_preview_surface().to_dict()
+        payload = _preview_surface_payload()
 
         self.assertEqual(payload["surface_id"], "publish-preview")
-        self.assertEqual(
-            payload["selected_card"]["object_ref"], "incident-sync-eu-billing"
-        )
-        self.assertEqual(payload["selected_preview"]["action_type"], "restrict")
-        self.assertIn("channel_gate_matrix", payload["selected_preview"])
-        self.assertIn("audience_scope", payload["selected_preview"])
+        selected_card = cast(dict[str, object], payload["selected_card"])
+        self.assertEqual(selected_card["object_ref"], "incident-sync-eu-billing")
+        selected_preview = cast(dict[str, object], payload["selected_preview"])
+        self.assertEqual(selected_preview["action_type"], "restrict")
+        self.assertIn("channel_gate_matrix", selected_preview)
+        self.assertIn("audience_scope", selected_preview)
         self.assertIn("available_commands", payload)
+        action_presets = cast(list[dict[str, object]], payload["action_presets"])
         self.assertEqual(
-            [preset["command_key"] for preset in payload["action_presets"]],
+            [cast(str, preset["command_key"]) for preset in action_presets],
             ["restrict_publish", "hold_external"],
         )
         self.assertIsNone(payload["selected_action"])
         self.assertIsNone(payload["action_echo"])
-        self.assertGreaterEqual(payload["situation_frame"]["blocked_paths"], 1)
+        situation_frame = cast(dict[str, object], payload["situation_frame"])
+        self.assertGreaterEqual(cast(int, situation_frame["blocked_paths"]), 1)
 
     def test_specific_object_ref_exposes_granular_governance_actions(self) -> None:
-        payload = get_pressure_intake_publish_preview_surface(
-            "refund-enterprise-rewrite"
-        ).to_dict()
+        payload = _preview_surface_payload("refund-enterprise-rewrite")
 
-        self.assertEqual(
-            payload["selected_preview"]["object_id"], "refund-enterprise-rewrite"
-        )
-        effects = {
-            impact["effect"] for impact in payload["selected_preview"]["impacts"]
-        }
+        selected_preview = cast(dict[str, object], payload["selected_preview"])
+        self.assertEqual(selected_preview["object_id"], "refund-enterprise-rewrite")
+        impacts = cast(list[dict[str, object]], selected_preview["impacts"])
+        effects: set[str] = {cast(str, impact["effect"]) for impact in impacts}
         self.assertIn("conflict", effects)
         self.assertIn("stopped_exposure", effects)
-        self.assertIn("hold_external", payload["available_commands"])
-        self.assertIn("split_variant", payload["available_commands"])
-        self.assertIn("republish_internal_only", payload["available_commands"])
+        available_commands = cast(list[str], payload["available_commands"])
+        self.assertIn("hold_external", available_commands)
+        self.assertIn("split_variant", available_commands)
+        self.assertIn("republish_internal_only", available_commands)
         self.assertIsNotNone(payload["previous_object_ref"])
 
     def test_selected_action_returns_action_echo_and_updated_preview(self) -> None:
-        payload = get_pressure_intake_publish_preview_surface(
+        payload = _preview_surface_payload(
             "refund-enterprise-rewrite",
             action_key="republish_internal_only",
-        ).to_dict()
+        )
 
         self.assertEqual(payload["selected_action"], "republish_internal_only")
         self.assertIsNotNone(payload["action_echo"])
+        action_echo = cast(dict[str, object], payload["action_echo"])
+        self.assertEqual(action_echo["selected_action"], "republish_internal_only")
         self.assertEqual(
-            payload["action_echo"]["selected_action"], "republish_internal_only"
+            len(cast(list[dict[str, object]], action_echo["removed_bindings"])), 2
         )
-        self.assertEqual(len(payload["action_echo"]["removed_bindings"]), 2)
-        effects = {
-            (impact["audience_label"], impact["channel"]): impact["effect"]
-            for impact in payload["selected_preview"]["impacts"]
+        selected_preview = cast(dict[str, object], payload["selected_preview"])
+        impacts = cast(list[dict[str, object]], selected_preview["impacts"])
+        effects: dict[tuple[str, str], str] = {
+            (
+                cast(str, impact["audience_label"]),
+                cast(str, impact["channel"]),
+            ): cast(str, impact["effect"])
+            for impact in impacts
         }
         self.assertEqual(
             effects[("internal · billing", "copilot")], "continuing_exposure"
@@ -177,42 +202,47 @@ class PublishSurfaceTests(unittest.TestCase):
     def test_propagation_surface_defaults_to_recommended_action_and_status_lanes(
         self,
     ) -> None:
-        payload = get_pressure_intake_publish_propagation_surface().to_dict()
+        payload = _propagation_surface_payload()
 
         self.assertEqual(payload["surface_id"], "publish-propagation")
-        self.assertEqual(
-            payload["selected_card"]["object_ref"], "incident-sync-eu-billing"
-        )
+        selected_card = cast(dict[str, object], payload["selected_card"])
+        self.assertEqual(selected_card["object_ref"], "incident-sync-eu-billing")
         self.assertEqual(payload["selected_action"], "restrict_publish")
         self.assertIn("propagation_ledger", payload)
         self.assertIn("status_lanes", payload)
-        lane_counts = {
-            lane["status"]: lane["count"] for lane in payload["status_lanes"]
+        status_lanes = cast(list[dict[str, object]], payload["status_lanes"])
+        lane_counts: dict[str, int] = {
+            cast(str, lane["status"]): cast(int, lane["count"]) for lane in status_lanes
         }
         self.assertEqual(lane_counts["failed"], 2)
         self.assertGreaterEqual(lane_counts["pending"], 1)
+        propagation_ledger = cast(dict[str, object], payload["propagation_ledger"])
         self.assertIn(
-            "repair_source_chain", payload["propagation_ledger"]["continue_commands"]
+            "repair_source_chain",
+            cast(list[str], propagation_ledger["continue_commands"]),
         )
 
     def test_propagation_surface_can_rehearse_customer_facing_hold_path(self) -> None:
-        payload = get_pressure_intake_publish_propagation_surface(
+        payload = _propagation_surface_payload(
             "refund-enterprise-rewrite",
             action_key="hold_external",
-        ).to_dict()
+        )
 
         self.assertEqual(payload["selected_action"], "hold_external")
-        self.assertEqual(payload["action_echo"]["selected_action"], "hold_external")
-        record_map = {
-            record["surface_id"]: record
-            for record in payload["propagation_ledger"]["records"]
+        action_echo = cast(dict[str, object], payload["action_echo"])
+        self.assertEqual(action_echo["selected_action"], "hold_external")
+        propagation_ledger = cast(dict[str, object], payload["propagation_ledger"])
+        records = cast(list[dict[str, object]], propagation_ledger["records"])
+        record_map: dict[str, dict[str, object]] = {
+            cast(str, record["surface_id"]): record for record in records
         }
         self.assertEqual(
             record_map["hold_resolution"]["status"], "manual_action_required"
         )
         self.assertEqual(record_map["feedback"]["status"], "manual_action_required")
         self.assertIn(
-            "resolve_surface_hold", payload["propagation_ledger"]["continue_commands"]
+            "resolve_surface_hold",
+            cast(list[str], propagation_ledger["continue_commands"]),
         )
 
     def test_feedback_derived_signals_never_compile_publish_truth(self) -> None:
@@ -304,7 +334,8 @@ class PublishSurfaceTests(unittest.TestCase):
                 )
             )
 
-        self.assertEqual(payload["selected_card"]["object_ref"], publishable.object_ref)
+        selected_card = cast(dict[str, object], payload["selected_card"])
+        self.assertEqual(selected_card["object_ref"], publishable.object_ref)
         candidate_loader.assert_awaited_once_with(db, signal=publishable)
         command_loader.assert_awaited_once_with(
             db,

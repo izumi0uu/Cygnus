@@ -36,12 +36,17 @@ def mark_source_requeued_after_department_change(
     source,
     *,
     job_id: Optional[str] = None,
+    reason: str = "department change",
 ) -> object:
-    """Mark a source as re-queued after a scope-changing department edit."""
+    """Mark a source as re-queued after a scope/identity-changing edit.
+
+    Used for department edits (pages move to new departments) and language
+    edits (pages move to the new canonical language identity).
+    """
     mark_source_processing(
         source,
         progress=0,
-        progress_message="Re-queued after department change...",
+        progress_message=f"Re-queued after {reason}...",
     )
     source.error_message = None
     return attach_source_runtime_job(source, job_id=job_id)

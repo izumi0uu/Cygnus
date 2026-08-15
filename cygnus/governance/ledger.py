@@ -9,6 +9,7 @@ from enum import Enum
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cygnus.observability import current_request_id, current_traceparent
 from cygnus.runtime.database.models import GovernanceLedgerEvent, WikiPageDraft
 
 
@@ -157,6 +158,8 @@ async def append_draft_event(
     payload: dict[str, object] | None = None,
     occurred_at: datetime | None = None,
     lock: bool = True,
+    correlation_id: str | None = None,
+    traceparent: str | None = None,
 ) -> GovernanceLedgerEvent:
     """Append one ordered event or return its exact idempotent replay."""
     normalized_key = idempotency_key.strip()
@@ -222,7 +225,13 @@ async def append_draft_event(
                 f"draft_id={draft_id} state conflict: expected {expected_state}, got {normalized_from_state}"
             )
         next_sequence = current.sequence + 1
-
+    effective_correlation = correlation_id or current_request_id()
+    correlation_uuid = None
+    if effective_correlation:
+        try:
+            correlation_uuid = uuid.UUID(str(effective_correlation))
+        except (TypeError, ValueError):
+            correlation_uuid = None
     event = GovernanceLedgerEvent(
         draft_id=draft_id,
         sequence=next_sequence,
@@ -230,6 +239,8 @@ async def append_draft_event(
         from_state=normalized_from_state,
         to_state=normalized_to_state,
         actor_id=actor_id,
+        correlation_id=correlation_uuid,
+        traceparent=traceparent or current_traceparent(),
         idempotency_key=normalized_key,
         reason=normalized_reason,
         payload=normalized_payload,
@@ -376,6 +387,10 @@ def event_to_dict(event: GovernanceLedgerEvent) -> dict[str, object]:
         "from_state": event.from_state,
         "to_state": event.to_state,
         "actor_id": str(event.actor_id) if event.actor_id is not None else None,
+        "correlation_id": (
+            str(event.correlation_id) if event.correlation_id is not None else None
+        ),
+        "traceparent": event.traceparent,
         "idempotency_key": event.idempotency_key,
         "reason": event.reason,
         "payload": event.payload,

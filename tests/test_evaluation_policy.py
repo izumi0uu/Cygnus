@@ -23,11 +23,17 @@ class EvaluationPolicyTests(unittest.TestCase):
             )
         )
 
+        data = result["data"]
+        assert isinstance(data, dict)
         self.assertEqual(result["status"], "approval_required")
         self.assertEqual(result["errors"], ["approval_required"])
         self.assertEqual(result["warnings"], [])
-        self.assertEqual(result["data"]["object_version"], 2)
-        self.assertFalse(result["data"]["allowed"])
+        self.assertEqual(data["object_version"], 2)
+        self.assertEqual(
+            data["object_ref"],
+            "ko-page-00000000-0000-4000-8000-000000000217",
+        )
+        self.assertFalse(data["allowed"])
 
     def test_stale_expected_version_returns_tool_conflict(self) -> None:
         result = asyncio.run(
@@ -43,10 +49,12 @@ class EvaluationPolicyTests(unittest.TestCase):
             )
         )
 
+        data = result["data"]
+        assert isinstance(data, dict)
         self.assertEqual(result["status"], "conflict")
         self.assertEqual(result["errors"], ["stale_version"])
-        self.assertEqual(result["data"]["object_version"], 5)
-        self.assertFalse(result["data"]["allowed"])
+        self.assertEqual(data["object_version"], 5)
+        self.assertFalse(data["allowed"])
 
     def test_admin_with_durable_policy_truth_is_allowed(self) -> None:
         result = asyncio.run(
@@ -61,13 +69,15 @@ class EvaluationPolicyTests(unittest.TestCase):
             )
         )
 
+        data = result["data"]
+        assert isinstance(data, dict)
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["errors"], [])
         self.assertEqual(result["warnings"], [])
-        self.assertTrue(result["data"]["allowed"])
-        self.assertEqual(result["data"]["target_channels"], ["internal-copilot"])
+        self.assertTrue(data["allowed"])
+        self.assertEqual(data["target_channels"], ["internal-copilot"])
         self.assertEqual(
-            result["data"]["recommended_action_key"],
+            data["recommended_action_key"],
             "publish",
         )
 
@@ -84,10 +94,12 @@ class EvaluationPolicyTests(unittest.TestCase):
             )
         )
 
+        data = result["data"]
+        assert isinstance(data, dict)
         self.assertEqual(result["status"], "approval_required")
         self.assertNotEqual(result["status"], "success")
-        self.assertFalse(result["data"]["allowed"])
-        self.assertTrue(result["data"]["approval_required"])
+        self.assertFalse(data["allowed"])
+        self.assertTrue(data["approval_required"])
 
     def test_probe_invokes_existing_tool_and_preserves_denial(self) -> None:
         denied = {

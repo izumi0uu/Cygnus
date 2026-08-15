@@ -79,6 +79,7 @@ async def governance_overview(
         ) from exc
     return surface.to_dict() | {"persisted": True, "rehearsal": False}
 
+
 @router.get("/api/recovery/{command_id}")
 async def durable_recovery(
     command_id: str,

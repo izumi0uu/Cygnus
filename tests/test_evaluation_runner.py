@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import unittest
 from dataclasses import replace
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 from cygnus.domain import (
@@ -28,11 +29,13 @@ from cygnus.evaluation.contracts import (
     EvalExpectation,
     PolicyExpectation,
 )
+from cygnus.evaluation.corpus import production_eval_cases
 from cygnus.evaluation.runner import evaluate_case, run_domain_eval
 from cygnus.evidence import EvidenceSourceType, FreshnessState, SupportEvidence
 from cygnus.integrations.session_bridge import (
     GovernedQueryRequest,
     GovernedSessionBridge,
+    delivered_truth_for_objects,
 )
 from cygnus.retrieval import SubstrateKnowledgeSnapshot
 
@@ -128,15 +131,17 @@ def _unsupported_case() -> EvalCase:
     )
 
 
-def _bridge_payload(case: EvalCase) -> dict[str, object]:
+def _bridge_payload(case: EvalCase) -> dict[str, Any]:
     return GovernedSessionBridge(
         SubstrateKnowledgeSnapshot(objects=case.objects, evidence=case.evidence)
-    ).query(
+    ).query_with_fixture_delivery(
         GovernedQueryRequest(
             request_ref=f"test:{case.case_id}",
             query=case.query,
             audience_context=case.audience_context,
-        )
+            channel="copilot",
+        ),
+        delivery_truth=delivered_truth_for_objects(case.objects),
     )
 
 
@@ -158,6 +163,17 @@ class EvaluationRunnerTests(unittest.IsolatedAsyncioTestCase):
                 CHECK_FRESHNESS_PREFERENCE,
             ),
         )
+
+    async def test_published_known_issue_uses_eval_owned_delivery_truth(self) -> None:
+        case = next(
+            item
+            for item in production_eval_cases()
+            if item.case_id == "product-version-known-issue-01-v42-supported"
+        )
+
+        result = await evaluate_case(case)
+
+        self.assertTrue(result.passed, result.to_dict())
 
     async def test_plausible_but_wrong_expected_object_fails_retrieval(self) -> None:
         case = _supported_case()
@@ -200,7 +216,11 @@ class EvaluationRunnerTests(unittest.IsolatedAsyncioTestCase):
             }
         )
 
-        with patch.object(GovernedSessionBridge, "query", return_value=payload):
+        with patch.object(
+            GovernedSessionBridge,
+            "query_with_fixture_delivery",
+            return_value=payload,
+        ):
             result = await evaluate_case(case)
 
         self.assertFalse(_check(result, CHECK_OBJECT_RETRIEVAL).passed)
@@ -215,7 +235,11 @@ class EvaluationRunnerTests(unittest.IsolatedAsyncioTestCase):
         data["governance_context"]["trace_ref"] = None
         data["answer"]["trace_ref"] = None
 
-        with patch.object(GovernedSessionBridge, "query", return_value=payload):
+        with patch.object(
+            GovernedSessionBridge,
+            "query_with_fixture_delivery",
+            return_value=payload,
+        ):
             result = await evaluate_case(case)
 
         self.assertFalse(_check(result, CHECK_TRACE_RESOLUTION).passed)
@@ -228,7 +252,11 @@ class EvaluationRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(source_trace, dict)
         source_trace["evidence_refs"] = []
 
-        with patch.object(GovernedSessionBridge, "query", return_value=payload):
+        with patch.object(
+            GovernedSessionBridge,
+            "query_with_fixture_delivery",
+            return_value=payload,
+        ):
             result = await evaluate_case(case)
 
         self.assertFalse(_check(result, CHECK_CITATION_GROUNDING).passed)
@@ -244,7 +272,11 @@ class EvaluationRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(source_trace, dict)
         source_trace["evidence_refs"][0]["evidence_id"] = "ev-different-source"
 
-        with patch.object(GovernedSessionBridge, "query", return_value=payload):
+        with patch.object(
+            GovernedSessionBridge,
+            "query_with_fixture_delivery",
+            return_value=payload,
+        ):
             result = await evaluate_case(case)
 
         citation_check = _check(result, CHECK_CITATION_GROUNDING)
@@ -274,7 +306,11 @@ class EvaluationRunnerTests(unittest.IsolatedAsyncioTestCase):
         payload["data"]["answer"]["direct_external_use"] = True
         payload["data"]["answer"]["usage"] = "direct"
 
-        with patch.object(GovernedSessionBridge, "query", return_value=payload):
+        with patch.object(
+            GovernedSessionBridge,
+            "query_with_fixture_delivery",
+            return_value=payload,
+        ):
             result = await evaluate_case(case)
 
         freshness_check = _check(result, CHECK_FRESHNESS_PREFERENCE)
@@ -295,6 +331,7 @@ class EvaluationRunnerTests(unittest.IsolatedAsyncioTestCase):
             supported_audiences=(internal_only,),
             question="Who approves enterprise refund exceptions?",
             canonical_answer="Billing Ops approves enterprise exceptions.",
+            publish_targets=("copilot",),
         )
         case = EvalCase(
             case_id="plan-tier-refund-restricted",
@@ -316,7 +353,28 @@ class EvaluationRunnerTests(unittest.IsolatedAsyncioTestCase):
 
         result = await evaluate_case(case)
 
-        self.assertTrue(_check(result, CHECK_AUDIENCE_RESTRICTION).passed)
+        # The object is synced on the queried channel, so this exercises the
+        # audience-mismatch leak path: the forbidden object must not be exposed
+        # and the answer must be withheld entirely (None), not an empty shell.
+        restriction_check = _check(result, CHECK_AUDIENCE_RESTRICTION)
+        self.assertTrue(restriction_check.passed)
+        self.assertIn("exposed=[]", restriction_check.detail)
+        self.assertIn("answer_withheld=True", restriction_check.detail)
+
+        leaked_payload = copy.deepcopy(_bridge_payload(_supported_case()))
+        leaked_data = leaked_payload["data"]
+        self.assertIsInstance(leaked_data, dict)
+        leaked_data["governance"]["state"] = "restricted"
+        leaked_data["answer"]["object_id"] = restricted_answer.object_id
+
+        with patch.object(
+            GovernedSessionBridge,
+            "query_with_fixture_delivery",
+            return_value=leaked_payload,
+        ):
+            leaked_result = await evaluate_case(case)
+
+        self.assertFalse(_check(leaked_result, CHECK_AUDIENCE_RESTRICTION).passed)
 
     async def test_unsupported_response_with_direct_answer_fails_escalation(
         self,
@@ -326,7 +384,7 @@ class EvaluationRunnerTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(
             GovernedSessionBridge,
-            "query",
+            "query_with_fixture_delivery",
             return_value=exposed_payload,
         ):
             result = await evaluate_case(unsupported)
@@ -426,7 +484,7 @@ class EvaluationRunnerTests(unittest.IsolatedAsyncioTestCase):
     async def test_evaluator_exception_becomes_failed_checks(self) -> None:
         with patch.object(
             GovernedSessionBridge,
-            "query",
+            "query_with_fixture_delivery",
             side_effect=RuntimeError("broken evaluator"),
         ):
             result = await evaluate_case(_supported_case())
@@ -443,6 +501,25 @@ class EvaluationRunnerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(all("RuntimeError" in check.detail for check in result.checks))
 
+    async def test_malformed_bridge_payload_fails_all_applicable_checks(self) -> None:
+        with patch.object(
+            GovernedSessionBridge,
+            "query_with_fixture_delivery",
+            return_value={"status": "success", "data": "malformed"},
+        ):
+            result = await evaluate_case(_supported_case())
+
+        self.assertFalse(result.passed)
+        self.assertEqual(
+            result.failed_check_ids,
+            (
+                CHECK_OBJECT_RETRIEVAL,
+                CHECK_TRACE_RESOLUTION,
+                CHECK_CITATION_GROUNDING,
+                CHECK_FRESHNESS_PREFERENCE,
+            ),
+        )
+
     async def test_report_order_is_stable_by_case_id(self) -> None:
         later = _supported_case(case_id="z-supported")
         earlier = _supported_case(case_id="a-supported")
@@ -454,7 +531,9 @@ class EvaluationRunnerTests(unittest.IsolatedAsyncioTestCase):
             tuple(result.case_id for result in report.results),
             ("a-supported", "z-supported"),
         )
+        results = report.to_dict()["results"]
+        assert isinstance(results, list)
         self.assertEqual(
-            [item["case_id"] for item in report.to_dict()["results"]],
+            [item["case_id"] for item in results],
             ["a-supported", "z-supported"],
         )

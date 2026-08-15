@@ -6,16 +6,21 @@ import json
 import unittest
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
-_MODULE_PATH = Path(__file__).resolve().parents[1] / "cygnus" / "substrate" / "source_text.py"
+_MODULE_PATH = (
+    Path(__file__).resolve().parents[1] / "cygnus" / "substrate" / "source_text.py"
+)
 
 
 def _load_source_text_module():
     import importlib.util
 
-    spec = importlib.util.spec_from_file_location("cygnus_source_text_test_module", _MODULE_PATH)
+    spec = importlib.util.spec_from_file_location(
+        "cygnus_source_text_test_module", _MODULE_PATH
+    )
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -25,25 +30,10 @@ def _load_source_text_module():
 source_text = _load_source_text_module()
 
 
-class _FakeResponse:
-    def __init__(self, *, content: bytes, headers: dict[str, str] | None = None):
-        self.content = content
-        self.headers = headers or {}
-
-
-class _FakeAsyncClient:
-    def __init__(self, response: _FakeResponse):
-        self._response = response
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
-
-    async def get(self, _url: str, *, follow_redirects: bool, timeout: int):
-        _ = follow_redirects, timeout
-        return self._response
+def _fetched(
+    url: str, content: bytes, content_type: str | None = None
+) -> SimpleNamespace:
+    return SimpleNamespace(url=url, content_type=content_type, payload=content)
 
 
 class SourceTextInternalizationTests(unittest.TestCase):
@@ -52,12 +42,16 @@ class SourceTextInternalizationTests(unittest.TestCase):
 
         pages = asyncio.run(source_text._extract_text_from_file(payload, "policy.html"))
 
-        self.assertEqual(pages, [{"content": "# Policy\n\nEnterprise only.", "page_number": 1}])
+        self.assertEqual(
+            pages, [{"content": "# Policy\n\nEnterprise only.", "page_number": 1}]
+        )
 
     def test_extracts_json_file_without_external_extractor(self) -> None:
         payload = json.dumps({"plan": "enterprise", "region": "eu"}).encode("utf-8")
 
-        pages = asyncio.run(source_text._extract_text_from_file(payload, "variant.json"))
+        pages = asyncio.run(
+            source_text._extract_text_from_file(payload, "variant.json")
+        )
 
         self.assertEqual(pages[0]["page_number"], 1)
         self.assertIn('"plan": "enterprise"', pages[0]["content"])
@@ -74,33 +68,50 @@ class SourceTextInternalizationTests(unittest.TestCase):
         self.assertIn("Variant hold for EU", pages[0]["content"])
 
     def test_url_html_uses_cygnus_owned_html_path(self) -> None:
-        response = _FakeResponse(
-            content=b"<html><body><h2>Known issue</h2><p>Sync delay.</p></body></html>",
-            headers={"content-type": "text/html; charset=utf-8"},
+        fetched = _fetched(
+            "https://example.com/issues/sync",
+            b"<html><body><h2>Known issue</h2><p>Sync delay.</p></body></html>",
+            content_type="text/html; charset=utf-8",
         )
 
-        with patch("httpx.AsyncClient", return_value=_FakeAsyncClient(response)):
-            pages = asyncio.run(source_text._extract_text_from_url("https://example.com/issues/sync"))
+        with patch.object(
+            source_text, "fetch_public_source_url", return_value=fetched
+        ) as fetch_mock:
+            pages = asyncio.run(
+                source_text._extract_text_from_url("https://example.com/issues/sync")
+            )
 
-        self.assertEqual(pages, [{"content": "## Known issue\n\nSync delay.", "page_number": 1}])
+        fetch_mock.assert_awaited_once()
+        self.assertEqual(
+            pages, [{"content": "## Known issue\n\nSync delay.", "page_number": 1}]
+        )
 
     def test_url_pdf_routes_into_file_extractor(self) -> None:
-        response = _FakeResponse(
-            content=b"%PDF-1.7 fake payload",
-            headers={"content-type": "application/pdf"},
+        fetched = _fetched(
+            "https://example.com/source",
+            b"%PDF-1.7 fake payload",
+            content_type="application/pdf",
         )
 
-        async def _fake_extract_text_from_file(file_data: bytes, file_name: str, vision_provider=None):
-            self.assertEqual(file_data, response.content)
+        async def _fake_extract_text_from_file(
+            file_data: bytes, file_name: str, vision_provider=None
+        ):
+            self.assertEqual(file_data, fetched.payload)
             self.assertEqual(file_name, "downloaded.pdf")
             self.assertIsNone(vision_provider)
             return [{"content": "pdf body", "page_number": 1}]
 
         with (
-            patch("httpx.AsyncClient", return_value=_FakeAsyncClient(response)),
-            patch.object(source_text, "_extract_text_from_file", side_effect=_fake_extract_text_from_file),
+            patch.object(source_text, "fetch_public_source_url", return_value=fetched),
+            patch.object(
+                source_text,
+                "_extract_text_from_file",
+                side_effect=_fake_extract_text_from_file,
+            ),
         ):
-            pages = asyncio.run(source_text._extract_text_from_url("https://example.com/source"))
+            pages = asyncio.run(
+                source_text._extract_text_from_url("https://example.com/source")
+            )
 
         self.assertEqual(pages, [{"content": "pdf body", "page_number": 1}])
 

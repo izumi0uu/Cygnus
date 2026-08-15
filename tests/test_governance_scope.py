@@ -9,6 +9,7 @@ from uuid import UUID
 
 from fastapi import HTTPException
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -26,10 +27,12 @@ from cygnus.runtime.services.permission_engine import (
     build_document_scope_clause,
     build_wiki_draft_scope_clause,
     build_wiki_scope_clause,
+    can_access_document,
 )
 
 
 DEPARTMENT_ID = UUID("11111111-1111-1111-1111-111111111111")
+OTHER_DEPARTMENT_ID = UUID("22222222-2222-2222-2222-222222222222")
 
 
 def scoped_employee(
@@ -98,6 +101,75 @@ class GovernanceScopeTests(unittest.TestCase):
         self.assertIn("wiki_pages.id IS NULL", wiki_sql)
         self.assertIn("NOT (EXISTS", source_sql)
         self.assertNotIn("source_departments.department_id IN", source_sql)
+
+    def test_malformed_department_scope_is_not_reclassified_as_global(self) -> None:
+        user = scoped_employee(department_ids=(OTHER_DEPARTMENT_ID,))
+        source_sql = compile_clause(Source, build_document_scope_clause(user))
+
+        self.assertIn("sources.scope_type = 'global'", source_sql)
+        self.assertIn("sources.scope_id IS NULL", source_sql)
+        self.assertIn("source_departments.department_id = sources.scope_id", source_sql)
+
+        class _Result:
+            def __init__(self, department_ids: tuple[UUID, ...]) -> None:
+                self._department_ids = department_ids
+
+            def all(self) -> list[tuple[UUID]]:
+                return [(department_id,) for department_id in self._department_ids]
+
+        class _Session:
+            def __init__(self, department_ids: tuple[UUID, ...]) -> None:
+                self._department_ids = department_ids
+
+            async def execute(self, _statement):
+                return _Result(self._department_ids)
+
+        async def can_read(
+            *,
+            scope_type: str,
+            scope_id: UUID | None,
+            links: tuple[UUID, ...],
+        ) -> bool:
+            source = SimpleNamespace(
+                id=UUID("33333333-3333-3333-3333-333333333333"),
+                scope_type=scope_type,
+                scope_id=scope_id,
+            )
+            with patch(
+                "cygnus.runtime.services.permission_engine._get_user_permissions",
+                return_value={"doc:read:own_dept"},
+            ):
+                return await can_access_document(
+                    cast(AsyncSession, cast(object, _Session(links))),
+                    user,
+                    cast(Source, cast(object, source)),
+                )
+
+        malformed_unlinked = asyncio.run(
+            can_read(scope_type="department", scope_id=DEPARTMENT_ID, links=())
+        )
+        malformed_mismatched = asyncio.run(
+            can_read(
+                scope_type="department",
+                scope_id=DEPARTMENT_ID,
+                links=(OTHER_DEPARTMENT_ID,),
+            )
+        )
+        valid_multidepartment = asyncio.run(
+            can_read(
+                scope_type="department",
+                scope_id=DEPARTMENT_ID,
+                links=(DEPARTMENT_ID, OTHER_DEPARTMENT_ID),
+            )
+        )
+        valid_global = asyncio.run(
+            can_read(scope_type="global", scope_id=None, links=())
+        )
+
+        self.assertFalse(malformed_unlinked)
+        self.assertFalse(malformed_mismatched)
+        self.assertTrue(valid_multidepartment)
+        self.assertTrue(valid_global)
 
     def test_user_without_permissions_gets_always_false_scope(self) -> None:
         user = scoped_employee(global_role="viewer")

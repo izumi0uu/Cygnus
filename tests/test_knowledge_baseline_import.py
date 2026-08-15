@@ -17,7 +17,9 @@ KNOWLEDGE_BASELINE_FILES = [
 
 def test_knowledge_baseline_files_exist() -> None:
     for relative_path in KNOWLEDGE_BASELINE_FILES:
-        assert Path(relative_path).is_file(), f"missing mirrored knowledge substrate file: {relative_path}"
+        assert Path(relative_path).is_file(), (
+            f"missing mirrored knowledge substrate file: {relative_path}"
+        )
 
 
 def test_knowledge_baseline_files_are_syntax_valid() -> None:

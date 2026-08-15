@@ -3,9 +3,13 @@ from __future__ import annotations
 import types
 import unittest
 import uuid
+from typing import cast
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from cygnus.runtime.utils.progress import ProgressTracker
 
 
 class _HealthySession:
@@ -105,7 +109,20 @@ class ApiBootSmokeTests(unittest.TestCase):
 
 class WorkerBootSmokeTests(unittest.IsolatedAsyncioTestCase):
     async def test_worker_hooks_expose_a_bootable_contract(self) -> None:
+        import json
+
+        from cygnus.runtime.readiness import WORKER_HEARTBEAT_CONTEXT_KEY
         from cygnus.runtime.worker import WorkerSettings
+
+        class _HeartbeatRedis:
+            def __init__(self):
+                self.sets = []
+
+            async def set(self, key, value, ex=None):
+                self.sets.append((key, value, ex))
+
+        redis = _HeartbeatRedis()
+        ctx: dict[str, object] = {"redis": redis}
 
         with (
             patch(
@@ -117,13 +134,21 @@ class WorkerBootSmokeTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(return_value=0),
             ) as feedback_sweep,
         ):
-            await WorkerSettings.on_startup({})
-        await WorkerSettings.on_shutdown({})
+            await WorkerSettings.on_startup(ctx)
+        await WorkerSettings.on_shutdown(ctx)
 
         sweep.assert_awaited_once()
         feedback_sweep.assert_awaited_once()
         self.assertGreaterEqual(len(WorkerSettings.functions), 1)
         self.assertGreaterEqual(len(WorkerSettings.cron_jobs), 1)
+
+        # Heartbeat lifecycle: starting -> ready -> stopped, with a bounded TTL.
+        states = [json.loads(value)["state"] for _k, value, _ex in redis.sets]
+        self.assertEqual(states[0], "starting")
+        self.assertIn("ready", states)
+        self.assertEqual(states[-1], "stopped")
+        self.assertTrue(all(ex is not None for _k, _v, ex in redis.sets))
+        self.assertIsNotNone(ctx.get(WORKER_HEARTBEAT_CONTEXT_KEY))
 
     async def test_worker_pre_review_cron_sweeps_durable_intents(self) -> None:
         import cygnus.runtime.worker as worker_module
@@ -174,10 +199,10 @@ class MrpResumeSmokeTests(unittest.IsolatedAsyncioTestCase):
             ) as reduce_phase,
         ):
             result = await pipeline_module.run_mrp_pipeline(
-                session=object(),
+                session=cast(AsyncSession, object()),
                 source=source,
                 full_text="full text",
-                tracker=object(),
+                tracker=cast(ProgressTracker, object()),
                 registry=object(),
                 kt_slug=None,
                 kt_name=None,
@@ -243,10 +268,10 @@ class MrpResumeSmokeTests(unittest.IsolatedAsyncioTestCase):
             patch.object(pipeline_module, "run_commit_phase", commit_phase),
         ):
             result = await pipeline_module.run_refine_pipeline(
-                session=_FakeSession(),
+                session=cast(AsyncSession, _FakeSession()),
                 source=source,
                 full_text="full text",
-                tracker=object(),
+                tracker=cast(ProgressTracker, object()),
                 registry=_FakeRegistry(),
                 kt_slug=None,
                 kt_name=None,

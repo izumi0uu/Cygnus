@@ -18,7 +18,9 @@ RUNTIME_SPINE_FILES = [
 
 def test_runtime_spine_files_exist() -> None:
     for relative_path in RUNTIME_SPINE_FILES:
-        assert Path(relative_path).is_file(), f"missing mirrored runtime file: {relative_path}"
+        assert Path(relative_path).is_file(), (
+            f"missing mirrored runtime file: {relative_path}"
+        )
 
 
 def test_runtime_spine_files_are_syntax_valid() -> None:

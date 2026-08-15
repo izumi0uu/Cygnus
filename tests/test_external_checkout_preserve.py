@@ -9,8 +9,14 @@ from pathlib import Path
 
 
 def _load_module():
-    module_path = Path(__file__).resolve().parents[1] / "scripts" / "external_checkout_preserve.py"
-    spec = importlib.util.spec_from_file_location("external_checkout_preserve", module_path)
+    module_path = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "external_checkout_preserve.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "external_checkout_preserve", module_path
+    )
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -21,20 +27,24 @@ def _load_module():
 external_checkout_preserve = _load_module()
 
 
-
 def _git(cwd: Path, *args: str) -> str:
     return subprocess.check_output(["git", "-C", str(cwd), *args], text=True).strip()
 
 
-
 def _git_ok(cwd: Path, *args: str) -> None:
-    subprocess.check_call(["git", "-C", str(cwd), *args], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.check_call(
+        ["git", "-C", str(cwd), *args],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
 
 class ExternalCheckoutPreserveTests(unittest.TestCase):
     def _make_repo_with_ahead_history(self, root: Path) -> tuple[Path, str, str]:
         bare = root / "origin.git"
-        subprocess.check_call(["git", "init", "--bare", str(bare)], stdout=subprocess.DEVNULL)
+        subprocess.check_call(
+            ["git", "init", "--bare", str(bare)], stdout=subprocess.DEVNULL
+        )
 
         seed = root / "seed"
         _git_ok(root, "clone", str(bare), str(seed))
@@ -58,13 +68,17 @@ class ExternalCheckoutPreserveTests(unittest.TestCase):
         head = _git(repo, "rev-parse", "HEAD")
         return repo, base, head
 
-    def test_create_preservation_artifacts_writes_manifest_bundle_and_patches(self) -> None:
+    def test_create_preservation_artifacts_writes_manifest_bundle_and_patches(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             repo, base, head = self._make_repo_with_ahead_history(root)
             out = root / "artifacts"
 
-            artifact = external_checkout_preserve.create_preservation_artifacts(repo, out)
+            artifact = external_checkout_preserve.create_preservation_artifacts(
+                repo, out
+            )
 
             self.assertEqual(artifact.base_commit, base)
             self.assertEqual(artifact.head_commit, head)
@@ -83,9 +97,13 @@ class ExternalCheckoutPreserveTests(unittest.TestCase):
             root = Path(tmp)
             repo, _base, head = self._make_repo_with_ahead_history(root)
             out = root / "artifacts"
-            artifact = external_checkout_preserve.create_preservation_artifacts(repo, out)
+            artifact = external_checkout_preserve.create_preservation_artifacts(
+                repo, out
+            )
 
-            verification = external_checkout_preserve.verify_delta_bundle(repo, artifact, cleanup=False)
+            verification = external_checkout_preserve.verify_delta_bundle(
+                repo, artifact, cleanup=False
+            )
             assert verification is not None
             self.assertEqual(verification.original_head, head)
             self.assertEqual(verification.restored_head, head)
@@ -100,9 +118,13 @@ class ExternalCheckoutPreserveTests(unittest.TestCase):
             root = Path(tmp)
             repo, _base, head = self._make_repo_with_ahead_history(root)
             out = root / "artifacts"
-            artifact = external_checkout_preserve.create_preservation_artifacts(repo, out)
+            artifact = external_checkout_preserve.create_preservation_artifacts(
+                repo, out
+            )
 
-            verification = external_checkout_preserve.verify_patch_series(repo, artifact, cleanup=False)
+            verification = external_checkout_preserve.verify_patch_series(
+                repo, artifact, cleanup=False
+            )
             assert verification is not None
             self.assertEqual(verification.original_head, head)
             self.assertEqual(verification.restored_subjects, ["feat: local ahead"])
@@ -111,7 +133,9 @@ class ExternalCheckoutPreserveTests(unittest.TestCase):
             self.assertTrue(verification.subjects_match_expected)
             self.assertTrue(Path(verification.restore_dir).exists())
 
-    def test_verify_worktree_state_restores_staged_unstaged_and_untracked_changes(self) -> None:
+    def test_verify_worktree_state_restores_staged_unstaged_and_untracked_changes(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             repo, _base, head = self._make_repo_with_ahead_history(root)
@@ -120,14 +144,22 @@ class ExternalCheckoutPreserveTests(unittest.TestCase):
             _git_ok(repo, "add", "tracked.txt")
             (repo / "notes.txt").write_text("scratch\n", encoding="utf-8")
             out = root / "artifacts"
-            artifact = external_checkout_preserve.create_preservation_artifacts(repo, out)
+            artifact = external_checkout_preserve.create_preservation_artifacts(
+                repo, out
+            )
 
             self.assertEqual(artifact.head_commit, head)
-            self.assertTrue(any(line.startswith(" M feature.txt") for line in artifact.status_lines))
-            self.assertTrue(any(line.startswith("A  tracked.txt") for line in artifact.status_lines))
+            self.assertTrue(
+                any(line.startswith(" M feature.txt") for line in artifact.status_lines)
+            )
+            self.assertTrue(
+                any(line.startswith("A  tracked.txt") for line in artifact.status_lines)
+            )
             self.assertIn("notes.txt", artifact.untracked_files)
 
-            verification = external_checkout_preserve.verify_worktree_state(repo, artifact, cleanup=False)
+            verification = external_checkout_preserve.verify_worktree_state(
+                repo, artifact, cleanup=False
+            )
             assert verification is not None
             self.assertEqual(verification.original_head, head)
             self.assertEqual(verification.restored_head, head)

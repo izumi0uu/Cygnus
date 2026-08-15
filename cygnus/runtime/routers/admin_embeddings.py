@@ -30,6 +30,7 @@ from cygnus.runtime.database.models import (
     EmbeddingJob,
     Employee,
     WikiPage,
+    _WikiPageEmbeddingBase,
     get_embedding_model_for_dim,
 )
 from cygnus.runtime.services.audit_service import log_audit
@@ -41,6 +42,7 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 # Schemas
 # ---------------------------------------------------------------------------
+
 
 class EmbeddingSpecOut(BaseModel):
     id: str
@@ -89,10 +91,12 @@ class EmbeddingSwitchOut(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
-async def _spec_to_out(
-    spec: EmbeddingModelSpec, db: AsyncSession
-) -> EmbeddingSpecOut:
-    from cygnus.runtime.services.config_service import ConfigService, embedding_api_key_for
+
+async def _spec_to_out(spec: EmbeddingModelSpec, db: AsyncSession) -> EmbeddingSpecOut:
+    from cygnus.runtime.services.config_service import (
+        ConfigService,
+        embedding_api_key_for,
+    )
 
     svc = ConfigService(db)
     key = await svc.get(embedding_api_key_for(spec.provider))
@@ -138,6 +142,7 @@ async def _get_current_job(db: AsyncSession) -> Optional[EmbeddingJob]:
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.get("/settings/embeddings/catalog", response_model=EmbeddingCatalogOut)
 async def get_catalog(
     db: AsyncSession = Depends(get_db),
@@ -172,12 +177,10 @@ async def get_status(
     embedded = 0
     if active:
         spec = get_spec(active)
-        Emb = get_embedding_model_for_dim(spec.dimension)
+        Emb: type[_WikiPageEmbeddingBase] = get_embedding_model_for_dim(spec.dimension)
         embedded = (
             await db.execute(
-                select(func.count(Emb.page_id)).where(
-                    Emb.model_spec_id == active
-                )
+                select(func.count(Emb.page_id)).where(Emb.model_spec_id == active)
             )
         ).scalar_one()
 
@@ -196,7 +199,10 @@ async def switch_embedding_model(
     db: AsyncSession = Depends(get_db),
     _user: Employee = require_permission("org:settings:manage"),
 ):
-    from cygnus.runtime.services.config_service import ConfigService, embedding_api_key_for
+    from cygnus.runtime.services.config_service import (
+        ConfigService,
+        embedding_api_key_for,
+    )
 
     try:
         spec = get_spec(body.model_spec_id)
@@ -261,9 +267,7 @@ async def switch_embedding_model(
     return EmbeddingSwitchOut(job_id=job_id)
 
 
-@router.get(
-    "/settings/embeddings/jobs/{job_id}", response_model=EmbeddingJobOut
-)
+@router.get("/settings/embeddings/jobs/{job_id}", response_model=EmbeddingJobOut)
 async def get_job(
     job_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),

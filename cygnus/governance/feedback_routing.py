@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.governance.feedback import FeedbackSignalType
 from cygnus.governance.ledger import lock_governance_command
+from cygnus.observability import current_request_id, current_traceparent
 from cygnus.runtime.database.models import (
     GovernanceFeedbackRoute,
     GovernanceFeedbackSignal,
@@ -137,10 +138,18 @@ async def route_feedback_signal(
         raise FeedbackRouteConflict(
             f"feedback_signal_id={signal.id} replay is missing its durable route"
         )
-
+    effective_correlation = current_request_id()
+    correlation_uuid = None
+    if effective_correlation:
+        try:
+            correlation_uuid = uuid.UUID(effective_correlation)
+        except (TypeError, ValueError):
+            correlation_uuid = None
     route = GovernanceFeedbackRoute(
         id=uuid.uuid4(),
         feedback_signal_id=signal.id,
+        correlation_id=correlation_uuid,
+        traceparent=current_traceparent(),
         route_kind=route_kind.value,
         lifecycle_state=FeedbackRouteState.QUEUED.value,
     )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import TypedDict, cast
 import unittest
 import uuid
 
@@ -11,6 +12,39 @@ from cygnus.governance.drift_signals import (
 from cygnus.review import build_drift_governance_surface
 from cygnus.review.surface import ObservationState, SurfaceObservation
 from cygnus.runtime.database.models import GovernanceSignal
+
+
+class _DriftContextPayload(TypedDict):
+    proposal_ref: str
+    title: str
+    risk_type: str
+    suggested_object_type: str
+    urgency: str
+    why_now: str
+    evidence_ids: list[str]
+    event_refs: list[str]
+    event_types: list[str]
+    trigger_signals: list[str]
+    affected_audience_labels: list[str]
+    affected_surfaces: list[str]
+
+
+class _DriftObservationPayload(TypedDict):
+    state: str
+    observed_count: int
+    reason: str
+    covered_signals: list[str]
+    missing_signals: list[str]
+
+
+class _DriftSurfacePayload(TypedDict):
+    surface_id: str
+    headline: str
+    summary: str
+    observation: _DriftObservationPayload
+    contexts: list[_DriftContextPayload]
+    available_commands: list[str]
+    proposal_lane: list[str]
 
 
 _NOW = datetime(2026, 8, 8, 12, 0, tzinfo=timezone.utc)
@@ -80,7 +114,10 @@ class GovernanceDriftProviderTests(unittest.TestCase):
             {bundle.signal.risk_type.value for bundle in bundles},
             {"drift"},
         )
-        surface = build_drift_governance_surface(bundles).to_dict()
+        surface = cast(
+            _DriftSurfacePayload,
+            build_drift_governance_surface(bundles).to_dict(),
+        )
         self.assertEqual(len(surface["contexts"]), 2)
         self.assertEqual(
             {
@@ -100,10 +137,13 @@ class GovernanceDriftProviderTests(unittest.TestCase):
             covered_signals=provider.covered_signals,
         )
 
-        payload = build_drift_governance_surface(
-            provider.bundles,
-            observation=observation,
-        ).to_dict()
+        payload = cast(
+            _DriftSurfacePayload,
+            build_drift_governance_surface(
+                provider.bundles,
+                observation=observation,
+            ).to_dict(),
+        )
 
         self.assertEqual(payload["contexts"], [])
         self.assertEqual(payload["observation"]["state"], "ready")

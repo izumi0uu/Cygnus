@@ -21,6 +21,7 @@ router = APIRouter()
 # Dashboard stats
 # ---------------------------------------------------------------------------
 
+
 class DashboardStats(BaseModel):
     total_sources: int
     total_departments: int
@@ -28,7 +29,10 @@ class DashboardStats(BaseModel):
 
 
 @router.get("/dashboard/stats", response_model=DashboardStats)
-async def dashboard_stats(db: AsyncSession = Depends(get_db)):
+async def dashboard_stats(
+    db: AsyncSession = Depends(get_db),
+    _user: Employee = require_permission("org:settings:manage"),
+):
     repo = Repository(db)
     return DashboardStats(
         total_sources=await repo.count(Source),
@@ -41,8 +45,10 @@ async def dashboard_stats(db: AsyncSession = Depends(get_db)):
 # Settings CRUD
 # ---------------------------------------------------------------------------
 
+
 class SettingsUpdate(BaseModel):
     """Batch update config values."""
+
     settings: dict[str, str]
 
 
@@ -76,10 +82,17 @@ async def update_settings(
 
     svc = ConfigService(db)
     results = await svc.set_batch(body.settings)
-    
+
     # Audit log
     keys_updated = list(body.settings.keys())
-    await log_audit(db, _user, "update", "settings", "global", reason=f"Updated keys: {', '.join(keys_updated)}")
+    await log_audit(
+        db,
+        _user,
+        "update",
+        "settings",
+        "global",
+        reason=f"Updated keys: {', '.join(keys_updated)}",
+    )
     await db.commit()
     return {"updated": results}
 
@@ -88,9 +101,17 @@ async def update_settings(
 # Provider connection testing
 # ---------------------------------------------------------------------------
 
+
 @router.post("/settings/test-providers", response_model=dict[str, TestConnectionResult])
-async def test_all_providers(db: AsyncSession = Depends(get_db)):
-    """Test all configured AI providers (embedding, LLM, vision)."""
+async def test_all_providers(
+    db: AsyncSession = Depends(get_db),
+    _user: Employee = require_permission("org:settings:manage"),
+):
+    """Test all configured AI providers (embedding, LLM, vision).
+
+    Admin-gated: this initiates outbound connections to configured provider
+    endpoints and must not be callable anonymously.
+    """
     from cygnus.runtime.ai.registry import ProviderRegistry
 
     registry = ProviderRegistry(db)
@@ -103,7 +124,10 @@ async def test_all_providers(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/settings/test-embedding", response_model=TestConnectionResult)
-async def test_embedding(db: AsyncSession = Depends(get_db)):
+async def test_embedding(
+    db: AsyncSession = Depends(get_db),
+    _user: Employee = require_permission("org:settings:manage"),
+):
     """Test the configured embedding provider."""
     from cygnus.runtime.ai.registry import ProviderRegistry
 
@@ -117,7 +141,10 @@ async def test_embedding(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/settings/test-llm", response_model=TestConnectionResult)
-async def test_llm(db: AsyncSession = Depends(get_db)):
+async def test_llm(
+    db: AsyncSession = Depends(get_db),
+    _user: Employee = require_permission("org:settings:manage"),
+):
     """Test the configured LLM provider."""
     from cygnus.runtime.ai.registry import ProviderRegistry
 
@@ -131,7 +158,10 @@ async def test_llm(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/settings/test-vision", response_model=TestConnectionResult)
-async def test_vision(db: AsyncSession = Depends(get_db)):
+async def test_vision(
+    db: AsyncSession = Depends(get_db),
+    _user: Employee = require_permission("org:settings:manage"),
+):
     """Test the configured vision provider."""
     from cygnus.runtime.ai.registry import ProviderRegistry
 
@@ -139,7 +169,9 @@ async def test_vision(db: AsyncSession = Depends(get_db)):
         registry = ProviderRegistry(db)
         provider = await registry.get_vision()
         if not provider:
-            return TestConnectionResult(success=False, message="No vision provider configured")
+            return TestConnectionResult(
+                success=False, message="No vision provider configured"
+            )
         ok, msg = await provider.test_connection()
         return TestConnectionResult(success=ok, message=msg)
     except Exception as e:
@@ -150,12 +182,16 @@ async def test_vision(db: AsyncSession = Depends(get_db)):
 # Supported providers list (for admin UI dropdowns)
 # ---------------------------------------------------------------------------
 
+
 @router.get("/settings/providers")
-async def list_providers():
+async def list_providers(
+    _user: Employee = require_permission("org:settings:manage"),
+):
     """
     Catalog-derived listing of supported providers per capability. Each model
     entry includes spec_id, label, cost, and capability metadata so the UI can
     render rich dropdowns.
     """
     from cygnus.runtime.ai.registry import supported_providers
+
     return supported_providers()

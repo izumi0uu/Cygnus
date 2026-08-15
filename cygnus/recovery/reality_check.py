@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Iterable
+from typing import Iterable, TypedDict
 
 
 def _normalize_strings(values: Iterable[str] | None, *, label: str) -> tuple[str, ...]:
@@ -105,7 +105,11 @@ class DownstreamFeedbackSignal:
             raise ValueError("event_at must not be blank")
         if self.queue_owner is not None and not self.queue_owner.strip():
             raise ValueError("queue_owner must not be blank when provided")
-        object.__setattr__(self, "source_refs", _normalize_strings(self.source_refs, label="source ref"))
+        object.__setattr__(
+            self,
+            "source_refs",
+            _normalize_strings(self.source_refs, label="source ref"),
+        )
         object.__setattr__(
             self,
             "follow_up_actions",
@@ -190,7 +194,12 @@ class MismatchByAudience:
     def __post_init__(self) -> None:
         if not self.audience_label.strip():
             raise ValueError("audience_label must not be blank")
-        for field_name in ("rewrite_count", "reject_count", "escalation_count", "unresolved_count"):
+        for field_name in (
+            "rewrite_count",
+            "reject_count",
+            "escalation_count",
+            "unresolved_count",
+        ):
             if getattr(self, field_name) < 0:
                 raise ValueError(f"{field_name} must not be negative")
         object.__setattr__(
@@ -231,11 +240,15 @@ class DownstreamRealityCheckSurface:
         if not self.summary.strip():
             raise ValueError("summary must not be blank")
         object.__setattr__(self, "feedback_feed", tuple(self.feedback_feed))
-        object.__setattr__(self, "mismatch_by_audience", tuple(self.mismatch_by_audience))
+        object.__setattr__(
+            self, "mismatch_by_audience", tuple(self.mismatch_by_audience)
+        )
         object.__setattr__(
             self,
             "upstream_object_links",
-            _normalize_strings(self.upstream_object_links, label="upstream object link"),
+            _normalize_strings(
+                self.upstream_object_links, label="upstream object link"
+            ),
         )
         object.__setattr__(
             self,
@@ -256,7 +269,9 @@ class DownstreamRealityCheckSurface:
             "summary": self.summary,
             "reality_check_strip": self.reality_strip.to_dict(),
             "feedback_feed": [signal.to_dict() for signal in self.feedback_feed],
-            "mismatch_by_audience": [item.to_dict() for item in self.mismatch_by_audience],
+            "mismatch_by_audience": [
+                item.to_dict() for item in self.mismatch_by_audience
+            ],
             "upstream_object_links": list(self.upstream_object_links),
             "send_back_commands": list(self.send_back_commands),
         }
@@ -269,13 +284,17 @@ def build_downstream_reality_check_surface(
 ) -> DownstreamRealityCheckSurface:
     ordered_feed = tuple(
         sorted(
-            _select_command_feedback(command_ref=command_ref, feedback_feed=feedback_feed),
+            _select_command_feedback(
+                command_ref=command_ref, feedback_feed=feedback_feed
+            ),
             key=lambda signal: (signal.event_at, signal.signal_id),
             reverse=True,
         )
     )
     if not ordered_feed:
-        raise ValueError("downstream reality check requires at least one feedback signal for the command")
+        raise ValueError(
+            "downstream reality check requires at least one feedback signal for the command"
+        )
 
     converging_surfaces = tuple(
         _dedupe(
@@ -355,10 +374,18 @@ def _select_command_feedback(
     )
 
 
+class _AudienceBucket(TypedDict):
+    rewrite_count: int
+    reject_count: int
+    escalation_count: int
+    unresolved_count: int
+    affected_surfaces: list[str]
+
+
 def _build_mismatch_by_audience(
     feedback_feed: tuple[DownstreamFeedbackSignal, ...],
 ) -> list[MismatchByAudience]:
-    buckets: dict[str, dict[str, object]] = {}
+    buckets: dict[str, _AudienceBucket] = {}
     for signal in feedback_feed:
         bucket = buckets.setdefault(
             signal.audience_label,
@@ -378,25 +405,30 @@ def _build_mismatch_by_audience(
             bucket["escalation_count"] += 1
         elif signal.signal_type is FeedbackSignalType.UNRESOLVED_CONVERSATION:
             bucket["unresolved_count"] += 1
-        surfaces: list[str] = bucket["affected_surfaces"]  # type: ignore[assignment]
+        surfaces = bucket["affected_surfaces"]
         if signal.surface_id not in surfaces:
             surfaces.append(signal.surface_id)
 
     results = [
         MismatchByAudience(
             audience_label=audience_label,
-            rewrite_count=int(data["rewrite_count"]),
-            reject_count=int(data["reject_count"]),
-            escalation_count=int(data["escalation_count"]),
-            unresolved_count=int(data["unresolved_count"]),
-            affected_surfaces=tuple(data["affected_surfaces"]),  # type: ignore[arg-type]
+            rewrite_count=data["rewrite_count"],
+            reject_count=data["reject_count"],
+            escalation_count=data["escalation_count"],
+            unresolved_count=data["unresolved_count"],
+            affected_surfaces=tuple(data["affected_surfaces"]),
         )
         for audience_label, data in sorted(buckets.items())
     ]
     return sorted(
         results,
         key=lambda item: (
-            -(item.rewrite_count + item.reject_count + item.escalation_count + item.unresolved_count),
+            -(
+                item.rewrite_count
+                + item.reject_count
+                + item.escalation_count
+                + item.unresolved_count
+            ),
             item.audience_label,
         ),
     )

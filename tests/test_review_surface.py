@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from typing import cast
 
 from cygnus.domain import AudienceFilter, Visibility
 from cygnus.domain.objects import KnowledgeObjectType
@@ -90,6 +91,9 @@ class ReviewSurfaceTests(unittest.TestCase):
         payload = surface.to_dict()
         self.assertEqual(payload["surface_id"], "review-home")
         self.assertIn("situation_frame", payload)
-        self.assertEqual(payload["observation"]["state"], "ready")
-        self.assertEqual(payload["priority_stack"][0]["owner_state"], "unassigned")
-        self.assertEqual(payload["command_brief"]["brief_id"], "brief-1")
+        observation = cast(dict[str, object], payload["observation"])
+        self.assertEqual(observation["state"], "ready")
+        priority_stack = cast(list[dict[str, object]], payload["priority_stack"])
+        self.assertEqual(priority_stack[0]["owner_state"], "unassigned")
+        command_brief = cast(dict[str, object], payload["command_brief"])
+        self.assertEqual(command_brief["brief_id"], "brief-1")

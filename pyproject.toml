@@ -40,6 +40,9 @@ dependencies = [
     "openpyxl>=3.1",
     "xlrd>=2.0",
     "tabulate>=0.9",
+    "opentelemetry-api>=1.42,<2",
+    "opentelemetry-sdk>=1.42,<2",
+    "opentelemetry-exporter-otlp-proto-http>=1.42,<2",
 ]
 
 [project.optional-dependencies]
@@ -47,7 +50,29 @@ dev = [
     "pytest>=9.0.3",
     "pytest-asyncio>=1.2.0",
     "ruff>=0.14.0",
+    "mypy>=1.14.0",
+    "pip-audit>=2.7.0",
 ]
+
+[tool.uv]
+# `uv sync` installs the `cygnus` distribution itself (not just dependencies).
+package = true
 
 [tool.setuptools.packages.find]
 include = ["cygnus*"]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.mypy]
+python_version = "3.12"
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_configs = true
+warn_unused_ignores = true
+ignore_missing_imports = true
+files = ["cygnus", "scripts", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

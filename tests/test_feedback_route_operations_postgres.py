@@ -10,6 +10,8 @@ import uuid
 from sqlalchemy import delete, null, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import selectinload
+from cygnus.domain import governed_object_ref
+from cygnus.runtime.services import wiki_service
 
 from cygnus.governance.feedback_execution import claim_feedback_routes
 from cygnus.governance.feedback_operations import (
@@ -26,6 +28,7 @@ from cygnus.runtime.database.models import (
     GovernanceFeedbackRoute,
     GovernanceFeedbackSignal,
     GovernanceReviewAssignment,
+    GovernanceReviewAssignmentEvent,
     GovernanceSignal,
     WikiPage,
 )
@@ -51,6 +54,8 @@ def _page(
         summary="Governed support guidance.",
         scope_type=scope_type,
         scope_id=scope_id,
+        language="en",
+        normalized_path=wiki_service.normalize_page_path(slug),
         knowledge_type_slugs=["answer_card"],
         source_ids=[],
         version=1,
@@ -84,7 +89,7 @@ def _feedback(
             "language": None,
             "product_version": None,
         },
-        object_id=f"ko-{command_id}",
+        object_id=governed_object_ref(page_id),
         page_id=page_id,
         draft_id=None,
         source_context_ref="private://must-not-leak",
@@ -144,7 +149,7 @@ def _outcome(
         id=signal_id,
         signal_ref=f"feedback-route:{route_id}",
         signal_type="low_rating",
-        object_ref="ko-cyg120-completed",
+        object_ref=governed_object_ref(page_id),
         title="CYG-120 completed route review pressure",
         object_type="answer_card",
         page_id=page_id,
@@ -657,7 +662,19 @@ class FeedbackRouteOperationsPostgresTests(unittest.TestCase):
         finally:
             async with sessions() as session:
                 _ = await session.execute(
-                    delete(AuditLog).where(AuditLog.principal_id == admin_id)
+                    delete(GovernanceReviewAssignmentEvent).where(
+                        GovernanceReviewAssignmentEvent.assignment_id == assignment_id
+                    )
+                )
+                _ = await session.execute(
+                    delete(GovernanceReviewAssignment).where(
+                        GovernanceReviewAssignment.id == assignment_id
+                    )
+                )
+                _ = await session.execute(
+                    delete(GovernanceFeedbackRoute).where(
+                        GovernanceFeedbackRoute.id.in_(tuple(route_ids.values()))
+                    )
                 )
                 _ = await session.execute(
                     delete(GovernanceFeedbackSignal).where(
@@ -671,6 +688,11 @@ class FeedbackRouteOperationsPostgresTests(unittest.TestCase):
                 )
                 _ = await session.execute(
                     delete(WikiPage).where(WikiPage.id.in_(tuple(page_ids.values())))
+                )
+                _ = await session.execute(
+                    delete(EmployeeDepartment).where(
+                        EmployeeDepartment.employee_id.in_((admin_id, scoped_user_id))
+                    )
                 )
                 _ = await session.execute(
                     delete(Employee).where(Employee.id.in_((admin_id, scoped_user_id)))

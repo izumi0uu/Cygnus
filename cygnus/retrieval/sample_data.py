@@ -15,7 +15,6 @@ from cygnus.domain import (
 from cygnus.evidence import EvidenceSourceType, FreshnessState, SupportEvidence
 
 
-
 def sample_support_evidence() -> tuple[SupportEvidence, ...]:
     external_enterprise_eu = AudienceFilter(
         visibility=Visibility.EXTERNAL,
@@ -45,6 +44,7 @@ def sample_support_evidence() -> tuple[SupportEvidence, ...]:
             plans=("free",),
             freshness_state=FreshnessState.FRESH,
             updated_at="2026-06-10",
+            revision="2026-06-10.3",
             tags=("billing", "refund"),
         ),
         SupportEvidence(
@@ -58,6 +58,7 @@ def sample_support_evidence() -> tuple[SupportEvidence, ...]:
             plans=("enterprise",),
             freshness_state=FreshnessState.FRESH,
             updated_at="2026-06-11",
+            revision="2026-06-11.1",
             tags=("billing", "refund", "exception"),
         ),
         SupportEvidence(
@@ -73,6 +74,7 @@ def sample_support_evidence() -> tuple[SupportEvidence, ...]:
             product_versions=("2026.06",),
             freshness_state=FreshnessState.FRESH,
             updated_at="2026-06-09",
+            revision="2026-06-09.2",
             tags=("billing", "invoice", "export"),
         ),
         SupportEvidence(
@@ -87,6 +89,7 @@ def sample_support_evidence() -> tuple[SupportEvidence, ...]:
             regions=("eu",),
             freshness_state=FreshnessState.STALE,
             updated_at="2026-06-12",
+            revision="2026-06-12.1",
             tags=("billing", "invoice", "incident"),
         ),
         SupportEvidence(
@@ -98,10 +101,10 @@ def sample_support_evidence() -> tuple[SupportEvidence, ...]:
             audience_filter=internal_billing,
             product_lines=("billing",),
             freshness_state=FreshnessState.UNKNOWN,
+            revision="2026-06-08.4",
             tags=("billing", "verification", "ticket"),
         ),
     )
-
 
 
 def sample_knowledge_objects() -> tuple[KnowledgeObject, ...]:
@@ -145,7 +148,9 @@ def sample_knowledge_objects() -> tuple[KnowledgeObject, ...]:
             tags=("billing", "refund"),
             rule_domain="refund",
             rule_statement="Support may grant refunds within 14 days, but enterprise exceptions require support ops approval.",
-            effective_conditions=("Only the first payment qualifies for self-serve refunds.",),
+            effective_conditions=(
+                "Only the first payment qualifies for self-serve refunds.",
+            ),
             exceptions=("Enterprise annual contracts are approval-gated.",),
             authority_source="billing-policy-v3",
         ),
@@ -195,7 +200,11 @@ def sample_knowledge_objects() -> tuple[KnowledgeObject, ...]:
             tags=("billing", "verification", "troubleshooting"),
             problem_statement="Customer cannot pass billing verification during invoice export.",
             prerequisites=("Customer is signed in.",),
-            steps=("Check billing admin role.", "Check invoice ownership.", "Retry export."),
+            steps=(
+                "Check billing admin role.",
+                "Check invoice ownership.",
+                "Retry export.",
+            ),
             stop_conditions=("Customer can export the invoice.",),
             escalation_route_id=escalation.object_id,
         ),

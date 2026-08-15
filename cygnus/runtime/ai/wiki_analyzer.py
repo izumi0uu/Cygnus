@@ -102,9 +102,12 @@ async def analyze_source(
     try:
         excerpt = full_text[:ANALYSIS_CHARS]
 
-        existing_lines = "\n".join(
-            f"  - {p['slug']}: {p.get('title', '')}" for p in existing_pages[:200]
-        ) or "  (none)"
+        existing_lines = (
+            "\n".join(
+                f"  - {p['slug']}: {p.get('title', '')}" for p in existing_pages[:200]
+            )
+            or "  (none)"
+        )
 
         prompt = ANALYSIS_PROMPT_TEMPLATE.format(
             kt_name=kt_name or "(none)",
@@ -122,6 +125,7 @@ async def analyze_source(
         )
 
         from cygnus.runtime.utils.text import parse_json_loose
+
         result = parse_json_loose(raw)
         logger.debug(f"WikiAnalyzer: analysis complete for '{source_title}'")
         return result
@@ -151,13 +155,17 @@ def format_analysis_section(analysis: Optional[dict]) -> str:
     if entities:
         lines.append("\n**Named entities:**")
         for e in entities[:10]:
-            lines.append(f"- {e.get('name', '')} ({e.get('type', '')}) — {e.get('significance', '')}")
+            lines.append(
+                f"- {e.get('name', '')} ({e.get('type', '')}) — {e.get('significance', '')}"
+            )
 
     concepts = analysis.get("key_concepts", [])
     if concepts:
         lines.append("\n**Key concepts to cover:**")
         for c in concepts[:10]:
-            lines.append(f"- `{c.get('suggested_slug', '')}` — {c.get('name', '')}: {c.get('description', '')}")
+            lines.append(
+                f"- `{c.get('suggested_slug', '')}` — {c.get('name', '')}: {c.get('description', '')}"
+            )
 
     to_update = analysis.get("existing_pages_to_update", [])
     if to_update:
@@ -169,8 +177,9 @@ def format_analysis_section(analysis: Optional[dict]) -> str:
     if to_create:
         lines.append("\n**Suggested new pages:**")
         for p in to_create:
-            lines.append(f"- `{p.get('suggested_slug', '')}` ({p.get('page_type', '')}) — {p.get('title', '')}")
-
+            lines.append(
+                f"- `{p.get('suggested_slug', '')}` ({p.get('page_type', '')}) — {p.get('title', '')}"
+            )
 
     notes = analysis.get("compilation_notes", "")
     if notes:

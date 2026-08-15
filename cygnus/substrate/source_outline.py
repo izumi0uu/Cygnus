@@ -68,7 +68,11 @@ def slice_pages_by_range(
         if idx < 0 or idx >= total:
             continue
         start = page_offsets[idx]
-        end = page_offsets[idx + 1] - len(PAGE_JOIN_SEPARATOR) if idx + 1 < total else len(full_text)
+        end = (
+            page_offsets[idx + 1] - len(PAGE_JOIN_SEPARATOR)
+            if idx + 1 < total
+            else len(full_text)
+        )
         out.append({"page": pn, "content": full_text[start:end]})
     return out
 
@@ -126,12 +130,14 @@ def build_outline(pages: list[dict]) -> list[dict]:
             hashes, title = match.group(1), match.group(2).strip()
             if not title:
                 continue
-            flat.append({
-                "title": title,
-                "level": len(hashes),
-                "page": page_num,
-                "char_start": cursor + match.start(),
-            })
+            flat.append(
+                {
+                    "title": title,
+                    "level": len(hashes),
+                    "page": page_num,
+                    "char_start": cursor + match.start(),
+                }
+            )
         cursor += len(content)
         if idx < len(pages) - 1:
             cursor += len(PAGE_JOIN_SEPARATOR)
@@ -179,13 +185,15 @@ def flatten_outline(nodes: list[dict]) -> list[dict]:
 
     def _walk(items: list[dict]):
         for n in items:
-            out.append({
-                "title": n["title"],
-                "level": n["level"],
-                "page": n.get("page"),
-                "char_start": n.get("char_start"),
-                "char_end": n.get("char_end"),
-            })
+            out.append(
+                {
+                    "title": n["title"],
+                    "level": n["level"],
+                    "page": n.get("page"),
+                    "char_start": n.get("char_start"),
+                    "char_end": n.get("char_end"),
+                }
+            )
             if n.get("children"):
                 _walk(n["children"])
 

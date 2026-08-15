@@ -14,6 +14,7 @@ class ProgressTracker:
     async def update(self, progress: int, message: str):
         from cygnus.runtime.database import async_session_factory
         from cygnus.runtime.database.models import Source
+
         async with async_session_factory() as session:
             source = await session.get(Source, self.source_id)
             if source:

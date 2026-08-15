@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from typing import cast
 
 from cygnus.domain import AudienceFilter, Visibility
 from cygnus.domain.objects import KnowledgeObjectType
@@ -64,12 +65,14 @@ class ReviewServiceTests(unittest.TestCase):
         self.assertEqual(payload["risk_id"], "source_blindness:cp-risk-1")
         self.assertEqual(payload["owner_state"], "unassigned")
         self.assertIsNone(payload["queue_owner"])
-        self.assertIn("assign_owner", payload["recommended_actions"])
-        self.assertIn("stale_evidence", payload["why_now"]["trigger_signals"])
-        self.assertIn("request_more_evidence", payload["recommended_actions"])
-        self.assertIn("refresh_sources", payload["recommended_actions"])
-        self.assertIn("mark_urgent", payload["recommended_actions"])
-        self.assertIn("source coverage is degraded", payload["why_now"]["summary"])
+        recommended_actions = cast(list[str], payload["recommended_actions"])
+        why_now = cast(dict[str, object], payload["why_now"])
+        self.assertIn("assign_owner", recommended_actions)
+        self.assertIn("stale_evidence", cast(list[str], why_now["trigger_signals"]))
+        self.assertIn("request_more_evidence", recommended_actions)
+        self.assertIn("refresh_sources", recommended_actions)
+        self.assertIn("mark_urgent", recommended_actions)
+        self.assertIn("source coverage is degraded", cast(str, why_now["summary"]))
 
     def test_consumption_feedback_review_items_keep_suspected_language_and_conservative_actions(
         self,
@@ -213,12 +216,16 @@ class ReviewServiceTests(unittest.TestCase):
             bundles=bundles,
         )
 
-        self.assertEqual(payload["priority_items"][0]["object_ref"], "cp-high")
-        self.assertEqual(payload["summary_counts"]["drift"], 1)
-        self.assertEqual(payload["summary_counts"]["ticket_pressure"], 1)
+        priority_items = cast(list[dict[str, object]], payload["priority_items"])
+        summary_counts = cast(dict[str, int], payload["summary_counts"])
+        self.assertEqual(priority_items[0]["object_ref"], "cp-high")
+        self.assertEqual(summary_counts["drift"], 1)
+        self.assertEqual(summary_counts["ticket_pressure"], 1)
         summaries_by_ref = {
-            item["object_ref"]: item["why_now"]["summary"]
-            for item in payload["priority_items"]
+            cast(str, item["object_ref"]): cast(
+                str, cast(dict[str, object], item["why_now"])["summary"]
+            )
+            for item in priority_items
         }
         self.assertIn(
             "published guidance is drifting away from current support reality",

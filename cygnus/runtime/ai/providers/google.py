@@ -9,9 +9,12 @@ Supports:
 
 import asyncio
 import uuid
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from google.genai import Client
 
 from cygnus.substrate.agent_protocol import (
     AssistantTurn,
@@ -24,6 +27,7 @@ from cygnus.runtime.ai.providers.base import (
     LLMProvider,
     ProviderConfig,
     VisionProvider,
+    observe_provider_call,
 )
 
 
@@ -32,12 +36,13 @@ class GoogleEmbedding(EmbeddingProvider):
 
     def __init__(self, config: ProviderConfig):
         super().__init__(config)
-        self._client = None
+        self._client: Client | None = None
 
     @property
-    def client(self):
+    def client(self) -> "Client":
         if self._client is None:
             from google import genai
+
             self._client = genai.Client(api_key=self.config.api_key)
         return self._client
 
@@ -45,14 +50,26 @@ class GoogleEmbedding(EmbeddingProvider):
         from google.genai import types
 
         formatted = self._format_for_task(text)
-        result = self.client.models.embed_content(
+        with observe_provider_call(
+            provider="google",
             model=self.config.model_id,
-            contents=formatted,
-            config=types.EmbedContentConfig(
-                output_dimensionality=self.dimensions,
-            ),
-        )
-        return list(result.embeddings[0].values)  # type: ignore[index,union-attr]
+            operation="embed",
+        ) as observation:
+            result = self.client.models.embed_content(
+                model=self.config.model_id,
+                contents=formatted,
+                config=types.EmbedContentConfig(
+                    output_dimensionality=self.dimensions,
+                ),
+            )
+            observation.success(result)
+        embeddings = result.embeddings
+        if not embeddings:
+            raise RuntimeError("Gemini embed_content returned no embeddings")
+        values = embeddings[0].values
+        if values is None:
+            raise RuntimeError("Gemini embed_content returned no embedding values")
+        return list(values)
 
     async def embed_batch(
         self, texts: list[str], concurrency: int = 5
@@ -116,12 +133,13 @@ class GoogleLLM(LLMProvider):
 
     def __init__(self, config: ProviderConfig):
         super().__init__(config)
-        self._client = None
+        self._client: Client | None = None
 
     @property
-    def client(self):
+    def client(self) -> "Client":
         if self._client is None:
             from google import genai
+
             self._client = genai.Client(api_key=self.config.api_key)
         return self._client
 
@@ -134,15 +152,21 @@ class GoogleLLM(LLMProvider):
     ) -> str:
         from google.genai import types
 
-        response = self.client.models.generate_content(
+        with observe_provider_call(
+            provider="google",
             model=self.config.model_id,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system,
-                max_output_tokens=max_tokens,
-                temperature=temperature,
-            ),
-        )
+            operation="generate",
+        ) as observation:
+            response = self.client.models.generate_content(
+                model=self.config.model_id,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system,
+                    max_output_tokens=max_tokens,
+                    temperature=temperature,
+                ),
+            )
+            observation.success(response)
         return response.text or ""
 
     async def generate_with_tools(
@@ -162,23 +186,31 @@ class GoogleLLM(LLMProvider):
             system_instruction=system,
             max_output_tokens=max_tokens,
             temperature=temperature,
-            tools=gemini_tools,  # type: ignore[arg-type]
+            tools=gemini_tools,
             tool_config=gtypes.ToolConfig(
-                function_calling_config=gtypes.FunctionCallingConfig(mode="AUTO")  # type: ignore[arg-type]
+                function_calling_config=gtypes.FunctionCallingConfig(
+                    mode=gtypes.FunctionCallingConfigMode.AUTO
+                )
             ),
         )
 
-        response = await self.client.aio.models.generate_content(
+        with observe_provider_call(
+            provider="google",
             model=self.config.model_id,
-            contents=contents,
-            config=config,
-        )
+            operation="generate_tools",
+        ) as observation:
+            response = await self.client.aio.models.generate_content(
+                model=self.config.model_id,
+                contents=contents,
+                config=config,
+            )
+            observation.success(response)
 
         text_parts: list[str] = []
         tool_calls: list[ToolCall] = []
 
         if response.candidates:
-            for part in (response.candidates[0].content.parts or []):  # type: ignore[union-attr]
+            for part in response.candidates[0].content.parts or []:  # type: ignore[union-attr]
                 if hasattr(part, "text") and part.text:
                     text_parts.append(part.text)
                 elif hasattr(part, "function_call") and part.function_call:
@@ -186,7 +218,9 @@ class GoogleLLM(LLMProvider):
                     args = dict(fc.args) if fc.args else {}
                     # Gemini doesn't assign IDs — generate a stable one
                     tc_id = f"fc_{fc.name}_{uuid.uuid4().hex[:8]}"
-                    tool_calls.append(ToolCall(id=tc_id, name=fc.name or "", arguments=args))
+                    tool_calls.append(
+                        ToolCall(id=tc_id, name=fc.name or "", arguments=args)
+                    )
 
         finish_reason = "tool_use" if tool_calls else "end_turn"
         if response.candidates:
@@ -200,7 +234,7 @@ class GoogleLLM(LLMProvider):
 
         return AssistantTurn(
             text="\n".join(text_parts) or None,
-            tool_calls=tool_calls,
+            tool_calls=tuple(tool_calls),
             finish_reason=finish_reason,
             raw_provider_content=raw_content,
         )
@@ -218,12 +252,13 @@ class GoogleVision(VisionProvider):
 
     def __init__(self, config: ProviderConfig):
         super().__init__(config)
-        self._client = None
+        self._client: Client | None = None
 
     @property
-    def client(self):
+    def client(self) -> "Client":
         if self._client is None:
             from google import genai
+
             self._client = genai.Client(api_key=self.config.api_key)
         return self._client
 
@@ -245,16 +280,22 @@ class GoogleVision(VisionProvider):
         # Retry logic for transient network errors
         for attempt in range(3):
             try:
-                response = await self.client.aio.models.generate_content(
+                with observe_provider_call(
+                    provider="google",
                     model=self.config.model_id,
-                    contents=[
-                        types.Part.from_bytes(data=image_data, mime_type=mime_type),
-                        prompt,
-                    ],
-                    config=types.GenerateContentConfig(
-                        temperature=0.2,
-                    ),
-                )
+                    operation="vision",
+                ) as observation:
+                    response = await self.client.aio.models.generate_content(
+                        model=self.config.model_id,
+                        contents=[
+                            types.Part.from_bytes(data=image_data, mime_type=mime_type),
+                            prompt,
+                        ],
+                        config=types.GenerateContentConfig(
+                            temperature=0.2,
+                        ),
+                    )
+                    observation.success(response)
                 return response.text.strip() if response.text else ""
             except Exception as e:
                 logger.warning(f"Google Vision attempt {attempt + 1} failed: {e}")

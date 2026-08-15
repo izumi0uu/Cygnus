@@ -23,6 +23,9 @@ def upgrade() -> None:
     # Local/dev historically received this table from Base.metadata.create_all.
     # Production must receive the same schema from Alembic. Preserve the
     # already-created local table while making fresh managed upgrades complete.
+    # In the current chain the table is always owned by the pre-governance
+    # baseline (20260627_00), so this guard returns early and this revision
+    # never creates it.
     if sa.inspect(op.get_bind()).has_table("notifications"):
         return
 
@@ -76,5 +79,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    if sa.inspect(op.get_bind()).has_table("notifications"):
-        op.drop_table("notifications")
+    # `notifications` is owned by the pre-governance baseline (20260627_00),
+    # not by this revision: its upgrade guard early-returns whenever the table
+    # exists, which is always true on the managed chain. Dropping it here would
+    # destroy a baseline-owned table and break a head -> baseline downgrade
+    # round-trip. The baseline downgrade removes the table.
+    return

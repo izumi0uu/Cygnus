@@ -60,7 +60,6 @@ def run_git(repo: Path, *args: str) -> str:
     return subprocess.check_output(["git", "-C", str(repo), *args], text=True).strip()
 
 
-
 def run_git_quiet(repo: Path, *args: str) -> None:
     subprocess.check_call(
         ["git", "-C", str(repo), *args],
@@ -69,10 +68,8 @@ def run_git_quiet(repo: Path, *args: str) -> None:
     )
 
 
-
 def run_git_bytes(repo: Path, *args: str) -> bytes:
     return subprocess.check_output(["git", "-C", str(repo), *args])
-
 
 
 def collect_ahead_commits(repo: Path, base_ref: str) -> list[dict[str, str]]:
@@ -86,10 +83,8 @@ def collect_ahead_commits(repo: Path, base_ref: str) -> list[dict[str, str]]:
     return commits
 
 
-
 def ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
-
 
 
 def collect_status_lines(repo: Path) -> list[str]:
@@ -100,22 +95,20 @@ def collect_status_lines(repo: Path) -> list[str]:
     return [line for line in status.splitlines() if line]
 
 
-
 def collect_untracked_files(status_lines: list[str]) -> list[str]:
     return [line[3:] for line in status_lines if line.startswith("?? ")]
-
 
 
 def _write_patch_file(repo: Path, destination: Path, *git_args: str) -> None:
     destination.write_bytes(run_git_bytes(repo, *git_args))
 
 
-
-def _write_untracked_archive(repo: Path, destination: Path, untracked_files: list[str]) -> None:
+def _write_untracked_archive(
+    repo: Path, destination: Path, untracked_files: list[str]
+) -> None:
     with tarfile.open(destination, "w:gz") as archive:
         for relative_path in untracked_files:
             archive.add(repo / relative_path, arcname=relative_path)
-
 
 
 def create_preservation_artifacts(
@@ -170,14 +163,27 @@ def create_preservation_artifacts(
 
     delta_bundle_path = output_root / "arkon-ahead.bundle"
     full_bundle_path = output_root / "arkon-full.bundle"
-    _write_patch_file(repo, staged_patch_path, "diff", "--cached", "--binary", "--no-ext-diff")
+    _write_patch_file(
+        repo, staged_patch_path, "diff", "--cached", "--binary", "--no-ext-diff"
+    )
     _write_patch_file(repo, worktree_patch_path, "diff", "--binary", "--no-ext-diff")
     _write_untracked_archive(repo, untracked_archive_path, untracked_files)
 
     if ahead_commits:
-        run_git_quiet(repo, "bundle", "create", str(delta_bundle_path), "HEAD", f"^{base_commit}")
+        run_git_quiet(
+            repo, "bundle", "create", str(delta_bundle_path), "HEAD", f"^{base_commit}"
+        )
         subprocess.check_call(
-            ["git", "-C", str(repo), "format-patch", "--quiet", "-o", str(patches_dir), f"{base_commit}..{head_commit}"]
+            [
+                "git",
+                "-C",
+                str(repo),
+                "format-patch",
+                "--quiet",
+                "-o",
+                str(patches_dir),
+                f"{base_commit}..{head_commit}",
+            ]
         )
     else:
         delta_bundle_path.write_text("", encoding="utf-8")
@@ -203,22 +209,40 @@ def create_preservation_artifacts(
     )
 
 
-
 def _expected_subjects(artifact: PreservationArtifact) -> list[str]:
     return [item["subject"] for item in artifact.ahead_commits]
 
 
-
-def verify_delta_bundle(repo: Path, artifact: PreservationArtifact, *, cleanup: bool = True) -> RestoreVerification | None:
+def verify_delta_bundle(
+    repo: Path, artifact: PreservationArtifact, *, cleanup: bool = True
+) -> RestoreVerification | None:
     if not artifact.ahead_commits:
         return None
-    restore_root = Path(tempfile.mkdtemp(prefix="cygnus-arkon-restore-ahead-", dir="/private/tmp"))
+    restore_root = Path(
+        tempfile.mkdtemp(prefix="cygnus-arkon-restore-ahead-", dir="/private/tmp")
+    )
     restore_repo = restore_root / "repo"
     subprocess.check_call(["git", "clone", "--quiet", str(repo), str(restore_repo)])
     run_git_quiet(restore_repo, "checkout", artifact.base_commit)
-    subprocess.check_call(["git", "-C", str(restore_repo), "pull", "--quiet", artifact.delta_bundle_path, "HEAD"])
+    subprocess.check_call(
+        [
+            "git",
+            "-C",
+            str(restore_repo),
+            "pull",
+            "--quiet",
+            artifact.delta_bundle_path,
+            "HEAD",
+        ]
+    )
     restored_head = run_git(restore_repo, "rev-parse", "HEAD")
-    subjects_raw = run_git(restore_repo, "log", "--reverse", "--format=%s", f"{artifact.base_commit}..{restored_head}")
+    subjects_raw = run_git(
+        restore_repo,
+        "log",
+        "--reverse",
+        "--format=%s",
+        f"{artifact.base_commit}..{restored_head}",
+    )
     subjects = [line for line in subjects_raw.splitlines() if line]
     expected_subjects = _expected_subjects(artifact)
     result = RestoreVerification(
@@ -236,17 +260,35 @@ def verify_delta_bundle(repo: Path, artifact: PreservationArtifact, *, cleanup: 
     return result
 
 
-
-def verify_patch_series(repo: Path, artifact: PreservationArtifact, *, cleanup: bool = True) -> RestoreVerification | None:
+def verify_patch_series(
+    repo: Path, artifact: PreservationArtifact, *, cleanup: bool = True
+) -> RestoreVerification | None:
     patch_files = sorted(Path(artifact.patches_dir).glob("*.patch"))
     if not patch_files:
         return None
-    restore_root = Path(tempfile.mkdtemp(prefix="cygnus-arkon-restore-patch-", dir="/private/tmp"))
+    restore_root = Path(
+        tempfile.mkdtemp(prefix="cygnus-arkon-restore-patch-", dir="/private/tmp")
+    )
     subprocess.check_call(["git", "clone", "--quiet", str(repo), str(restore_root)])
     run_git_quiet(restore_root, "checkout", artifact.base_commit)
-    subprocess.check_call(["git", "-C", str(restore_root), "am", "--quiet", *[str(p) for p in patch_files]])
+    subprocess.check_call(
+        [
+            "git",
+            "-C",
+            str(restore_root),
+            "am",
+            "--quiet",
+            *[str(p) for p in patch_files],
+        ]
+    )
     restored_head = run_git(restore_root, "rev-parse", "HEAD")
-    subjects_raw = run_git(restore_root, "log", "--reverse", "--format=%s", f"{artifact.base_commit}..{restored_head}")
+    subjects_raw = run_git(
+        restore_root,
+        "log",
+        "--reverse",
+        "--format=%s",
+        f"{artifact.base_commit}..{restored_head}",
+    )
     subjects = [line for line in subjects_raw.splitlines() if line]
     expected_subjects = _expected_subjects(artifact)
     result = RestoreVerification(
@@ -264,23 +306,30 @@ def verify_patch_series(repo: Path, artifact: PreservationArtifact, *, cleanup: 
     return result
 
 
-
-def verify_worktree_state(repo: Path, artifact: PreservationArtifact, *, cleanup: bool = True) -> WorktreeVerification | None:
+def verify_worktree_state(
+    repo: Path, artifact: PreservationArtifact, *, cleanup: bool = True
+) -> WorktreeVerification | None:
     if not artifact.status_lines:
         return None
 
-    restore_root = Path(tempfile.mkdtemp(prefix="cygnus-arkon-restore-worktree-", dir="/private/tmp"))
+    restore_root = Path(
+        tempfile.mkdtemp(prefix="cygnus-arkon-restore-worktree-", dir="/private/tmp")
+    )
     restore_repo = restore_root / "repo"
     subprocess.check_call(["git", "clone", "--quiet", str(repo), str(restore_repo)])
     run_git_quiet(restore_repo, "checkout", artifact.head_commit)
 
     staged_patch = Path(artifact.staged_patch_path)
     if staged_patch.exists() and staged_patch.stat().st_size > 0:
-        subprocess.check_call(["git", "-C", str(restore_repo), "apply", "--index", str(staged_patch)])
+        subprocess.check_call(
+            ["git", "-C", str(restore_repo), "apply", "--index", str(staged_patch)]
+        )
 
     worktree_patch = Path(artifact.worktree_patch_path)
     if worktree_patch.exists() and worktree_patch.stat().st_size > 0:
-        subprocess.check_call(["git", "-C", str(restore_repo), "apply", str(worktree_patch)])
+        subprocess.check_call(
+            ["git", "-C", str(restore_repo), "apply", str(worktree_patch)]
+        )
 
     untracked_archive = Path(artifact.untracked_archive_path)
     if untracked_archive.exists() and untracked_archive.stat().st_size > 0:
@@ -299,7 +348,6 @@ def verify_worktree_state(repo: Path, artifact: PreservationArtifact, *, cleanup
     if cleanup:
         shutil.rmtree(restore_root)
     return result
-
 
 
 def build_report(
@@ -329,14 +377,30 @@ def build_report(
     return report
 
 
-
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Preserve and verify local history for an external checkout before deletion.")
+    parser = argparse.ArgumentParser(
+        description="Preserve and verify local history for an external checkout before deletion."
+    )
     parser.add_argument("repo", help="Path to the external git checkout to preserve.")
-    parser.add_argument("--output-dir", help="Exact output directory. Defaults to a timestamped /private/tmp location.")
-    parser.add_argument("--base-ref", default=DEFAULT_BASE_REF, help="Base ref used to define ahead commits. Default: origin/main")
-    parser.add_argument("--verify-restore", action="store_true", help="Verify recovery via delta bundle, patch series replay, and dirty worktree recreation.")
-    parser.add_argument("--keep-restore-dirs", action="store_true", help="Keep temporary restore directories created during verification.")
+    parser.add_argument(
+        "--output-dir",
+        help="Exact output directory. Defaults to a timestamped /private/tmp location.",
+    )
+    parser.add_argument(
+        "--base-ref",
+        default=DEFAULT_BASE_REF,
+        help="Base ref used to define ahead commits. Default: origin/main",
+    )
+    parser.add_argument(
+        "--verify-restore",
+        action="store_true",
+        help="Verify recovery via delta bundle, patch series replay, and dirty worktree recreation.",
+    )
+    parser.add_argument(
+        "--keep-restore-dirs",
+        action="store_true",
+        help="Keep temporary restore directories created during verification.",
+    )
     parser.add_argument("--json", action="store_true", help="Emit JSON report.")
     args = parser.parse_args()
 
@@ -347,7 +411,10 @@ def main() -> int:
     if args.output_dir:
         output_root = Path(args.output_dir).expanduser().resolve()
     else:
-        output_root = Path("/private/tmp") / f"cygnus-arkon-preserve-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        output_root = (
+            Path("/private/tmp")
+            / f"cygnus-arkon-preserve-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        )
 
     report = build_report(
         repo,

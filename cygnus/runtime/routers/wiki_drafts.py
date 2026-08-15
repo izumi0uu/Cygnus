@@ -42,6 +42,7 @@ router = APIRouter()
 # Pydantic models
 # ---------------------------------------------------------------------------
 
+
 class ProposeDraftRequest(BaseModel):
     content_md: str
     note: Optional[str] = None
@@ -95,7 +96,9 @@ class ProposeCreateRequest(BaseModel):
     @classmethod
     def page_type_known(cls, v: str) -> str:
         if v not in wiki_service.PAGE_TYPES:
-            raise ValueError(f"page_type must be one of {sorted(wiki_service.PAGE_TYPES)}")
+            raise ValueError(
+                f"page_type must be one of {sorted(wiki_service.PAGE_TYPES)}"
+            )
         return v
 
     @field_validator("scope_type")
@@ -186,6 +189,7 @@ class DraftRoundResponse(BaseModel):
 
 class AuthorStats(BaseModel):
     """Lightweight author reputation surfaced alongside each draft."""
+
     approved: int = 0
     rejected: int = 0
     needs_revision: int = 0
@@ -195,6 +199,7 @@ class AuthorStats(BaseModel):
 
 class SuggestedReviewer(BaseModel):
     """Reviewer the system would route this draft to based on past activity."""
+
     id: uuid.UUID
     name: Optional[str] = None
     email: Optional[str] = None
@@ -238,6 +243,7 @@ class DraftResponse(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 async def _can_propose(db: AsyncSession, user: Employee, page: WikiPage) -> bool:
     """Permission to propose an edit on `page`.
 
@@ -280,7 +286,9 @@ async def _can_review_scope(
 
 
 async def _can_review_draft(
-    db: AsyncSession, user: Employee, draft: WikiPageDraft,
+    db: AsyncSession,
+    user: Employee,
+    draft: WikiPageDraft,
 ) -> bool:
     """Reviewer check that handles both edit and create drafts uniformly."""
     if draft.draft_kind == "create":
@@ -288,7 +296,11 @@ async def _can_review_draft(
         scope_type = sm.get("scope_type") or "global"
         scope_id_raw = sm.get("scope_id")
         try:
-            scope_id = uuid.UUID(scope_id_raw) if isinstance(scope_id_raw, str) else scope_id_raw
+            scope_id = (
+                uuid.UUID(scope_id_raw)
+                if isinstance(scope_id_raw, str)
+                else scope_id_raw
+            )
         except (ValueError, TypeError):
             scope_id = None
         if scope_id is not None and not isinstance(scope_id, uuid.UUID):
@@ -322,7 +334,9 @@ def _build_reviewable_page_filter(user: Employee):
 
 
 def _expire_after_failed_approve(
-    db: AsyncSession, draft: WikiPageDraft, page: Optional[WikiPage],
+    db: AsyncSession,
+    draft: WikiPageDraft,
+    page: Optional[WikiPage],
 ) -> None:
     """Expire ORM attributes touched by a partial approve so a savepoint
     rollback doesn't leave stale (e.g. bumped version) values on the
@@ -373,7 +387,11 @@ async def _suggested_reviewers(
         scope_type = sm.get("scope_type") or "global"
         scope_id_raw = sm.get("scope_id")
         try:
-            scope_id = uuid.UUID(scope_id_raw) if isinstance(scope_id_raw, str) else scope_id_raw
+            scope_id = (
+                uuid.UUID(scope_id_raw)
+                if isinstance(scope_id_raw, str)
+                else scope_id_raw
+            )
         except (ValueError, TypeError):
             scope_id = None
     else:
@@ -383,9 +401,10 @@ async def _suggested_reviewers(
 
     # Build the OR-filter that defines "similar pages".
     from sqlalchemy import or_
+
     clauses = []
     if kt_slugs:
-        clauses.append(WikiPage.knowledge_type_slugs.overlap(kt_slugs))  # type: ignore[arg-type]
+        clauses.append(WikiPage.knowledge_type_slugs.overlap(kt_slugs))
     clauses.append(
         and_(WikiPage.scope_type == scope_type, WikiPage.scope_id == scope_id)
         if scope_id is not None
@@ -394,22 +413,29 @@ async def _suggested_reviewers(
     similar_pages_stmt = select(WikiPage.id).where(or_(*clauses))
 
     # Rank by approval count across those pages.
-    rows = (await db.execute(
-        select(
-            WikiPageRevision.changed_by_id,
-            func.count(WikiPageRevision.id).label("cnt"),
+    rows = (
+        await db.execute(
+            select(
+                WikiPageRevision.changed_by_id,
+                func.count(WikiPageRevision.id).label("cnt"),
+            )
+            .where(
+                WikiPageRevision.changed_by_id.is_not(None),
+                WikiPageRevision.change_type.in_(
+                    [
+                        "editor_edit",
+                        "draft_approved",
+                        "draft_approved_create",
+                        "rollback",
+                    ]
+                ),
+                WikiPageRevision.page_id.in_(similar_pages_stmt),
+            )
+            .group_by(WikiPageRevision.changed_by_id)
+            .order_by(func.count(WikiPageRevision.id).desc())
+            .limit(limit + 2)  # +2 so we can drop author + self if needed
         )
-        .where(
-            WikiPageRevision.changed_by_id.is_not(None),
-            WikiPageRevision.change_type.in_(
-                ["editor_edit", "draft_approved", "draft_approved_create", "rollback"]
-            ),
-            WikiPageRevision.page_id.in_(similar_pages_stmt),
-        )
-        .group_by(WikiPageRevision.changed_by_id)
-        .order_by(func.count(WikiPageRevision.id).desc())
-        .limit(limit + 2)  # +2 so we can drop author + self if needed
-    )).all()
+    ).all()
 
     out: list[SuggestedReviewer] = []
     for row in rows:
@@ -419,15 +445,22 @@ async def _suggested_reviewers(
         emp = await db.get(Employee, reviewer_id)
         if not emp:
             continue
-        out.append(SuggestedReviewer(
-            id=emp.id, name=emp.name, email=emp.email, score=count,
-        ))
+        out.append(
+            SuggestedReviewer(
+                id=emp.id,
+                name=emp.name,
+                email=emp.email,
+                score=count,
+            )
+        )
         if len(out) >= limit:
             break
     return out
 
 
-async def _author_stats(db: AsyncSession, author_id: Optional[uuid.UUID]) -> Optional[AuthorStats]:
+async def _author_stats(
+    db: AsyncSession, author_id: Optional[uuid.UUID]
+) -> Optional[AuthorStats]:
     """Count this author's historical drafts grouped by terminal status.
 
     Returns None for anonymous / unknown authors. Cheap query — one
@@ -435,11 +468,13 @@ async def _author_stats(db: AsyncSession, author_id: Optional[uuid.UUID]) -> Opt
     """
     if not author_id:
         return None
-    rows = (await db.execute(
-        select(WikiPageDraft.status, func.count(WikiPageDraft.id))
-        .where(WikiPageDraft.author_id == author_id)
-        .group_by(WikiPageDraft.status)
-    )).all()
+    rows = (
+        await db.execute(
+            select(WikiPageDraft.status, func.count(WikiPageDraft.id))
+            .where(WikiPageDraft.author_id == author_id)
+            .group_by(WikiPageDraft.status)
+        )
+    ).all()
     counts = {row[0]: int(row[1]) for row in rows}
     approved = counts.get("approved", 0)
     rejected = counts.get("rejected", 0)
@@ -458,7 +493,9 @@ async def _author_stats(db: AsyncSession, author_id: Optional[uuid.UUID]) -> Opt
 async def _draft_response(db: AsyncSession, draft: WikiPageDraft) -> DraftResponse:
     page = await db.get(WikiPage, draft.page_id) if draft.page_id else None
     author = await db.get(Employee, draft.author_id) if draft.author_id else None
-    reviewer = await db.get(Employee, draft.reviewed_by_id) if draft.reviewed_by_id else None
+    reviewer = (
+        await db.get(Employee, draft.reviewed_by_id) if draft.reviewed_by_id else None
+    )
     current_version = page.version if page else 1
     has_conflict = bool(
         draft.status == "pending"
@@ -490,6 +527,7 @@ async def _draft_response(db: AsyncSession, draft: WikiPageDraft) -> DraftRespon
     if page_scope_id is not None:
         if page_scope_type == "department":
             from cygnus.runtime.database.models import Department
+
             d = await db.get(Department, page_scope_id)
             page_scope_name = d.name if d else None
     return DraftResponse(
@@ -534,7 +572,10 @@ async def _draft_response(db: AsyncSession, draft: WikiPageDraft) -> DraftRespon
 # Endpoints
 # ---------------------------------------------------------------------------
 
-@router.post("/wiki/pages/{slug:path}/drafts", response_model=DraftResponse, status_code=201)
+
+@router.post(
+    "/wiki/pages/{slug:path}/drafts", response_model=DraftResponse, status_code=201
+)
 async def propose_draft(
     slug: str,
     body: ProposeDraftRequest,
@@ -547,7 +588,10 @@ async def propose_draft(
 
     if body.scope_type is not None:
         page = await wiki_service.get_page_by_slug(
-            db, slug, scope_type=body.scope_type, scope_id=body.scope_id,
+            db,
+            slug,
+            scope_type=body.scope_type,
+            scope_id=body.scope_id,
         )
     else:
         page = await wiki_service.get_page_by_slug_any_scope(db, slug)
@@ -555,14 +599,22 @@ async def propose_draft(
         raise HTTPException(404, f"Wiki page not found: {slug}")
 
     if not await _can_propose(db, user, page):
-        raise HTTPException(403, "Insufficient permission to propose a draft for this page")
+        raise HTTPException(
+            403, "Insufficient permission to propose a draft for this page"
+        )
 
     # If client passed base_version, sanity-check it matches a real prior
     # version (≤ current). If omitted, default to the page's current version
     # so future approvals can detect drift.
     base_version = body.base_version if body.base_version is not None else page.version
-    if base_version is not None and page.version is not None and base_version > page.version:
-        raise HTTPException(400, f"base_version {base_version} is ahead of current page v{page.version}")
+    if (
+        base_version is not None
+        and page.version is not None
+        and base_version > page.version
+    ):
+        raise HTTPException(
+            400, f"base_version {base_version} is ahead of current page v{page.version}"
+        )
 
     draft = await contribution_service.create_wiki_draft(
         db,
@@ -579,7 +631,9 @@ async def propose_draft(
     draft.page = page
     if hasattr(body, "branch_id") and body.branch_id:
         draft.branch_id = body.branch_id
-    await log_audit(db, user, "create", "wiki_draft", str(draft.id), reason=f"draft for: {slug}")
+    await log_audit(
+        db, user, "create", "wiki_draft", str(draft.id), reason=f"draft for: {slug}"
+    )
     await contribution_service.notify_submitted(db, wiki_draft_adapter, draft, user)
     await db.commit()
     await db.refresh(draft)
@@ -588,8 +642,14 @@ async def propose_draft(
 
 @router.get("/wiki/drafts", response_model=list[DraftResponse])
 async def list_all_drafts(
-    status: Optional[str] = Query("pending", description="Filter by status: pending | approved | rejected | needs_revision | withdrawn"),
-    mine: bool = Query(False, description="When true, list drafts authored by the current user instead of drafts to review"),
+    status: Optional[str] = Query(
+        "pending",
+        description="Filter by status: pending | approved | rejected | needs_revision | withdrawn",
+    ),
+    mine: bool = Query(
+        False,
+        description="When true, list drafts authored by the current user instead of drafts to review",
+    ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -626,8 +686,11 @@ async def list_all_drafts(
     else:
         # Exclude drafts that belong to unsubmitted branches
         from cygnus.runtime.database.models import WikiBranch
+
         stmt = stmt.outerjoin(WikiBranch, WikiBranch.id == WikiPageDraft.branch_id)
-        stmt = stmt.where(or_(WikiPageDraft.branch_id.is_(None), WikiBranch.status == "pending_merge"))
+        stmt = stmt.where(
+            or_(WikiPageDraft.branch_id.is_(None), WikiBranch.status == "pending_merge")
+        )
 
         page_filter = _build_reviewable_page_filter(user)
         if page_filter is False:  # noqa: E712 — never true, kept for symmetry
@@ -656,7 +719,10 @@ async def list_page_drafts(
     sid = uuid.UUID(scope_id) if scope_id else None
     if scope_type:
         page = await wiki_service.get_page_by_slug(
-            db, slug, scope_type=scope_type, scope_id=sid,
+            db,
+            slug,
+            scope_type=scope_type,
+            scope_id=sid,
         )
     else:
         page = await wiki_service.get_page_by_slug_any_scope(db, slug)
@@ -717,7 +783,9 @@ async def approve_draft(
 
     # Authors cannot approve their own drafts (admins exempt).
     if user.role != "admin" and draft.author_id == user.id:
-        raise HTTPException(403, "You cannot approve your own draft. Ask another editor to review it.")
+        raise HTTPException(
+            403, "You cannot approve your own draft. Ask another editor to review it."
+        )
 
     metadata_overrides = None
     if draft.draft_kind == "create":
@@ -730,7 +798,9 @@ async def approve_draft(
 
     try:
         page = await contribution_service.approve_wiki_draft(
-            db, draft, user.id,
+            db,
+            draft,
+            user.id,
             reviewer_note=body.reviewer_note,
             edited_content_md=body.edited_content_md,
             allow_conflict=body.allow_conflict,
@@ -763,7 +833,11 @@ async def approve_draft(
         raise HTTPException(status_code=400, detail=str(e))
     action_label = "created" if draft.draft_kind == "create" else "approved"
     await log_audit(
-        db, user, "update", "wiki_draft", str(draft.id),
+        db,
+        user,
+        "update",
+        "wiki_draft",
+        str(draft.id),
         reason=f"{action_label} draft for: {page.slug}",
     )
     # Keep _index and _log fresh after content lands.
@@ -778,7 +852,11 @@ async def approve_draft(
     )
     draft.page = page
     await contribution_service.notify_approved(
-        db, wiki_draft_adapter, draft, user, version_label=f"v{page.version}",
+        db,
+        wiki_draft_adapter,
+        draft,
+        user,
+        version_label=f"v{page.version}",
     )
     await db.commit()
     await db.refresh(draft)
@@ -811,9 +889,20 @@ async def reject_draft(
         slug_label = (draft.suggested_metadata or {}).get("slug", "(new page)")
 
     await contribution_service.reject_wiki_draft(db, draft, user.id, body.reviewer_note)
-    await log_audit(db, user, "update", "wiki_draft", str(draft.id), reason=f"rejected draft for: {slug_label}")
+    await log_audit(
+        db,
+        user,
+        "update",
+        "wiki_draft",
+        str(draft.id),
+        reason=f"rejected draft for: {slug_label}",
+    )
     await contribution_service.notify_rejected(
-        db, wiki_draft_adapter, draft, user, reason=body.reviewer_note,
+        db,
+        wiki_draft_adapter,
+        draft,
+        user,
+        reason=body.reviewer_note,
     )
     await db.commit()
     await db.refresh(draft)
@@ -823,6 +912,7 @@ async def reject_draft(
 # ---------------------------------------------------------------------------
 # needs_revision flow — request changes, resubmit, withdraw, rounds history
 # ---------------------------------------------------------------------------
+
 
 @router.post("/wiki/drafts/{draft_id}/request-changes", response_model=DraftResponse)
 async def request_changes_on_draft(
@@ -848,7 +938,11 @@ async def request_changes_on_draft(
             draft.page = page
     try:
         await contribution_service.request_changes(
-            db, wiki_draft_adapter, draft, user, body.reviewer_note,
+            db,
+            wiki_draft_adapter,
+            draft,
+            user,
+            body.reviewer_note,
         )
     except InvalidTransition as e:
         raise HTTPException(400, str(e))
@@ -878,7 +972,11 @@ async def resubmit_draft(
 
     try:
         await contribution_service.resubmit_wiki_draft(
-            db, draft, user, body.content_md.strip(), author_note=body.note,
+            db,
+            draft,
+            user,
+            body.content_md.strip(),
+            author_note=body.note,
         )
     except InvalidTransition as e:
         raise HTTPException(400, str(e))
@@ -922,13 +1020,21 @@ async def list_draft_rounds(
     draft = await _load_draft(db, draft_id)
     if user.role != "admin" and draft.author_id != user.id:
         if not await _can_review_draft(db, user, draft):
-            raise HTTPException(403, "Insufficient permission to view this draft's rounds")
+            raise HTTPException(
+                403, "Insufficient permission to view this draft's rounds"
+            )
 
-    rows = (await db.execute(
-        select(WikiDraftRound)
-        .where(WikiDraftRound.draft_id == draft.id)
-        .order_by(WikiDraftRound.round_no.asc())
-    )).scalars().all()
+    rows = (
+        (
+            await db.execute(
+                select(WikiDraftRound)
+                .where(WikiDraftRound.draft_id == draft.id)
+                .order_by(WikiDraftRound.round_no.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
     return [
         DraftRoundResponse(
             id=r.id,
@@ -946,6 +1052,7 @@ async def list_draft_rounds(
 # ---------------------------------------------------------------------------
 # Create-kind drafts — propose a brand new page
 # ---------------------------------------------------------------------------
+
 
 @router.post("/wiki/drafts/create", response_model=DraftResponse, status_code=201)
 async def propose_create_page(
@@ -979,7 +1086,10 @@ async def propose_create_page(
     # Refuse if the slug already exists in the target scope (the contributor
     # should propose an edit on the existing page instead).
     existing = await wiki_service.get_page_by_slug(
-        db, body.slug, scope_type=body.scope_type, scope_id=body.scope_id,
+        db,
+        body.slug,
+        scope_type=body.scope_type,
+        scope_id=body.scope_id,
     )
     if existing is not None:
         raise HTTPException(
@@ -1011,7 +1121,11 @@ async def propose_create_page(
     if hasattr(body, "branch_id") and body.branch_id:
         draft.branch_id = body.branch_id
     await log_audit(
-        db, user, "create", "wiki_draft", str(draft.id),
+        db,
+        user,
+        "create",
+        "wiki_draft",
+        str(draft.id),
         reason=f"propose new page: {body.slug}",
     )
     await contribution_service.notify_submitted(db, wiki_draft_adapter, draft, user)
@@ -1023,6 +1137,7 @@ async def propose_create_page(
 # ---------------------------------------------------------------------------
 # Bulk approve — for the reviewer queue page
 # ---------------------------------------------------------------------------
+
 
 @router.post("/wiki/drafts/bulk-approve", response_model=BulkApproveResponse)
 async def bulk_approve_drafts(
@@ -1048,30 +1163,43 @@ async def bulk_approve_drafts(
     for did in body.draft_ids:
         draft = await db.get(WikiPageDraft, did)
         if not draft:
-            results.append(BulkApproveItemResult(
-                draft_id=did, status="error", message="Draft not found",
-            ))
+            results.append(
+                BulkApproveItemResult(
+                    draft_id=did,
+                    status="error",
+                    message="Draft not found",
+                )
+            )
             errored_count += 1
             continue
         if draft.status != "pending":
-            results.append(BulkApproveItemResult(
-                draft_id=did, status="skipped",
-                message=f"Draft is already {draft.status}",
-            ))
+            results.append(
+                BulkApproveItemResult(
+                    draft_id=did,
+                    status="skipped",
+                    message=f"Draft is already {draft.status}",
+                )
+            )
             skipped_count += 1
             continue
         if not await _can_review_draft(db, user, draft):
-            results.append(BulkApproveItemResult(
-                draft_id=did, status="skipped",
-                message="Insufficient permission",
-            ))
+            results.append(
+                BulkApproveItemResult(
+                    draft_id=did,
+                    status="skipped",
+                    message="Insufficient permission",
+                )
+            )
             skipped_count += 1
             continue
         if user.role != "admin" and draft.author_id == user.id:
-            results.append(BulkApproveItemResult(
-                draft_id=did, status="skipped",
-                message="Cannot approve your own draft",
-            ))
+            results.append(
+                BulkApproveItemResult(
+                    draft_id=did,
+                    status="skipped",
+                    message="Cannot approve your own draft",
+                )
+            )
             skipped_count += 1
             continue
 
@@ -1088,46 +1216,72 @@ async def bulk_approve_drafts(
         try:
             async with db.begin_nested():
                 page = await contribution_service.approve_wiki_draft(
-                    db, draft, user.id,
+                    db,
+                    draft,
+                    user.id,
                     reviewer_note=body.reviewer_note,
                     allow_conflict=body.allow_conflict,
                 )
                 await log_audit(
-                    db, user, "update", "wiki_draft", str(draft.id),
+                    db,
+                    user,
+                    "update",
+                    "wiki_draft",
+                    str(draft.id),
                     reason=f"bulk-approved: {page.slug}",
                 )
                 scope_type = page.scope_type or "global"
                 scope_id = page.scope_id
-                await wiki_service.regenerate_index(db, scope_type=scope_type, scope_id=scope_id)
+                await wiki_service.regenerate_index(
+                    db, scope_type=scope_type, scope_id=scope_id
+                )
                 await wiki_service.append_log(
                     db,
                     f"Bulk-approved draft for: {page.title} ({page.slug}) -> v{page.version} by {user.name or user.email}",
-                    scope_type=scope_type, scope_id=scope_id,
+                    scope_type=scope_type,
+                    scope_id=scope_id,
                 )
                 draft.page = page
                 await contribution_service.notify_approved(
-                    db, wiki_draft_adapter, draft, user,
+                    db,
+                    wiki_draft_adapter,
+                    draft,
+                    user,
                     version_label=f"v{page.version}",
                 )
-        except (contribution_service.DraftConflictError, contribution_service.CreateDraftSlugConflict) as e:
+        except (
+            contribution_service.DraftConflictError,
+            contribution_service.CreateDraftSlugConflict,
+        ) as e:
             _expire_after_failed_approve(db, draft, page)
-            results.append(BulkApproveItemResult(
-                draft_id=did, status="error", message=str(e),
-            ))
+            results.append(
+                BulkApproveItemResult(
+                    draft_id=did,
+                    status="error",
+                    message=str(e),
+                )
+            )
             errored_count += 1
             continue
         except Exception as e:
             _expire_after_failed_approve(db, draft, page)
-            results.append(BulkApproveItemResult(
-                draft_id=did, status="error", message=str(e),
-            ))
+            results.append(
+                BulkApproveItemResult(
+                    draft_id=did,
+                    status="error",
+                    message=str(e),
+                )
+            )
             errored_count += 1
             continue
 
-        results.append(BulkApproveItemResult(
-            draft_id=did, status="approved",
-            page_version=page.version,
-        ))
+        results.append(
+            BulkApproveItemResult(
+                draft_id=did,
+                status="approved",
+                page_version=page.version,
+            )
+        )
         approved_count += 1
 
     await db.commit()

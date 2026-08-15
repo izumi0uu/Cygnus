@@ -62,7 +62,9 @@ class SupportObjectTests(unittest.TestCase):
             destination_team="billing-ops",
             required_context=("account_id", "plan_id"),
             supported_audiences=(
-                AudienceFilter(visibility=Visibility.INTERNAL, product_lines=("billing",)),
+                AudienceFilter(
+                    visibility=Visibility.INTERNAL, product_lines=("billing",)
+                ),
             ),
         )
         flow = TroubleshootingFlow(
@@ -86,7 +88,9 @@ class SupportObjectTests(unittest.TestCase):
             exceptions=("Enterprise annual contracts require manual approval.",),
             authority_source="billing-policy-v3",
             supported_audiences=(
-                AudienceFilter(visibility=Visibility.INTERNAL, product_lines=("billing",)),
+                AudienceFilter(
+                    visibility=Visibility.INTERNAL, product_lines=("billing",)
+                ),
             ),
         )
         issue = KnownIssuePage(

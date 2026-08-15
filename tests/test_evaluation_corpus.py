@@ -209,18 +209,18 @@ class ProductionEvaluationCorpusTests(unittest.TestCase):
         ].expectation.policy
         stale = self.by_id["freshness-conflict-02-stale-only"].expectation.policy
 
-        self.assertIsNotNone(approved)
+        assert approved is not None
         self.assertEqual(approved.draft_status, "approved")
         self.assertTrue(approved.is_admin)
         self.assertEqual(approved.expected_status, "success")
         self.assertIsNone(approved.expected_error)
 
-        self.assertIsNotNone(pending)
+        assert pending is not None
         self.assertEqual(pending.draft_status, "pending")
         self.assertEqual(pending.expected_status, "approval_required")
         self.assertEqual(pending.expected_error, "approval_required")
 
-        self.assertIsNotNone(stale)
+        assert stale is not None
         self.assertEqual(stale.page_version, 5)
         self.assertEqual(stale.expected_version, 4)
         self.assertEqual(stale.expected_status, "conflict")

@@ -1,7 +1,7 @@
 """Add durable governance write and publication ledger.
 
 Revision ID: 20260727_01
-Revises: None
+Revises: 20260627_00
 Create Date: 2026-07-27 14:41:56
 """
 
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision: str = "20260727_01"
-down_revision: str | None = None
+down_revision: str | None = "20260627_00"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

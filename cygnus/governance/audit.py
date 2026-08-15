@@ -89,12 +89,15 @@ _DETAIL_KEYS: dict[str, tuple[str, ...]] = {
         "page_id",
         "page_version",
         "revision_round",
+        "approval_digest",
     ),
     GovernanceEventType.REJECTED.value: ("revision_round",),
     GovernanceEventType.WITHDRAWN.value: ("revision_round",),
     GovernanceEventType.PUBLISHED.value: (
         "publication_id",
         "approval_ref",
+        "approval_digest",
+        "scope_digest",
         "command_id",
         "object_ref",
         "object_version",
@@ -115,6 +118,7 @@ _DETAIL_KEYS: dict[str, tuple[str, ...]] = {
         "page_id",
         "page_version",
         "revision_round",
+        "approval_digest",
         "source",
     ),
 }

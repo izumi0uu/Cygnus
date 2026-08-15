@@ -100,7 +100,11 @@ class WikiDirectCreateRequest(BaseModel):
     @classmethod
     def slug_format(cls, v: str) -> str:
         v = v.strip()
-        if not v or v in (wiki_service.INDEX_SLUG, wiki_service.LOG_SLUG, wiki_service.HOT_SLUG):
+        if not v or v in (
+            wiki_service.INDEX_SLUG,
+            wiki_service.LOG_SLUG,
+            wiki_service.HOT_SLUG,
+        ):
             raise ValueError("slug must be non-empty and not reserved")
         if any(c.isspace() for c in v):
             raise ValueError("slug must not contain whitespace")
@@ -110,7 +114,9 @@ class WikiDirectCreateRequest(BaseModel):
     @classmethod
     def page_type_known(cls, v: str) -> str:
         if v not in wiki_service.PAGE_TYPES:
-            raise ValueError(f"page_type must be one of {sorted(wiki_service.PAGE_TYPES)}")
+            raise ValueError(
+                f"page_type must be one of {sorted(wiki_service.PAGE_TYPES)}"
+            )
         return v
 
     @field_validator("scope_type")
@@ -157,14 +163,16 @@ def _detail(p: WikiPage, backlinks: list[str], outlinks: list[str]) -> WikiPageD
     )
 
 
-
-
 @router.get("/wiki/pages", response_model=list[WikiPageSummary])
 async def list_wiki_pages(
     page_type: Optional[str] = Query(None),
     knowledge_type_slug: Optional[str] = Query(None),
-    scope_type: Optional[str] = Query(None, description="Filter to a specific scope: global, department, or project"),
-    scope_id: Optional[str] = Query(None, description="UUID of the scope (required for department/project)"),
+    scope_type: Optional[str] = Query(
+        None, description="Filter to a specific scope: global, department, or project"
+    ),
+    scope_id: Optional[str] = Query(
+        None, description="UUID of the scope (required for department/project)"
+    ),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -191,8 +199,17 @@ async def list_wiki_pages(
             ).label("scope_name"),
         )
         .select_from(WikiPage)
-        .outerjoin(Department, and_(WikiPage.scope_id == Department.id, WikiPage.scope_type == "department"))
-        .where(WikiPage.slug.notin_([wiki_service.INDEX_SLUG, wiki_service.LOG_SLUG, wiki_service.HOT_SLUG]))
+        .outerjoin(
+            Department,
+            and_(
+                WikiPage.scope_id == Department.id, WikiPage.scope_type == "department"
+            ),
+        )
+        .where(
+            WikiPage.slug.notin_(
+                [wiki_service.INDEX_SLUG, wiki_service.LOG_SLUG, wiki_service.HOT_SLUG]
+            )
+        )
         .order_by(WikiPage.updated_at.desc())
         .limit(limit)
         .offset(offset)
@@ -214,7 +231,7 @@ async def list_wiki_pages(
     if page_type:
         stmt = stmt.where(WikiPage.page_type == page_type)
     if knowledge_type_slug:
-        stmt = stmt.where(WikiPage.knowledge_type_slugs.any(knowledge_type_slug))  # type: ignore[arg-type]
+        stmt = stmt.where(WikiPage.knowledge_type_slugs.contains([knowledge_type_slug]))
 
     rows = (await db.execute(stmt)).all()
     return [_summary(r.WikiPage, scope_name=r.scope_name) for r in rows]
@@ -230,9 +247,13 @@ async def get_wiki_page(
 ):
     sid = uuid.UUID(scope_id) if scope_id else None
     if scope_type:
-        page = await wiki_service.get_page_by_slug(db, slug, scope_type=scope_type, scope_id=sid)
+        page = await wiki_service.get_page_by_slug(
+            db, slug, scope_type=scope_type, scope_id=sid
+        )
     else:
-        page = await wiki_service.get_page_by_slug(db, slug, scope_type="global", scope_id=None)
+        page = await wiki_service.get_page_by_slug(
+            db, slug, scope_type="global", scope_id=None
+        )
         if not page:
             page = await wiki_service.get_page_by_slug_any_scope(db, slug)
 
@@ -246,10 +267,16 @@ async def get_wiki_page(
             perms = _get_user_permissions(user)
             if "wiki:read:all" not in perms:
                 if page.scope_id not in user.department_ids:
-                    raise HTTPException(403, "Access denied — this page belongs to another department")
+                    raise HTTPException(
+                        403, "Access denied — this page belongs to another department"
+                    )
 
-    backlinks = await wiki_service.get_backlinks(db, slug, page.scope_type, page.scope_id)
-    outlinks = await wiki_service.get_outlinks(db, slug, page.scope_type or "global", page.scope_id)
+    backlinks = await wiki_service.get_backlinks(
+        db, slug, page.scope_type, page.scope_id
+    )
+    outlinks = await wiki_service.get_outlinks(
+        db, slug, page.scope_type or "global", page.scope_id
+    )
     return _detail(page, backlinks, outlinks)
 
 
@@ -272,10 +299,15 @@ async def get_wiki_index(
     if st == "department" and sid is not None and user.role != "admin":
         perms = _get_user_permissions(user)
         if "wiki:read:all" not in perms and sid not in user.department_ids:
-            raise HTTPException(403, "Access denied — this index belongs to another department")
+            raise HTTPException(
+                403, "Access denied — this index belongs to another department"
+            )
 
     page = await wiki_service.get_page_by_slug(
-        db, wiki_service.INDEX_SLUG, scope_type=st, scope_id=sid,
+        db,
+        wiki_service.INDEX_SLUG,
+        scope_type=st,
+        scope_id=sid,
     )
     return {"content_md": page.content_md if page else ""}
 
@@ -289,7 +321,9 @@ async def list_my_wiki_scopes(
 
     Used by the wiki UI to populate the scope switcher.
     """
-    scopes: list[WikiScope] = [WikiScope(scope_type="global", scope_id=None, name="Global")]
+    scopes: list[WikiScope] = [
+        WikiScope(scope_type="global", scope_id=None, name="Global")
+    ]
 
     is_admin = user.role == "admin"
     perms = _get_user_permissions(user)
@@ -297,19 +331,27 @@ async def list_my_wiki_scopes(
 
     # Departments
     if has_all:
-        depts = (await db.execute(
-            select(Department.id, Department.name).order_by(Department.name)
-        )).all()
+        depts = (
+            await db.execute(
+                select(Department.id, Department.name).order_by(Department.name)
+            )
+        ).all()
         for d in depts:
-            scopes.append(WikiScope(scope_type="department", scope_id=d.id, name=d.name))
+            scopes.append(
+                WikiScope(scope_type="department", scope_id=d.id, name=d.name)
+            )
     elif user.department_ids:
-        depts = (await db.execute(
-            select(Department.id, Department.name)
-            .where(Department.id.in_(user.department_ids))
-            .order_by(Department.name)
-        )).all()
+        depts = (
+            await db.execute(
+                select(Department.id, Department.name)
+                .where(Department.id.in_(user.department_ids))
+                .order_by(Department.name)
+            )
+        ).all()
         for dept in depts:
-            scopes.append(WikiScope(scope_type="department", scope_id=dept.id, name=dept.name))
+            scopes.append(
+                WikiScope(scope_type="department", scope_id=dept.id, name=dept.name)
+            )
 
     return scopes
 
@@ -337,10 +379,16 @@ async def direct_create_wiki_page(
     if user.role != "admin":
         perms = _get_user_permissions(user)
         if "wiki:write:all" not in perms:
-            raise HTTPException(403, "Requires wiki:write:all permission to create global/department wiki pages")
+            raise HTTPException(
+                403,
+                "Requires wiki:write:all permission to create global/department wiki pages",
+            )
 
     existing = await wiki_service.get_page_by_slug(
-        db, body.slug, scope_type=body.scope_type, scope_id=body.scope_id,
+        db,
+        body.slug,
+        scope_type=body.scope_type,
+        scope_id=body.scope_id,
     )
     if existing is not None:
         raise HTTPException(
@@ -350,23 +398,42 @@ async def direct_create_wiki_page(
 
     page = await wiki_service.apply_create(
         db,
-        slug=body.slug, title=body.title, page_type=body.page_type,
-        content_md=body.content_md, summary=body.summary,
-        knowledge_type_slugs=list(body.knowledge_type_slugs), source_ids=[],
-        scope_type=body.scope_type, scope_id=body.scope_id,
+        slug=body.slug,
+        title=body.title,
+        page_type=body.page_type,
+        content_md=body.content_md,
+        summary=body.summary,
+        knowledge_type_slugs=list(body.knowledge_type_slugs),
+        source_ids=[],
+        scope_type=body.scope_type,
+        scope_id=body.scope_id,
     )
-    await log_audit(db, user, "create", "wiki_page", str(page.id), reason=f"direct create: {page.slug}")
-    await wiki_service.regenerate_index(db, scope_type=page.scope_type or "global", scope_id=page.scope_id)
+    await log_audit(
+        db,
+        user,
+        "create",
+        "wiki_page",
+        str(page.id),
+        reason=f"direct create: {page.slug}",
+    )
+    await wiki_service.regenerate_index(
+        db, scope_type=page.scope_type or "global", scope_id=page.scope_id
+    )
     await wiki_service.append_log(
         db,
         f"Created page: {page.title} ({page.slug}) by {user.name or user.email}",
-        scope_type=page.scope_type or "global", scope_id=page.scope_id,
+        scope_type=page.scope_type or "global",
+        scope_id=page.scope_id,
     )
     await db.commit()
     await db.refresh(page)
 
-    backlinks = await wiki_service.get_backlinks(db, page.slug, page.scope_type, page.scope_id)
-    outlinks = await wiki_service.get_outlinks(db, page.slug, page.scope_type or "global", page.scope_id)
+    backlinks = await wiki_service.get_backlinks(
+        db, page.slug, page.scope_type, page.scope_id
+    )
+    outlinks = await wiki_service.get_outlinks(
+        db, page.slug, page.scope_type or "global", page.scope_id
+    )
     return _detail(page, backlinks, outlinks)
 
 
@@ -394,10 +461,15 @@ async def update_wiki_page_status(
     sid = uuid.UUID(scope_id) if scope_id else None
     if scope_type:
         page = await wiki_service.get_page_by_slug(
-            db, slug, scope_type=scope_type, scope_id=sid,
+            db,
+            slug,
+            scope_type=scope_type,
+            scope_id=sid,
         )
     else:
-        page = await wiki_service.get_page_by_slug(db, slug, scope_type="global", scope_id=None)
+        page = await wiki_service.get_page_by_slug(
+            db, slug, scope_type="global", scope_id=None
+        )
         if not page:
             page = await wiki_service.get_page_by_slug_any_scope(db, slug)
     if not page:
@@ -436,10 +508,15 @@ async def direct_edit_wiki_page(
     sid = uuid.UUID(scope_id) if scope_id else None
     if scope_type:
         page = await wiki_service.get_page_by_slug(
-            db, slug, scope_type=scope_type, scope_id=sid,
+            db,
+            slug,
+            scope_type=scope_type,
+            scope_id=sid,
         )
     else:
-        page = await wiki_service.get_page_by_slug(db, slug, scope_type="global", scope_id=None)
+        page = await wiki_service.get_page_by_slug(
+            db, slug, scope_type="global", scope_id=None
+        )
         if not page:
             page = await wiki_service.get_page_by_slug_any_scope(db, slug)
     if not page:
@@ -449,13 +526,22 @@ async def direct_edit_wiki_page(
     if user.role != "admin":
         perms = _get_user_permissions(user)
         if "wiki:write:all" not in perms:
-            raise HTTPException(403, "Requires wiki:write:all permission to directly edit global/department wiki pages")
+            raise HTTPException(
+                403,
+                "Requires wiki:write:all permission to directly edit global/department wiki pages",
+            )
 
-    await wiki_service.direct_edit_page(db, page, user.id, body.content_md, body.change_note)
-    await log_audit(db, user, "update", "wiki_page", str(page.id), reason=f"direct edit: {slug}")
+    await wiki_service.direct_edit_page(
+        db, page, user.id, body.content_md, body.change_note
+    )
+    await log_audit(
+        db, user, "update", "wiki_page", str(page.id), reason=f"direct edit: {slug}"
+    )
     edited_scope_type = page.scope_type or "global"
     edited_scope_id = page.scope_id
-    await wiki_service.regenerate_index(db, scope_type=edited_scope_type, scope_id=edited_scope_id)
+    await wiki_service.regenerate_index(
+        db, scope_type=edited_scope_type, scope_id=edited_scope_id
+    )
     await wiki_service.append_log(
         db,
         f"Edited page: {page.title} ({slug}) → v{page.version} by {user.name or user.email}",
@@ -465,12 +551,18 @@ async def direct_edit_wiki_page(
     await db.commit()
     await db.refresh(page)
 
-    backlinks = await wiki_service.get_backlinks(db, slug, page.scope_type, page.scope_id)
-    outlinks = await wiki_service.get_outlinks(db, slug, page.scope_type or "global", page.scope_id)
+    backlinks = await wiki_service.get_backlinks(
+        db, slug, page.scope_type, page.scope_id
+    )
+    outlinks = await wiki_service.get_outlinks(
+        db, slug, page.scope_type or "global", page.scope_id
+    )
     return _detail(page, backlinks, outlinks)
 
 
-@router.get("/wiki/pages/{slug:path}/revisions", response_model=list[WikiRevisionSummary])
+@router.get(
+    "/wiki/pages/{slug:path}/revisions", response_model=list[WikiRevisionSummary]
+)
 async def list_wiki_page_revisions(
     slug: str,
     limit: int = Query(20, ge=1, le=100),
@@ -483,13 +575,16 @@ async def list_wiki_page_revisions(
         raise HTTPException(404, f"Wiki page not found: {slug}")
 
     from cygnus.runtime.database.models import Employee as Emp
-    rows = (await db.execute(
-        select(WikiPageRevision, Emp.name.label("changed_by_name"))
-        .outerjoin(Emp, WikiPageRevision.changed_by_id == Emp.id)
-        .where(WikiPageRevision.page_id == page.id)
-        .order_by(WikiPageRevision.version.desc())
-        .limit(limit)
-    )).all()
+
+    rows = (
+        await db.execute(
+            select(WikiPageRevision, Emp.name.label("changed_by_name"))
+            .outerjoin(Emp, WikiPageRevision.changed_by_id == Emp.id)
+            .where(WikiPageRevision.page_id == page.id)
+            .order_by(WikiPageRevision.version.desc())
+            .limit(limit)
+        )
+    ).all()
 
     return [
         WikiRevisionSummary(
@@ -504,7 +599,10 @@ async def list_wiki_page_revisions(
     ]
 
 
-@router.post("/wiki/pages/{slug:path}/revisions/{version}/rollback", response_model=WikiPageDetail)
+@router.post(
+    "/wiki/pages/{slug:path}/revisions/{version}/rollback",
+    response_model=WikiPageDetail,
+)
 async def rollback_wiki_page(
     slug: str,
     version: int,
@@ -524,12 +622,23 @@ async def rollback_wiki_page(
     except ValueError as e:
         raise HTTPException(404, str(e))
 
-    await log_audit(db, user, "update", "wiki_page", str(page.id), reason=f"rollback to v{version}: {slug}")
+    await log_audit(
+        db,
+        user,
+        "update",
+        "wiki_page",
+        str(page.id),
+        reason=f"rollback to v{version}: {slug}",
+    )
     await db.commit()
     await db.refresh(page)
 
-    backlinks = await wiki_service.get_backlinks(db, slug, page.scope_type, page.scope_id)
-    outlinks = await wiki_service.get_outlinks(db, slug, page.scope_type or "global", page.scope_id)
+    backlinks = await wiki_service.get_backlinks(
+        db, slug, page.scope_type, page.scope_id
+    )
+    outlinks = await wiki_service.get_outlinks(
+        db, slug, page.scope_type or "global", page.scope_id
+    )
     return _detail(page, backlinks, outlinks)
 
 
@@ -542,9 +651,17 @@ async def list_orphaned_wiki_pages(
     if user.role != "admin":
         raise HTTPException(403, "Only admins can view orphaned pages")
 
-    pages = (await db.execute(
-        select(WikiPage).where(WikiPage.orphaned == True).order_by(WikiPage.updated_at.desc())  # noqa: E712
-    )).scalars().all()
+    pages = (
+        (
+            await db.execute(
+                select(WikiPage)
+                .where(WikiPage.orphaned)
+                .order_by(WikiPage.updated_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
     return [_summary(p) for p in pages]
 
 
@@ -567,7 +684,9 @@ async def delete_wiki_page(
 
     sid = uuid.UUID(scope_id) if scope_id else None
     if scope_type:
-        page = await wiki_service.get_page_by_slug(db, slug, scope_type=scope_type, scope_id=sid)
+        page = await wiki_service.get_page_by_slug(
+            db, slug, scope_type=scope_type, scope_id=sid
+        )
     else:
         page = await wiki_service.get_page_by_slug(db, slug)
         if not page:
@@ -584,7 +703,9 @@ async def delete_wiki_page(
     deleted_scope_id = page.scope_id
     await log_audit(db, user, "delete", "wiki", slug, reason=deleted_title)
     await wiki_service.delete_page_cascade(db, page)
-    await wiki_service.regenerate_index(db, scope_type=deleted_scope_type, scope_id=deleted_scope_id)
+    await wiki_service.regenerate_index(
+        db, scope_type=deleted_scope_type, scope_id=deleted_scope_id
+    )
     await wiki_service.append_log(db, f"Deleted page: {deleted_title} ({slug})")
     await db.commit()
     return {"ok": True, "deleted_slug": slug}
@@ -592,7 +713,9 @@ async def delete_wiki_page(
 
 @router.get("/wiki/graph")
 async def get_wiki_graph(
-    slug: Optional[str] = Query(None, description="Center the graph on this slug; omit for full graph"),
+    slug: Optional[str] = Query(
+        None, description="Center the graph on this slug; omit for full graph"
+    ),
     depth: int = Query(1, ge=1, le=3),
     offset: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
@@ -609,7 +732,9 @@ async def get_wiki_graph(
 
     from cygnus.runtime.database.models import Department, WikiLink
 
-    base_filter = WikiPage.slug.notin_([wiki_service.INDEX_SLUG, wiki_service.LOG_SLUG, wiki_service.HOT_SLUG])
+    base_filter = WikiPage.slug.notin_(
+        [wiki_service.INDEX_SLUG, wiki_service.LOG_SLUG, wiki_service.HOT_SLUG]
+    )
 
     # Apply scope filter
     scope_filter = build_wiki_scope_clause(user)
@@ -635,7 +760,12 @@ async def get_wiki_graph(
             ).label("scope_name"),
         )
         .select_from(WikiPage)
-        .outerjoin(Department, and_(WikiPage.scope_id == Department.id, WikiPage.scope_type == "department"))
+        .outerjoin(
+            Department,
+            and_(
+                WikiPage.scope_id == Department.id, WikiPage.scope_type == "department"
+            ),
+        )
         .where(base_filter)
         .order_by(WikiPage.slug)
         .offset(offset)
@@ -648,10 +778,13 @@ async def get_wiki_graph(
 
     # Edges — return ALL on first batch (offset=0)
     if offset == 0:
-        edges_rows = (await db.execute(
-            select(WikiPage.slug.label("from_slug"), WikiLink.to_slug)
-            .join(WikiLink, WikiLink.from_page_id == WikiPage.id)
-        )).all()
+        edges_rows = (
+            await db.execute(
+                select(WikiPage.slug.label("from_slug"), WikiLink.to_slug).join(
+                    WikiLink, WikiLink.from_page_id == WikiPage.id
+                )
+            )
+        ).all()
         edges = edges_rows
     else:
         edges = []
@@ -686,13 +819,15 @@ async def get_wiki_lint(
     """Diagnose dead links, orphan pages, and contradiction nodes in a scope."""
     st = scope_type or "global"
     sid = uuid.UUID(scope_id) if scope_id else None
-    
+
     # Scope permission checks
     if st == "department" and sid is not None and user.role != "admin":
         perms = _get_user_permissions(user)
         if "wiki:read:all" not in perms and sid not in user.department_ids:
-            raise HTTPException(403, "Access denied — this belongs to another department")
-            
+            raise HTTPException(
+                403, "Access denied — this belongs to another department"
+            )
+
     return await wiki_service.lint_wiki(db, scope_type=st, scope_id=sid)
 
 
@@ -706,17 +841,23 @@ async def get_wiki_hot(
     """Fetch the `_hot` cache briefing page for a scope (default: global)."""
     st = scope_type or "global"
     sid = uuid.UUID(scope_id) if scope_id else None
-    
+
     # Scope access checks
     if st == "department" and sid is not None and user.role != "admin":
         perms = _get_user_permissions(user)
         if "wiki:read:all" not in perms and sid not in user.department_ids:
-            raise HTTPException(403, "Access denied — this belongs to another department")
-            
+            raise HTTPException(
+                403, "Access denied — this belongs to another department"
+            )
+
     page = await wiki_service.get_page_by_slug(
         db, wiki_service.HOT_SLUG, scope_type=st, scope_id=sid
     )
-    return {"content_md": page.content_md if page else "*(Hot Knowledge Briefing has not been initialized. The system will generate it automatically after the next ingest or when triggered.)*"}
+    return {
+        "content_md": page.content_md
+        if page
+        else "*(Hot Knowledge Briefing has not been initialized. The system will generate it automatically after the next ingest or when triggered.)*"
+    }
 
 
 @router.post("/wiki/hot/rebuild")
@@ -729,13 +870,16 @@ async def rebuild_wiki_hot(
     """Force-trigger regeneration of the `_hot` cache briefing page for a scope."""
     st = scope_type or "global"
     sid = uuid.UUID(scope_id) if scope_id else None
-    
+
     # Scope access checks
     if user.role != "admin":
         perms = _get_user_permissions(user)
         if "wiki:write:all" not in perms:
-            raise HTTPException(403, "Requires wiki:write:all permission to edit global/department wiki pages")
-                
+            raise HTTPException(
+                403,
+                "Requires wiki:write:all permission to edit global/department wiki pages",
+            )
+
     page = await wiki_service.regenerate_hot_cache(db, scope_type=st, scope_id=sid)
     await db.commit()
     return {"ok": True, "content_md": page.content_md}

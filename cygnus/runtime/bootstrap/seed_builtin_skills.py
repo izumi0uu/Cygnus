@@ -37,8 +37,12 @@ def _upload_to_minio(zip_bytes: bytes, skill_id: str, version_num: int) -> None:
                 continue
             with zf.open(member) as f:
                 content = f.read()
-            object_name = f"skills/{skill_id}/versions/{version_num}/content/{member.filename}"
-            content_type = mimetypes.guess_type(member.filename)[0] or "application/octet-stream"
+            object_name = (
+                f"skills/{skill_id}/versions/{version_num}/content/{member.filename}"
+            )
+            content_type = (
+                mimetypes.guess_type(member.filename)[0] or "application/octet-stream"
+            )
             storage_service.upload_file(
                 object_name=object_name,
                 data=content,
@@ -59,11 +63,15 @@ async def _seed_one(skill_dir: Path) -> None:
 
         if skill is not None:
             if skill.version_hash == content_hash:
-                logger.info(f"Built-in skill '{slug}' already up to date (v{skill.current_version})")
+                logger.info(
+                    f"Built-in skill '{slug}' already up to date (v{skill.current_version})"
+                )
                 return
 
             new_v = skill.current_version + 1
-            version = SkillVersion(skill_id=skill.id, version_number=new_v, created_by=None)
+            version = SkillVersion(
+                skill_id=skill.id, version_number=new_v, created_by=None
+            )
             session.add(version)
             await session.flush()
 
@@ -109,12 +117,12 @@ async def _seed_one(skill_dir: Path) -> None:
 
 async def seed_builtin_skills(skills_root: str | None = None) -> None:
     if skills_root is None:
-        skills_root = Path(__file__).parent.parent.parent / "skills"
+        root = Path(__file__).parent.parent.parent / "skills"
     else:
-        skills_root = Path(skills_root)
+        root = Path(skills_root)
 
-    if not skills_root.exists():
-        logger.warning(f"Skills directory not found at {skills_root}, skipping built-in seed")
+    if not root.exists():
+        logger.warning(f"Skills directory not found at {root}, skipping built-in seed")
         return
 
     try:
@@ -123,7 +131,9 @@ async def seed_builtin_skills(skills_root: str | None = None) -> None:
         logger.warning(f"MinIO not available, skipping built-in skill seed: {e}")
         return
 
-    skill_dirs = sorted(d for d in skills_root.iterdir() if d.is_dir() and (d / "SKILL.md").exists())
+    skill_dirs = sorted(
+        d for d in root.iterdir() if d.is_dir() and (d / "SKILL.md").exists()
+    )
     if not skill_dirs:
         logger.info("No built-in skill directories found, skipping seed")
         return
@@ -132,7 +142,9 @@ async def seed_builtin_skills(skills_root: str | None = None) -> None:
         try:
             await _seed_one(skill_dir)
         except IntegrityError:
-            logger.info(f"Built-in skill '{skill_dir.name}' already seeded by concurrent process")
+            logger.info(
+                f"Built-in skill '{skill_dir.name}' already seeded by concurrent process"
+            )
         except Exception as e:
             logger.error(f"Failed to seed built-in skill '{skill_dir.name}': {e}")
 

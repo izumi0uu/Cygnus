@@ -49,6 +49,7 @@ class NotificationType:
 # Write helpers
 # ---------------------------------------------------------------------------
 
+
 async def notify(
     db: AsyncSession,
     recipient_id: uuid.UUID,
@@ -100,15 +101,17 @@ async def notify_each(
         if exclude_actor and actor_id is not None and rid == actor_id:
             continue
         seen.add(rid)
-        out.append(Notification(
-            recipient_id=rid,
-            type=type,
-            subject=item.get("subject", ""),
-            body=item.get("body", ""),
-            target_type=target_type,
-            target_id=str(item.get("target_id") or ""),
-            actor_id=actor_id,
-        ))
+        out.append(
+            Notification(
+                recipient_id=rid,
+                type=type,
+                subject=item.get("subject", ""),
+                body=item.get("body", ""),
+                target_type=target_type,
+                target_id=str(item.get("target_id") or ""),
+                actor_id=actor_id,
+            )
+        )
     if not out:
         return out
     db.add_all(out)
@@ -142,10 +145,18 @@ async def notify_many(
         if exclude_actor and actor_id is not None and rid == actor_id:
             continue
         seen.add(rid)
-        out.append(await notify(
-            db, rid, type=type, subject=subject, target_type=target_type,
-            target_id=target_id, body=body, actor_id=actor_id,
-        ))
+        out.append(
+            await notify(
+                db,
+                rid,
+                type=type,
+                subject=subject,
+                target_type=target_type,
+                target_id=target_id,
+                body=body,
+                actor_id=actor_id,
+            )
+        )
     # Each `notify` call already staged itself; no extra stage call here.
     return out
 
@@ -158,7 +169,8 @@ async def notify_many(
 # ---------------------------------------------------------------------------
 
 _REQUEST_STAGED: ContextVar[Optional[list[Notification]]] = ContextVar(
-    "_notif_staged_request", default=None,
+    "_notif_staged_request",
+    default=None,
 )
 _SESSION_STAGED: dict[int, list[Notification]] = {}
 
@@ -203,8 +215,10 @@ async def _load_persisted_dispatch_records(
     if not staged_ids:
         return []
     rows = (
-        await db.execute(select(Notification).where(Notification.id.in_(staged_ids)))
-    ).scalars().all()
+        (await db.execute(select(Notification).where(Notification.id.in_(staged_ids))))
+        .scalars()
+        .all()
+    )
     by_id = {notification.id: notification for notification in rows}
     return [
         by_id[notification_id]
@@ -232,6 +246,7 @@ async def dispatch_pending(db: Optional[AsyncSession] = None) -> None:
 # Recipient resolution helpers
 # ---------------------------------------------------------------------------
 
+
 async def get_reviewers_for_scope(
     db: AsyncSession,
     scope_type: str,
@@ -239,6 +254,7 @@ async def get_reviewers_for_scope(
 ) -> list[uuid.UUID]:
     """Resolve the right reviewer set for a wiki page's scope (Admins & Knowledge Managers)."""
     from sqlalchemy import or_
+
     rows = await db.execute(
         select(Employee.id).where(
             or_(

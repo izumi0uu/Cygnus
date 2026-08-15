@@ -15,6 +15,13 @@ __pycache__/
 .env.local
 .env.docker.local
 
+# Production deployment (CYG-128) — templates/examples are tracked, real values are not
+deploy/.env.prod
+deploy/.state
+deploy/releases/*.env
+deploy/production-inputs.json
+deploy/rendered/
+
 # Local prototype exports
 prototypes/
 .tmp/

@@ -20,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.governance.ledger import lock_governance_command
+from cygnus.observability import current_request_id, current_traceparent
 from cygnus.runtime.database.models import GovernanceFeedbackSignal
 
 
@@ -279,18 +280,16 @@ async def create_feedback_signal(
     signal_input: FeedbackSignalInput,
     *,
     actor_id: uuid.UUID | str,
+    correlation_id: str | None = None,
+    traceparent: str | None = None,
 ) -> FeedbackSignalWrite:
-    """Create or replay one feedback fact without committing the transaction."""
-
-    # Frozen dataclasses do not deep-freeze mapping members. Rebuild at the
-    # persistence boundary so caller mutation cannot bypass normalization.
+    """Create or replay one feedback fact with request trace metadata."""
     normalized_input = _normalize_feedback_input(signal_input)
     normalized_actor_id = _required_uuid(actor_id, "actor_id")
     request_fingerprint = _feedback_request_fingerprint(
         normalized_input,
         actor_id=normalized_actor_id,
     )
-
     await lock_governance_command(
         session,
         f"feedback-signal:{normalized_input.command_id}",
@@ -307,11 +306,19 @@ async def create_feedback_signal(
             message = f"command_id={normalized_input.command_id} is already bound to different feedback"
             raise FeedbackCommandConflict(message)
         return FeedbackSignalWrite(signal=existing, replayed=True)
-
+    effective_correlation = correlation_id or current_request_id()
+    correlation_uuid = None
+    if effective_correlation:
+        try:
+            correlation_uuid = uuid.UUID(str(effective_correlation))
+        except (TypeError, ValueError):
+            correlation_uuid = None
     signal = GovernanceFeedbackSignal(
         id=uuid.uuid4(),
         command_id=normalized_input.command_id,
         request_fingerprint=request_fingerprint,
+        correlation_id=correlation_uuid,
+        traceparent=traceparent or current_traceparent(),
         signal_type=FeedbackSignalType(normalized_input.signal_type).value,
         actor_id=normalized_actor_id,
         audience_context=dict(normalized_input.audience_context),
@@ -327,19 +334,22 @@ async def create_feedback_signal(
 
 
 def feedback_signal_ref(signal: GovernanceFeedbackSignal) -> str:
-    """Return the durable entity reference for one feedback fact."""
+    """Return the stable external reference for one persisted feedback fact."""
     return f"feedback-signal:{signal.id}"
 
 
 def feedback_signal_to_dict(signal: GovernanceFeedbackSignal) -> dict[str, object]:
-    """Project a durable feedback row without exposing its request fingerprint."""
-
+    """Project a durable feedback row without exposing fingerprints or notes payloads."""
     created_at = getattr(signal, "created_at", None)
     updated_at = getattr(signal, "updated_at", None)
     return {
         "feedback_ref": feedback_signal_ref(signal),
         "signal_id": str(signal.id),
         "command_id": signal.command_id,
+        "correlation_id": (
+            str(signal.correlation_id) if signal.correlation_id is not None else None
+        ),
+        "traceparent": signal.traceparent,
         "signal_type": signal.signal_type,
         "actor_id": str(signal.actor_id),
         "audience_context": dict(signal.audience_context or {}),

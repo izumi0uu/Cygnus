@@ -11,6 +11,7 @@ from datetime import datetime
 from enum import Enum as PyEnum
 from typing import Optional
 
+from cygnus.substrate.source_language import DEFAULT_SOURCE_LANGUAGE
 from pgvector.sqlalchemy import HALFVEC, Vector
 from sqlalchemy import (
     Boolean,
@@ -110,6 +111,19 @@ class Source(Base):
         nullable=True,
         comment="Project/workspace ID when scope_type=project. Null for global.",
     )
+    # Explicit normalized source language tag (en | zh). Part of the canonical
+    # identity of every wiki page compiled from this source: the compiler
+    # writes pages under this exact tag. NEVER auto-detected from document
+    # content and never silently overwritten — set only from explicit API
+    # input; existing rows migrated to 'en' (20260812_08_source_language).
+    # Validated via cygnus.substrate.source_language.normalize_source_language.
+    language: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False,
+        default=DEFAULT_SOURCE_LANGUAGE,
+        server_default=text("'en'"),
+        comment="Explicit normalized source language tag (en|zh); canonical identity for compiled wiki pages.",
+    )
     knowledge_type_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("knowledge_types.id", ondelete="SET NULL"),
@@ -130,6 +144,22 @@ class Source(Base):
     progress: Mapped[int] = mapped_column(Integer, default=0)
     progress_message: Mapped[Optional[str]] = mapped_column(String(500))
     job_id: Mapped[Optional[str]] = mapped_column(String(200))
+    dispatch_generation: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+        comment="Monotonic execution generation. Bumped on every new pipeline "
+        "cycle (initial ingest, retry, department-change re-ingest). Worker "
+        "attempts from an older generation are fenced as stale.",
+    )
+    delete_requested_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Tombstone: set in the same transaction as the source deletion "
+        "intent, before any durable storage object is removed. The source row "
+        "is removed only after cleanup completes.",
+    )
     extracted_token_count: Mapped[Optional[int]] = mapped_column(
         Integer,
         nullable=True,
@@ -177,6 +207,39 @@ class Source(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    # --- Explicit freshness attestation (governed truth) ---
+    # Freshness is never inferred. Only an explicit FRESH attestation carrying
+    # actor, reason, attestation time, and a future expiry resolves to FRESH;
+    # default/missing/expired always resolve to UNKNOWN. Consumers use
+    # cygnus.evidence.freshness.resolve_source_freshness().
+    freshness_state: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="unknown",
+        server_default="unknown",
+        comment="Explicit freshness attestation: unknown | fresh | stale. Never inferred.",
+    )
+    freshness_actor_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("employees.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Employee who recorded the explicit freshness attestation.",
+    )
+    freshness_reason: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Why the explicit freshness attestation was recorded.",
+    )
+    freshness_attested_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When the explicit freshness attestation was recorded.",
+    )
+    freshness_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When a FRESH attestation lapses; expired attestations are never fresh.",
+    )
 
     # Relationships
     departments: Mapped[list["SourceDepartment"]] = relationship(
@@ -185,6 +248,14 @@ class Source(Base):
     knowledge_type: Mapped[Optional["KnowledgeType"]] = relationship()
     contributor: Mapped[Optional["Employee"]] = relationship(
         foreign_keys=[contributed_by_employee_id]
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "freshness_state IN ('unknown', 'fresh', 'stale')",
+            name="ck_sources_freshness_state",
+        ),
+        Index("ix_sources_freshness_state", "freshness_state"),
     )
 
 
@@ -369,6 +440,24 @@ class WikiPage(Base):
         nullable=True,
         comment="Project/workspace ID. Null for global scope.",
     )
+    language: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False,
+        default="en",
+        server_default=text("'en'"),
+        comment="Page language (BCP-47-ish); part of the canonical identity.",
+    )
+    # Canonical identity path derived from the slug via
+    # wiki_service.normalize_page_path(). Unique per scope and language — see
+    # uq_wiki_pages_canonical_identity_* below. Writers must go through
+    # wiki_service.write_page so the identity is always computed the same way.
+    normalized_path: Mapped[str] = mapped_column(
+        String(300),
+        nullable=False,
+        default="",
+        server_default=text("''"),
+        comment="Canonical identity path derived from slug; unique per scope and language.",
+    )
     knowledge_type_slugs: Mapped[list[str]] = mapped_column(
         ARRAY(String),
         nullable=False,
@@ -399,9 +488,9 @@ class WikiPage(Base):
             return "source"
         return "concept"
 
-    @page_type.expression
+    @page_type.inplace.expression
     @classmethod
-    def page_type(cls):
+    def _page_type_expression(cls):
         return case(
             (cls.slug == "_index", "index"),
             (cls.slug == "_log", "log"),
@@ -410,7 +499,31 @@ class WikiPage(Base):
             else_="concept",
         )
 
-    __table_args__ = (Index("ix_wiki_pages_status", "status"),)
+    __table_args__ = (
+        Index("ix_wiki_pages_status", "status"),
+        # Canonical identity: a page is uniquely identified by its scope,
+        # language, and normalized path. Two partial unique indexes cover the
+        # nullable global scope (scope_id IS NULL) — a plain UNIQUE on a
+        # nullable column would let unlimited global rows share one identity
+        # because Postgres treats NULLs as distinct.
+        Index(
+            "uq_wiki_pages_canonical_identity_global",
+            "scope_type",
+            "language",
+            "normalized_path",
+            unique=True,
+            postgresql_where=text("scope_id IS NULL"),
+        ),
+        Index(
+            "uq_wiki_pages_canonical_identity_scoped",
+            "scope_type",
+            "scope_id",
+            "language",
+            "normalized_path",
+            unique=True,
+            postgresql_where=text("scope_id IS NOT NULL"),
+        ),
+    )
 
 
 class WikiLink(Base):
@@ -1198,11 +1311,22 @@ class AuditLog(Base):
         JSONB,
         comment="Extra context (IP, user agent, request ID...)",
     )
+    correlation_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+        comment="Canonical end-to-end request correlation ID (UUID).",
+    )
+    traceparent: Mapped[Optional[str]] = mapped_column(
+        String(55),
+        nullable=True,
+        comment="W3C traceparent derived from correlation_id.",
+    )
 
     __table_args__ = (
         Index("ix_audit_log_timestamp", "timestamp"),
         Index("ix_audit_log_principal", "principal_id"),
         Index("ix_audit_log_resource", "resource_type", "resource_id"),
+        Index("ix_audit_log_correlation_id", "correlation_id"),
     )
 
 
@@ -1330,6 +1454,10 @@ class GovernanceFeedbackSignal(Base):
     )
     command_id: Mapped[str] = mapped_column(String(220), nullable=False)
     request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    correlation_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    traceparent: Mapped[Optional[str]] = mapped_column(String(55), nullable=True)
     signal_type: Mapped[str] = mapped_column(String(40), nullable=False)
     actor_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -1450,6 +1578,71 @@ class GovernanceFeedbackSignal(Base):
         Index("ix_governance_feedback_signals_object", "object_id"),
         Index("ix_governance_feedback_signals_page", "page_id"),
         Index("ix_governance_feedback_signals_draft", "draft_id"),
+        Index("ix_governance_feedback_signals_correlation_id", "correlation_id"),
+    )
+
+
+class GovernanceToolCommandReceipt(Base):
+    """Actor-bound replay receipt for governed session draft writes (CYG-140).
+
+    ``propose_knowledge_object`` / ``update_draft_object`` persist one receipt
+    in the same caller-owned transaction as the draft/ledger/audit truth.
+    Exact replay returns the stored result; reusing the command id with
+    different normalized input or a different actor conflicts without writes.
+    """
+
+    __tablename__ = "governance_tool_command_receipts"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    actor_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("employees.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    tool_name: Mapped[str] = mapped_column(String(60), nullable=False)
+    command_id: Mapped[str] = mapped_column(String(220), nullable=False)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    correlation_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    traceparent: Mapped[Optional[str]] = mapped_column(String(55), nullable=True)
+    result_payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "tool_name IN ('propose_knowledge_object', 'update_draft_object')",
+            name="ck_governance_tool_command_receipts_tool_name",
+        ),
+        CheckConstraint(
+            "tool_name = btrim(tool_name) AND char_length(tool_name) BETWEEN 1 AND 60",
+            name="ck_governance_tool_command_receipts_tool_name_shape",
+        ),
+        CheckConstraint(
+            "command_id = btrim(command_id) "
+            "AND char_length(command_id) BETWEEN 1 AND 220",
+            name="ck_governance_tool_command_receipts_command_id",
+        ),
+        CheckConstraint(
+            "char_length(request_fingerprint) = 64",
+            name="ck_governance_tool_command_receipts_fingerprint",
+        ),
+        UniqueConstraint(
+            "actor_id",
+            "tool_name",
+            "command_id",
+            name="uq_governance_tool_command_receipts_actor_tool_command",
+        ),
+        Index(
+            "ix_governance_tool_command_receipts_actor_created",
+            "actor_id",
+            "created_at",
+        ),
+        Index("ix_governance_tool_command_receipts_correlation_id", "correlation_id"),
     )
 
 
@@ -1466,6 +1659,10 @@ class GovernanceFeedbackRoute(Base):
         ForeignKey("governance_feedback_signals.id", ondelete="CASCADE"),
         nullable=False,
     )
+    correlation_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    traceparent: Mapped[Optional[str]] = mapped_column(String(55), nullable=True)
     route_kind: Mapped[str] = mapped_column(String(20), nullable=False)
     lifecycle_state: Mapped[str] = mapped_column(
         String(20), nullable=False, default="queued", server_default="queued"
@@ -1552,6 +1749,7 @@ class GovernanceFeedbackRoute(Base):
             "lease_expires_at",
             "created_at",
         ),
+        Index("ix_governance_feedback_routes_correlation_id", "correlation_id"),
     )
 
 
@@ -1623,6 +1821,10 @@ class GovernanceReviewAssignmentEvent(Base):
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     command_id: Mapped[str] = mapped_column(String(220), nullable=False, unique=True)
     request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    correlation_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    traceparent: Mapped[Optional[str]] = mapped_column(String(55), nullable=True)
     event_type: Mapped[str] = mapped_column(String(40), nullable=False)
     from_state: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     to_state: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -1661,6 +1863,9 @@ class GovernanceReviewAssignmentEvent(Base):
             "occurred_at",
         ),
         Index("ix_governance_review_assignment_events_type", "event_type"),
+        Index(
+            "ix_governance_review_assignment_events_correlation_id", "correlation_id"
+        ),
     )
 
 
@@ -1686,6 +1891,10 @@ class GovernanceTicketDraftPromotion(Base):
     )
     command_id: Mapped[str] = mapped_column(String(220), nullable=False, unique=True)
     request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    correlation_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    traceparent: Mapped[Optional[str]] = mapped_column(String(55), nullable=True)
     source_signal_version: Mapped[int] = mapped_column(Integer, nullable=False)
     expected_assignment_version: Mapped[int] = mapped_column(Integer, nullable=False)
     actor_id: Mapped[uuid.UUID] = mapped_column(
@@ -1711,6 +1920,7 @@ class GovernanceTicketDraftPromotion(Base):
             "ix_governance_ticket_draft_promotions_created",
             "created_at",
         ),
+        Index("ix_governance_ticket_draft_promotions_correlation_id", "correlation_id"),
     )
 
 
@@ -1825,6 +2035,10 @@ class GovernanceLedgerEvent(Base):
     idempotency_key: Mapped[str] = mapped_column(
         String(220), nullable=False, unique=True
     )
+    correlation_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    traceparent: Mapped[Optional[str]] = mapped_column(String(55), nullable=True)
     reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     payload: Mapped[dict[str, object]] = mapped_column(
         JSONB,
@@ -1851,6 +2065,7 @@ class GovernanceLedgerEvent(Base):
             "recorded_at",
         ),
         Index("ix_governance_ledger_events_type", "event_type"),
+        Index("ix_governance_ledger_events_correlation_id", "correlation_id"),
     )
 
 
@@ -1885,6 +2100,22 @@ class GovernancePublication(Base):
     )
     command_id: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
     request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    correlation_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    traceparent: Mapped[Optional[str]] = mapped_column(String(55), nullable=True)
+    approval_digest: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default="",
+        comment="Canonical approval digest persisted on the APPROVED ledger event.",
+    )
+    scope_digest: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default="",
+        comment="Previewed publish scope digest (approval, object version, bindings, freshness, action/targets).",
+    )
     object_ref: Mapped[str] = mapped_column(String(320), nullable=False)
     object_type: Mapped[str] = mapped_column(String(50), nullable=False)
     object_version: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -1924,6 +2155,7 @@ class GovernancePublication(Base):
             "draft_id",
             "published_at",
         ),
+        Index("ix_governance_publications_correlation_id", "correlation_id"),
     )
 
 
@@ -1941,6 +2173,14 @@ class GovernancePropagation(Base):
         nullable=False,
     )
     surface_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    desired_digest: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        nullable=True,
+        comment=(
+            "SHA-256 of the canonical approved publication payload staged for "
+            "outbound delivery; a signed acknowledgment must echo it exactly."
+        ),
+    )
     status: Mapped[str] = mapped_column(String(40), nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     channel_refs: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
@@ -1974,6 +2214,105 @@ class GovernancePropagation(Base):
             name="uq_governance_propagations_publication_surface",
         ),
         Index("ix_governance_propagations_status", "status"),
+    )
+
+
+class GovernancePropagationDelivery(Base):
+    """Durable outbound delivery receipt for one governed propagation surface.
+
+    One row per propagation (``propagation_id`` unique). The canonical payload
+    is frozen at publish staging so retries re-send the exact approved bytes
+    and the desired digest stays deterministic; only a signed downstream
+    acknowledgment may move the paired propagation to ``synced``. The row also
+    carries bounded attempt evidence, correlation metadata, and the final
+    acknowledgment receipt so governed reads see persisted propagation truth.
+    """
+
+    __tablename__ = "governance_propagation_deliveries"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    propagation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("governance_propagations.id", ondelete="RESTRICT"),
+        nullable=False,
+        unique=True,
+    )
+    publication_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("governance_publications.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    surface_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    status: Mapped[str] = mapped_column(String(40), nullable=False)
+    command_id: Mapped[str] = mapped_column(String(220), nullable=False, unique=True)
+    idempotency_key: Mapped[str] = mapped_column(
+        String(220), nullable=False, unique=True
+    )
+    desired_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    canonical_payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    expected_page_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    expected_approval_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    expected_binding_versions: Mapped[list[dict[str, object]]] = mapped_column(
+        JSONB, nullable=False
+    )
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    actor_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("employees.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    correlation_id: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    traceparent: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    attempt_evidence: Mapped[dict[str, object]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    acknowledged_digest: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True
+    )
+    acknowledged_version: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    acknowledged_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    ack_receipt_ref: Mapped[Optional[str]] = mapped_column(String(220), nullable=True)
+    ack_correlation_id: Mapped[Optional[str]] = mapped_column(
+        String(200), nullable=True
+    )
+    ack_traceparent: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'in_flight', 'synced', 'failed', 'dead_letter')",
+            name="ck_governance_propagation_deliveries_status",
+        ),
+        CheckConstraint(
+            "attempts >= 0 AND max_attempts >= 1",
+            name="ck_governance_propagation_deliveries_attempts",
+        ),
+        CheckConstraint(
+            "expected_page_version >= 1 AND expected_approval_version >= 1",
+            name="ck_governance_propagation_deliveries_versions",
+        ),
+        Index("ix_governance_propagation_deliveries_status", "status"),
+        Index(
+            "ix_governance_propagation_deliveries_publication",
+            "publication_id",
+        ),
     )
 
 
@@ -2306,12 +2645,23 @@ class MCPQueryLog(Base):
         comment="ok | error | denied",
     )
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    correlation_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+        comment="Canonical end-to-end request correlation ID (UUID).",
+    )
+    traceparent: Mapped[Optional[str]] = mapped_column(
+        String(55),
+        nullable=True,
+        comment="W3C traceparent derived from correlation_id.",
+    )
 
     __table_args__ = (
         Index("ix_mcp_query_log_created_at", "created_at"),
         Index("ix_mcp_query_log_employee_id", "employee_id"),
         Index("ix_mcp_query_log_tool_name", "tool_name"),
         Index("ix_mcp_query_log_zero_result", "created_at", "result_count"),
+        Index("ix_mcp_query_log_correlation_id", "correlation_id"),
     )
 
 
@@ -2364,4 +2714,167 @@ class StatsDailyRollup(Base):
         ),
         Index("ix_stats_rollup_date", "date"),
         Index("ix_stats_rollup_metric", "metric_key", "date"),
+    )
+
+
+class SourceDispatchExecution(Base):
+    """Durable outbox row for one (source, generation, stage) worker handoff.
+
+    Written transactionally with the API enqueue path and reconciled by the
+    worker sweep. The deterministic ``job_id`` is passed as ARQ's ``_job_id``
+    so a crash/restart can never enqueue the same stage twice: ARQ returns
+    ``None`` for an existing job, which is treated as a successful
+    acknowledgement. Workers claim a lease at task entry and fence critical
+    commits against the source's current ``dispatch_generation``.
+    """
+
+    __tablename__ = "source_dispatch_executions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    source_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("sources.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # Monotonic cycle counter snapshot for this execution. Workers fence against
+    # the source's current dispatch_generation: an older value is stale.
+    generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    # ingest | post_extraction | map_reduce | refine | regenerate_plan
+    stage: Mapped[str] = mapped_column(String(30), nullable=False)
+    task_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    task_args: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    # Deterministic: source-dispatch:{source_id}:{stage}:{generation}
+    job_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    correlation_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    traceparent: Mapped[Optional[str]] = mapped_column(String(55), nullable=True)
+    # pending | dispatching | enqueued | running | completed | stale | failed
+    dispatch_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default="pending"
+    )
+    # Number of delivery leases claimed; enqueue exceptions consume the retry
+    # budget, deterministic ARQ duplicate responses are acknowledgements.
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    lease_token: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    lease_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    enqueued_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    next_attempt_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    terminal_reason: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "source_id",
+            "generation",
+            "stage",
+            name="uq_source_dispatch_execution_stage",
+        ),
+        UniqueConstraint("job_id", name="uq_source_dispatch_execution_job"),
+        CheckConstraint(
+            "dispatch_status IN ('pending', 'dispatching', 'enqueued', 'running', "
+            "'completed', 'stale', 'failed')",
+            name="ck_source_dispatch_execution_status",
+        ),
+        CheckConstraint(
+            "generation >= 1 AND attempt_count >= 0",
+            name="ck_source_dispatch_execution_values",
+        ),
+        CheckConstraint(
+            "(dispatch_status IN ('pending', 'dispatching', 'enqueued', 'running') "
+            "AND terminal_reason IS NULL) OR "
+            "(dispatch_status IN ('completed', 'stale', 'failed') "
+            "AND terminal_reason IS NOT NULL)",
+            name="ck_source_dispatch_execution_terminal_reason",
+        ),
+        Index(
+            "ix_source_dispatch_execution_recovery",
+            "dispatch_status",
+            "next_attempt_at",
+            "lease_expires_at",
+        ),
+        Index("ix_source_dispatch_execution_source", "source_id"),
+        Index("ix_source_dispatch_execution_correlation_id", "correlation_id"),
+    )
+
+
+class SourceDeletion(Base):
+    """Database-led deletion intent for one source (tombstone + cleanup state).
+
+    The DELETE endpoint commits this row in the same transaction as
+    ``sources.delete_requested_at``. The worker sweep performs the durable
+    storage cleanup idempotently and only then removes the source row; a
+    partial object failure keeps the row in ``failed`` with ``last_error`` so
+    the problem stays visible and is retried. The row survives the source row
+    removal (``source_id`` is set NULL) so completed deletions stay auditable.
+    """
+
+    __tablename__ = "source_deletions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    source_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("sources.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    requested_by_employee_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("employees.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # e.g. "sources/{source_id}/" — the exact prefix the sweeper deletes.
+    storage_prefix: Mapped[str] = mapped_column(String(500), nullable=False)
+    # pending | in_progress | completed | failed
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default="pending"
+    )
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'in_progress', 'completed', 'failed')",
+            name="ck_source_deletions_status",
+        ),
+        CheckConstraint(
+            "attempt_count >= 0",
+            name="ck_source_deletions_attempts",
+        ),
+        Index("ix_source_deletions_recovery", "status", "updated_at"),
+        Index("ix_source_deletions_source", "source_id"),
     )

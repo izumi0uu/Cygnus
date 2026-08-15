@@ -31,6 +31,7 @@ router = APIRouter()
 # Schemas
 # ---------------------------------------------------------------------------
 
+
 class LLMSpecOut(BaseModel):
     id: str
     provider: str
@@ -302,6 +303,7 @@ async def _ping_anthropic_compatible_model(
 # LLM endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.get("/settings/llm/catalog", response_model=LLMCatalogOut)
 async def get_llm_catalog(
     db: AsyncSession = Depends(get_db),
@@ -370,7 +372,11 @@ async def switch_llm_model(
     await svc.set(ACTIVE_LLM_MODEL_KEY, spec.id)
     await svc.set(LLM_CUSTOM_ENABLED_KEY, "false")
     await log_audit(
-        db, _user, "switch_llm_model", "settings", "global",
+        db,
+        _user,
+        "switch_llm_model",
+        "settings",
+        "global",
         reason=f"Switching active LLM to {spec.id}",
     )
     await db.commit()
@@ -427,7 +433,9 @@ async def test_custom_llm(
             else:
                 message = f"Connection OK. Found {len(models)} models."
         else:
-            models = await _list_anthropic_compatible_models(normalized_base_url, api_key)
+            models = await _list_anthropic_compatible_models(
+                normalized_base_url, api_key
+            )
             if model_id:
                 preview = await _ping_anthropic_compatible_model(
                     normalized_base_url,
@@ -496,7 +504,9 @@ async def save_custom_llm(
         raise HTTPException(status_code=400, detail="Model ID is required.")
 
     base_url = _normalize_custom_base_url(body.base_url, provider)
-    context_window_tokens = body.context_window_tokens or DEFAULT_CUSTOM_LLM_CONTEXT_WINDOW_TOKENS
+    context_window_tokens = (
+        body.context_window_tokens or DEFAULT_CUSTOM_LLM_CONTEXT_WINDOW_TOKENS
+    )
     max_output_tokens = body.max_output_tokens or DEFAULT_CUSTOM_LLM_MAX_OUTPUT_TOKENS
     reasoning_effort = _normalize_reasoning_effort(
         provider,
@@ -549,7 +559,10 @@ async def disable_custom_llm(
     _user: Employee = require_permission("org:settings:manage"),
 ):
     from cygnus.runtime.ai.registry import ProviderRegistry
-    from cygnus.runtime.services.config_service import LLM_CUSTOM_ENABLED_KEY, ConfigService
+    from cygnus.runtime.services.config_service import (
+        LLM_CUSTOM_ENABLED_KEY,
+        ConfigService,
+    )
 
     svc = ConfigService(db)
     await svc.set(LLM_CUSTOM_ENABLED_KEY, "false")
@@ -571,6 +584,7 @@ async def disable_custom_llm(
 # ---------------------------------------------------------------------------
 # Vision endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.get("/settings/vision/catalog", response_model=VisionCatalogOut)
 async def get_vision_catalog(
@@ -610,7 +624,10 @@ async def switch_vision_model(
     _user: Employee = require_permission("org:settings:manage"),
 ):
     from cygnus.runtime.ai.vision_catalog import UnknownVisionModel, get_spec
-    from cygnus.runtime.services.config_service import ACTIVE_VISION_MODEL_KEY, ConfigService
+    from cygnus.runtime.services.config_service import (
+        ACTIVE_VISION_MODEL_KEY,
+        ConfigService,
+    )
 
     try:
         spec = get_spec(body.model_spec_id)
@@ -626,7 +643,11 @@ async def switch_vision_model(
 
     await svc.set(ACTIVE_VISION_MODEL_KEY, spec.id)
     await log_audit(
-        db, _user, "switch_vision_model", "settings", "global",
+        db,
+        _user,
+        "switch_vision_model",
+        "settings",
+        "global",
         reason=f"Switching active vision model to {spec.id}",
     )
     await db.commit()

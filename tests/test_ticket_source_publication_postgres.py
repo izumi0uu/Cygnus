@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
+from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
 from typing import cast
@@ -13,12 +14,21 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from cygnus.domain.audience import AudienceFilter, Visibility
+from cygnus.domain.objects import KnowledgeObjectType, governed_object_ref
+from cygnus.evidence.records import FreshnessState
+from cygnus.governance.approval_guards import approval_digest, publish_scope_digest
 from cygnus.governance.audience_bindings import (
     AudienceBindingCreate,
+    AudienceBindingLifecycle,
     create_audience_binding,
+    list_audience_bindings,
 )
 from cygnus.governance.ledger import GovernanceEventType, list_draft_events
-from cygnus.governance.signals import GovernanceSignalConflict
+from cygnus.governance.signals import (
+    GovernanceSignalConflict,
+    GovernanceSignalInput,
+    create_governance_signal,
+)
 from cygnus.governance.ticket_draft_promotions import (
     TicketDraftPromotionCommand,
     promote_ticket_cluster_to_draft,
@@ -33,12 +43,14 @@ from cygnus.governance.ticket_pilot import (
 )
 from cygnus.publish.durable import DurablePublishCommand, apply_durable_publish
 from cygnus.review.contributions import approve_wiki_draft, submit_wiki_draft
+from cygnus.review.intake import PressureSignalType
 from cygnus.runtime.database.models import (
     AuditLog,
     Employee,
     GovernanceAudienceBinding,
     GovernanceLedgerEvent,
     GovernancePropagation,
+    GovernancePropagationDelivery,
     GovernancePublication,
     GovernanceReviewAssignment,
     GovernanceSignal,
@@ -82,6 +94,7 @@ class TicketSourcePublicationPostgresTests(unittest.TestCase):
         signal_id: uuid.UUID | None = None
         draft_id: uuid.UUID | None = None
         page_id: uuid.UUID | None = None
+        publication_signal_id: uuid.UUID | None = None
         publication_id: uuid.UUID | None = None
 
         try:
@@ -99,6 +112,7 @@ class TicketSourcePublicationPostgresTests(unittest.TestCase):
                     title="CYG-125 sanitized resolved-ticket snapshot",
                     full_text=None,
                     source_type="file",
+                    language="en",
                     file_name=f"resolved-tickets-{unique}.csv",
                     file_size=len(_FIXTURE.read_bytes()),
                     status="ready",
@@ -110,6 +124,7 @@ class TicketSourcePublicationPostgresTests(unittest.TestCase):
                     title="CYG-125 different sanitized snapshot",
                     full_text=None,
                     source_type="file",
+                    language="en",
                     file_name=f"other-resolved-tickets-{unique}.csv",
                     file_size=len(_FIXTURE.read_bytes()),
                     status="ready",
@@ -117,6 +132,27 @@ class TicketSourcePublicationPostgresTests(unittest.TestCase):
                     contributed_by_employee_id=actor_id,
                 )
                 session.add_all((actor, source, other_source))
+                await session.flush()
+                source_attested_at = source.updated_at or datetime.now(timezone.utc)
+                source.freshness_state = FreshnessState.FRESH.value
+                source.freshness_actor_id = actor_id
+                source.freshness_reason = (
+                    "Attested fresh for the governed pilot publication."
+                )
+                source.freshness_attested_at = source_attested_at
+                source.freshness_expires_at = source_attested_at + timedelta(days=1)
+                other_attested_at = other_source.updated_at or datetime.now(
+                    timezone.utc
+                )
+                other_source.freshness_state = FreshnessState.FRESH.value
+                other_source.freshness_actor_id = actor_id
+                other_source.freshness_reason = (
+                    "Attested fresh for the governed pilot publication."
+                )
+                other_source.freshness_attested_at = other_attested_at
+                other_source.freshness_expires_at = other_attested_at + timedelta(
+                    days=1
+                )
                 await session.flush()
 
                 imported = await import_resolved_ticket_export(
@@ -201,33 +237,112 @@ class TicketSourcePublicationPostgresTests(unittest.TestCase):
                 page_id = page.id
                 self.assertEqual(page.source_ids, [source_id])
 
-                _ = await create_audience_binding(
+                object_ref = governed_object_ref(page.id)
+                audience_filter = AudienceFilter(
+                    visibility=Visibility.INTERNAL,
+                    product_lines=("workspace",),
+                    plans=("test-plan",),
+                    regions=("test-region",),
+                    languages=("en",),
+                    product_versions=("fixture-1",),
+                )
+                binding, binding_replayed = await create_audience_binding(
                     session,
                     command=AudienceBindingCreate(
                         page_id=page.id,
-                        object_ref=f"ko-{page.slug}",
+                        object_ref=object_ref,
                         variant_ref="internal-ticket-pilot",
                         channel="internal_copilot",
-                        audience_filter=AudienceFilter(
-                            visibility=Visibility.INTERNAL,
-                            product_lines=("workspace",),
-                            plans=("test-plan",),
-                            regions=("test-region",),
-                            languages=("en",),
-                            product_versions=("fixture-1",),
-                        ),
+                        audience_filter=audience_filter,
                     ),
                     actor_id=actor_id,
                 )
+                self.assertFalse(binding_replayed)
+                self.assertEqual(binding.object_ref, object_ref)
+                publication_signal = await create_governance_signal(
+                    session,
+                    GovernanceSignalInput(
+                        signal_ref=f"ticket-publication:{unique}",
+                        signal_type=PressureSignalType.TICKET_CLUSTER,
+                        object_ref=object_ref,
+                        title="Approved source-grounded ticket guidance",
+                        object_type=KnowledgeObjectType.TROUBLESHOOTING_FLOW,
+                        page_id=page.id,
+                        source_id=source_id,
+                        audience_filter=audience_filter,
+                        affected_surfaces=("internal_copilot",),
+                        trigger_signals=("ticket_cluster", "reviewer_approved"),
+                        freshness=FreshnessState.FRESH,
+                        summary=(
+                            "Reviewed ticket evidence supports the approved guidance."
+                        ),
+                        reason=("Publish the approved source-grounded pilot object."),
+                        evidence_excerpt=(
+                            "Three sanitized resolved tickets repeat the same flow."
+                        ),
+                    ),
+                    created_by_id=actor_id,
+                )
+                publication_signal_id = publication_signal.id
+                self.assertEqual(publication_signal.object_ref, object_ref)
                 events = await list_draft_events(session, draft.id)
                 approval = next(
                     event
                     for event in events
                     if event.event_type == GovernanceEventType.APPROVED.value
                 )
+                self.assertIn("approval_digest", approval.payload)
+                refreshed_signal = await session.get(
+                    GovernanceSignal, publication_signal_id
+                )
+                sources = tuple(
+                    (
+                        await session.execute(
+                            select(Source).where(Source.id == source_id)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                binding_rows = await list_audience_bindings(
+                    session,
+                    page_id=page.id,
+                    object_ref=object_ref,
+                    lifecycle_state=AudienceBindingLifecycle.ACTIVE,
+                )
+                canonical_digest = approval_digest(
+                    draft=draft,
+                    page=page,
+                    final_content=page.content_md,
+                    reviewer_id=draft.reviewed_by_id,
+                    reviewed_at=draft.reviewed_at,
+                    reviewer_note=draft.reviewer_note,
+                )
+                self.assertEqual(
+                    canonical_digest,
+                    approval.payload["approval_digest"],
+                )
+                if refreshed_signal is None:
+                    raise AssertionError("pilot signal fixture unexpectedly absent")
+                scope_digest = publish_scope_digest(
+                    approval_ref=approval.id,
+                    approval_digest_value=canonical_digest,
+                    object_version=page.version,
+                    binding_rows=binding_rows,
+                    source_state=((source.id, source.status) for source in sources),
+                    signal_freshness=refreshed_signal.freshness,
+                    signal_id=refreshed_signal.id,
+                    signal_status=refreshed_signal.status,
+                    action_key="publish",
+                    target_channels=("internal_copilot",),
+                )
                 publish_command = DurablePublishCommand(
                     draft_id=draft.id,
                     approval_ref=approval.id,
+                    approval_digest=canonical_digest,
+                    scope_digest=scope_digest,
+                    signal_id=refreshed_signal.id,
+                    signal_freshness=refreshed_signal.freshness,
                     command_id=f"cyg125-publish:{unique}",
                     action_key="publish",
                     target_channels=("internal_copilot",),
@@ -248,6 +363,9 @@ class TicketSourcePublicationPostgresTests(unittest.TestCase):
 
             async with sessions() as session:
                 persisted_signal = await session.get(GovernanceSignal, signal_id)
+                persisted_publication_signal = await session.get(
+                    GovernanceSignal, publication_signal_id
+                )
                 persisted_draft = await session.get(WikiPageDraft, draft_id)
                 persisted_page = await session.get(WikiPage, page_id)
                 persisted_publication = await session.get(
@@ -257,8 +375,10 @@ class TicketSourcePublicationPostgresTests(unittest.TestCase):
                 self.assertIsNotNone(persisted_draft)
                 self.assertIsNotNone(persisted_page)
                 self.assertIsNotNone(persisted_publication)
+                self.assertIsNotNone(persisted_publication_signal)
                 if (
                     persisted_signal is None
+                    or persisted_publication_signal is None
                     or persisted_draft is None
                     or persisted_page is None
                     or persisted_publication is None
@@ -268,6 +388,15 @@ class TicketSourcePublicationPostgresTests(unittest.TestCase):
                     )
                 self.assertEqual(persisted_signal.source_id, source_id)
                 self.assertEqual(persisted_page.source_ids, [source_id])
+                self.assertEqual(persisted_publication_signal.page_id, page_id)
+                self.assertEqual(
+                    persisted_publication_signal.object_ref,
+                    governed_object_ref(persisted_page.id),
+                )
+                self.assertEqual(
+                    persisted_publication.object_ref,
+                    governed_object_ref(persisted_page.id),
+                )
 
                 replayed_publish = await apply_durable_publish(
                     session,
@@ -300,6 +429,7 @@ class TicketSourcePublicationPostgresTests(unittest.TestCase):
                     actor_id=actor_id,
                     source_ids=(source_id, other_source_id),
                     signal_id=signal_id,
+                    publication_signal_id=publication_signal_id,
                     draft_id=draft_id,
                     page_id=page_id,
                     publication_id=publication_id,
@@ -314,12 +444,18 @@ class TicketSourcePublicationPostgresTests(unittest.TestCase):
         actor_id: uuid.UUID,
         source_ids: tuple[uuid.UUID, ...],
         signal_id: uuid.UUID | None,
+        publication_signal_id: uuid.UUID | None,
         draft_id: uuid.UUID | None,
         page_id: uuid.UUID | None,
         publication_id: uuid.UUID | None,
     ) -> None:
         async with sessions() as session:
             if publication_id is not None:
+                _ = await session.execute(
+                    delete(GovernancePropagationDelivery).where(
+                        GovernancePropagationDelivery.publication_id == publication_id
+                    )
+                )
                 _ = await session.execute(
                     delete(GovernancePropagation).where(
                         GovernancePropagation.publication_id == publication_id
@@ -359,14 +495,19 @@ class TicketSourcePublicationPostgresTests(unittest.TestCase):
                 _ = await session.execute(
                     delete(WikiPageDraft).where(WikiPageDraft.id == draft_id)
                 )
-            if signal_id is not None:
+            governance_signal_ids = tuple(
+                item for item in (signal_id, publication_signal_id) if item is not None
+            )
+            if governance_signal_ids:
                 _ = await session.execute(
                     delete(GovernanceReviewAssignment).where(
-                        GovernanceReviewAssignment.signal_id == signal_id
+                        GovernanceReviewAssignment.signal_id.in_(governance_signal_ids)
                     )
                 )
                 _ = await session.execute(
-                    delete(GovernanceSignal).where(GovernanceSignal.id == signal_id)
+                    delete(GovernanceSignal).where(
+                        GovernanceSignal.id.in_(governance_signal_ids)
+                    )
                 )
             if page_id is not None:
                 _ = await session.execute(

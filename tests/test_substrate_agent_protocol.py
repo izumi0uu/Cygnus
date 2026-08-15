@@ -5,6 +5,7 @@ import unittest
 from cygnus.runtime.ai import agent_protocol as runtime_protocol
 from cygnus.substrate.agent_protocol import (
     AssistantTurn,
+    SessionActorScope,
     ToolCall,
     ToolDefinition,
     assistant_message_from_turn,
@@ -37,9 +38,14 @@ class AgentProtocolTests(unittest.TestCase):
         openai_messages = neutral_to_openai_messages([assistant_message, tool_message])
 
         self.assertEqual(assistant_message["role"], "assistant")
-        self.assertEqual(assistant_message["tool_calls"][0].name, "validate_publish_policy")
+        self.assertEqual(
+            assistant_message["tool_calls"][0].name, "validate_publish_policy"
+        )
         self.assertEqual(tool_message["tool_results"][0]["id"], "call-1")
-        self.assertEqual(openai_messages[0]["tool_calls"][0]["function"]["name"], "validate_publish_policy")
+        self.assertEqual(
+            openai_messages[0]["tool_calls"][0]["function"]["name"],
+            "validate_publish_policy",
+        )
         self.assertEqual(openai_messages[1]["role"], "tool")
 
     def test_neutral_messages_project_to_anthropic_tool_shapes(self) -> None:
@@ -58,7 +64,9 @@ class AgentProtocolTests(unittest.TestCase):
         anthropic_messages = neutral_to_anthropic_messages(
             [
                 assistant_message_from_turn(turn),
-                tool_results_message([("call-3", "validate_publish_policy", {"status": "ok"})]),
+                tool_results_message(
+                    [("call-3", "validate_publish_policy", {"status": "ok"})]
+                ),
             ]
         )
 
@@ -83,31 +91,45 @@ class AgentProtocolTests(unittest.TestCase):
     def test_runtime_shim_points_to_substrate_owner(self) -> None:
         self.assertIs(runtime_protocol.AssistantTurn, AssistantTurn)
         self.assertIs(runtime_protocol.ToolCall, ToolCall)
-        self.assertIs(runtime_protocol.neutral_to_openai_messages, neutral_to_openai_messages)
+        self.assertIs(
+            runtime_protocol.neutral_to_openai_messages, neutral_to_openai_messages
+        )
 
-    def test_registry_dispatches_tools_without_provider_specific_message_shape(self) -> None:
+    def test_registry_dispatches_tools_without_provider_specific_message_shape(
+        self,
+    ) -> None:
+        import asyncio
+
         registry = ToolRegistry()
         registry.register(
             ToolDefinition(
-                name="request_review",
-                description="Request review",
-                parameters={"type": "object", "properties": {"draft_id": {"type": "string"}}},
-                risk_level="R1",
+                name="read_review_feedback",
+                description="Read review feedback",
+                parameters={
+                    "type": "object",
+                    "properties": {"draft_id": {"type": "string"}},
+                },
+                risk_level="R0",
             ),
             lambda *, draft_id: {"status": "success", "draft_id": draft_id},
         )
 
-        results = dispatch_tool_calls(
-            registry,
-            (
-                ToolCall(
-                    id="call-2",
-                    name="request_review",
-                    arguments={"draft_id": "draft-2"},
+        draft_id = "00000000-0000-0000-0000-000000000002"
+        results = asyncio.run(
+            dispatch_tool_calls(
+                registry,
+                (
+                    ToolCall(
+                        id="call-2",
+                        name="read_review_feedback",
+                        arguments={"draft_id": draft_id},
+                    ),
                 ),
-            ),
+                actor=SessionActorScope(authenticated=True),
+            )
         )
 
         self.assertEqual(results[0][0], "call-2")
-        self.assertEqual(results[0][1], "request_review")
-        self.assertEqual(results[0][2]["draft_id"], "draft-2")
+        self.assertEqual(results[0][1], "read_review_feedback")
+        self.assertEqual(results[0][2]["draft_id"], draft_id)
+        self.assertEqual(results[0][2]["contract_version"], "1.0")

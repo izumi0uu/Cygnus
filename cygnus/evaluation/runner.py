@@ -5,10 +5,13 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import cast
 
+from cygnus.domain import LifecycleState
 from cygnus.integrations.session_bridge import (
     GovernedQueryRequest,
     GovernedSessionBridge,
+    PropagationDeliveryTruth,
 )
+from cygnus.publish import PropagationStatus
 from cygnus.retrieval import SubstrateKnowledgeSnapshot
 
 from .contracts import (
@@ -29,6 +32,7 @@ from .policy import evaluate_policy_expectation
 
 
 _SUITE_NAME = "cygnus-production-domain-eval"
+_EVAL_CHANNEL = "copilot"
 _UNSUPPORTED_DISPOSITIONS = frozenset({"fallback", "escalate"})
 
 
@@ -101,6 +105,31 @@ class _BridgeObservation:
         )
 
 
+def _evaluation_delivery_truth(
+    case: EvalCase,
+    *,
+    channel: str,
+) -> PropagationDeliveryTruth:
+    """Build explicit signed-delivery fixtures for one evaluation scenario."""
+    rows = (
+        (
+            object_.object_id,
+            channel,
+            PropagationStatus.SYNCED.value,
+            tuple(
+                {
+                    "channel": channel,
+                    "audience_filter": audience.to_dict(),
+                }
+                for audience in object_.supported_audiences
+            ),
+        )
+        for object_ in case.objects
+        if object_.lifecycle_state is LifecycleState.PUBLISHED
+    )
+    return PropagationDeliveryTruth.from_propagation_rows(rows)
+
+
 async def evaluate_case(case: EvalCase) -> EvalCaseResult:
     """Evaluate one deterministic corpus case against the governed session seam."""
     checks: list[EvalCheck] = []
@@ -111,12 +140,14 @@ async def evaluate_case(case: EvalCase) -> EvalCaseResult:
             objects=case.objects,
             evidence=case.evidence,
         )
-        response = GovernedSessionBridge(snapshot).query(
+        response = GovernedSessionBridge(snapshot).query_with_fixture_delivery(
             GovernedQueryRequest(
                 request_ref=f"eval:{case.case_id}",
                 query=case.query,
                 audience_context=case.audience_context,
-            )
+                channel=_EVAL_CHANNEL,
+            ),
+            delivery_truth=_evaluation_delivery_truth(case, channel=_EVAL_CHANNEL),
         )
         observation = _BridgeObservation.from_response(response)
     except Exception as exc:

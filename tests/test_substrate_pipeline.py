@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from typing import Any
 
 from cygnus.substrate.pipeline_checkpoint import PipelineCheckpoint
 from cygnus.substrate.pipeline_phases import PipelinePhase
@@ -80,7 +81,7 @@ class PipelineCheckpointTests(unittest.TestCase):
 
 class SourceOutlinePrimitiveTests(unittest.TestCase):
     def test_outline_primitives_round_trip_page_slices(self) -> None:
-        pages = [
+        pages: list[dict[str, Any]] = [
             {"page_number": 1, "content": "# Intro\nHello world"},
             {"page_number": 2, "content": "## Details\nMore detail"},
         ]
@@ -89,7 +90,9 @@ class SourceOutlinePrimitiveTests(unittest.TestCase):
         outline = build_outline(pages)
         selected = slice_pages_by_range(full_text, offsets, parse_page_range("1-2"))
 
-        self.assertEqual(offsets, [0, len(pages[0]["content"]) + len(PAGE_JOIN_SEPARATOR)])
+        self.assertEqual(
+            offsets, [0, len(pages[0]["content"]) + len(PAGE_JOIN_SEPARATOR)]
+        )
         self.assertEqual([item["page"] for item in selected], [1, 2])
         self.assertEqual(outline[0]["title"], "Intro")
         self.assertEqual(outline[0]["children"][0]["title"], "Details")

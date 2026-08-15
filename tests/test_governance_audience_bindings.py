@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cygnus.domain import AudienceFilter, Visibility
+from cygnus.domain import AudienceFilter, Visibility, governed_object_ref
 from cygnus.governance.audience_bindings import (
     AudienceBindingConflict,
     AudienceBindingCreate,
@@ -68,7 +68,7 @@ def _binding(
     return GovernanceAudienceBinding(
         id=uuid.uuid4(),
         page_id=_PAGE_ID,
-        object_ref="ko-billing-policy",
+        object_ref=governed_object_ref(_PAGE_ID),
         variant_ref=variant_ref,
         channel=channel,
         visibility=visibility,
@@ -101,7 +101,7 @@ class AudienceBindingServiceTests(unittest.TestCase):
     def test_binding_command_canonicalizes_dimensions_and_key(self) -> None:
         left = AudienceBindingCreate(
             page_id=_PAGE_ID,
-            object_ref=" ko-billing-policy ",
+            object_ref=governed_object_ref(_PAGE_ID),
             variant_ref=" enterprise-eu ",
             channel=" help_center ",
             audience_filter=AudienceFilter(
@@ -113,7 +113,7 @@ class AudienceBindingServiceTests(unittest.TestCase):
         )
         right = AudienceBindingCreate(
             page_id=_PAGE_ID,
-            object_ref="ko-billing-policy",
+            object_ref=governed_object_ref(_PAGE_ID),
             variant_ref="enterprise-eu",
             channel="help_center",
             audience_filter=AudienceFilter(
@@ -131,7 +131,7 @@ class AudienceBindingServiceTests(unittest.TestCase):
     def test_create_persists_exact_binding_and_replays_same_key(self) -> None:
         command = AudienceBindingCreate(
             page_id=_PAGE_ID,
-            object_ref="ko-billing-policy",
+            object_ref=governed_object_ref(_PAGE_ID),
             variant_ref="enterprise-eu",
             channel="help_center",
             audience_filter=AudienceFilter(
@@ -295,7 +295,7 @@ class AudienceBindingServiceTests(unittest.TestCase):
         rows = asyncio.run(
             list_audience_bindings(
                 session,
-                object_ref="ko-billing-policy",
+                object_ref=governed_object_ref(_PAGE_ID),
                 binding_keys=("binding-a", "binding-b"),
                 page_scope_clause=WikiPage.id.is_(None),
             )
@@ -313,7 +313,7 @@ class AudienceBindingServiceTests(unittest.TestCase):
         self.assertEqual(rows, ())
         self.assertIn("JOIN wiki_pages", sql)
         self.assertIn("wiki_pages.id IS NULL", sql)
-        self.assertIn("ko-billing-policy", sql)
+        self.assertIn(governed_object_ref(_PAGE_ID), sql)
         self.assertIn("binding-a", sql)
         self.assertIn("binding-b", sql)
 
@@ -340,7 +340,7 @@ class AudienceBindingServiceTests(unittest.TestCase):
                 SimpleNamespace(
                     page_id=_PAGE_ID,
                     status="active",
-                    object_ref="ko-billing-policy",
+                    object_ref=governed_object_ref(_PAGE_ID),
                 ),
             ),
         )
@@ -418,7 +418,7 @@ class AudienceBindingApiTests(unittest.TestCase):
     def test_binding_api_is_admin_gated(self) -> None:
         payload = {
             "page_id": str(_PAGE_ID),
-            "object_ref": "ko-billing-policy",
+            "object_ref": governed_object_ref(_PAGE_ID),
             "variant_ref": "enterprise-eu",
             "channel": "help_center",
             "visibility": "external",
@@ -448,7 +448,7 @@ class AudienceBindingApiTests(unittest.TestCase):
         )
         payload = {
             "page_id": str(_PAGE_ID),
-            "object_ref": "ko-billing-policy",
+            "object_ref": governed_object_ref(_PAGE_ID),
             "variant_ref": "broad",
             "channel": "help_center",
             "visibility": "external",

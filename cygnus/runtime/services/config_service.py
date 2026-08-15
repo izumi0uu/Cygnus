@@ -24,6 +24,7 @@ from cygnus.runtime.database.models import AppConfig
 # Encryption helpers
 # ---------------------------------------------------------------------------
 
+
 def _derive_fernet_key(secret: str) -> bytes:
     """Derive a Fernet-compatible key from an arbitrary secret string."""
     digest = hashlib.sha256(secret.encode()).digest()
@@ -33,9 +34,14 @@ def _derive_fernet_key(secret: str) -> bytes:
 def _is_sensitive(key: str) -> bool:
     """A key is sensitive if it stores raw credentials/API keys."""
     return (
-        key in {
-            "embedding_api_key", "llm_api_key", "llm_custom_api_key", "vision_api_key",
-            "smtp_password", "webhook_secret",
+        key
+        in {
+            "embedding_api_key",
+            "llm_api_key",
+            "llm_custom_api_key",
+            "vision_api_key",
+            "smtp_password",
+            "webhook_secret",
         }
         or key.startswith("embedding_api_key__")  # per-provider keys
     )
@@ -43,11 +49,13 @@ def _is_sensitive(key: str) -> bool:
 
 # Backward-compat alias: code that compared `key in SENSITIVE_KEYS` should now
 # call `_is_sensitive(key)`. Kept for any external callers.
-SENSITIVE_KEYS = frozenset({
-    "embedding_api_key",
-    "llm_api_key",
-    "vision_api_key",
-})
+SENSITIVE_KEYS = frozenset(
+    {
+        "embedding_api_key",
+        "llm_api_key",
+        "vision_api_key",
+    }
+)
 
 # Active model selection (canonical spec_id from the respective catalog).
 # All three follow the same pattern so the registry resolution code is uniform.
@@ -64,6 +72,7 @@ LLM_CUSTOM_CONTEXT_WINDOW_KEY = "llm_custom_context_window_tokens"
 LLM_CUSTOM_MAX_OUTPUT_KEY = "llm_custom_max_output_tokens"
 LLM_CUSTOM_REASONING_EFFORT_KEY = "llm_custom_reasoning_effort"
 
+
 # Per-provider embedding API keys: `embedding_api_key__<provider>`. We store
 # one key per provider so admins can switch provider without losing the
 # previously configured key. Encrypted at rest.
@@ -77,35 +86,30 @@ ALL_CONFIG_KEYS = [
     ACTIVE_EMBEDDING_MODEL_KEY,  # canonical spec_id, e.g. "openai/text-embedding-3-small"
     "embedding_api_key__google",
     "embedding_api_key__openai",
-    "embedding_base_url",        # optional, custom endpoint (Ollama, Azure, proxy)
-
+    "embedding_base_url",  # optional, custom endpoint (Ollama, Azure, proxy)
     # --- LLM (catalog-driven; old llm_provider/llm_model_id kept readable below) ---
-    ACTIVE_LLM_MODEL_KEY,        # canonical spec_id from LLM_CATALOG
-    "llm_api_key",               # Provider API key
-    "llm_base_url",              # Custom endpoint
-    LLM_CUSTOM_ENABLED_KEY,      # Whether the Hermes-style custom relay is active
-    LLM_CUSTOM_PROVIDER_KEY,     # openai | anthropic
-    LLM_CUSTOM_MODEL_ID_KEY,     # free-form runtime model id
-    LLM_CUSTOM_API_KEY,          # Custom relay API key
-    LLM_CUSTOM_BASE_URL_KEY,     # Relay base URL
+    ACTIVE_LLM_MODEL_KEY,  # canonical spec_id from LLM_CATALOG
+    "llm_api_key",  # Provider API key
+    "llm_base_url",  # Custom endpoint
+    LLM_CUSTOM_ENABLED_KEY,  # Whether the Hermes-style custom relay is active
+    LLM_CUSTOM_PROVIDER_KEY,  # openai | anthropic
+    LLM_CUSTOM_MODEL_ID_KEY,  # free-form runtime model id
+    LLM_CUSTOM_API_KEY,  # Custom relay API key
+    LLM_CUSTOM_BASE_URL_KEY,  # Relay base URL
     LLM_CUSTOM_CONTEXT_WINDOW_KEY,
     LLM_CUSTOM_MAX_OUTPUT_KEY,
     LLM_CUSTOM_REASONING_EFFORT_KEY,
-
     # --- Vision (catalog-driven; old vision_provider/vision_model_id kept below) ---
-    ACTIVE_VISION_MODEL_KEY,     # canonical spec_id from VISION_CATALOG
-    "vision_api_key",            # Provider API key (or empty = same as embedding)
-    "vision_base_url",           # Custom endpoint
-
+    ACTIVE_VISION_MODEL_KEY,  # canonical spec_id from VISION_CATALOG
+    "vision_api_key",  # Provider API key (or empty = same as embedding)
+    "vision_base_url",  # Custom endpoint
     # --- Deprecated LLM/Vision free-form keys (read-only for backward compat) ---
     "llm_provider",
     "llm_model_id",
     "vision_provider",
     "vision_model_id",
-
     # --- System ---
     "session_timeout_minutes",
-
     # --- Deprecated embedding keys (kept readable for one release; do not write) ---
     "embedding_provider",
     "embedding_model_id",
@@ -132,6 +136,7 @@ class ConfigService:
     def fernet(self) -> Fernet:
         if self._fernet is None:
             from cygnus.runtime.config import settings
+
             key = _derive_fernet_key(settings.secret_key)
             self._fernet = Fernet(key)
         return self._fernet
@@ -166,6 +171,7 @@ class ConfigService:
 
         # 2. Fallback to env/settings
         from cygnus.runtime.config import settings
+
         env_value = getattr(settings, key, None)
         if env_value is not None:
             return str(env_value)
@@ -199,7 +205,7 @@ class ConfigService:
     async def get_all_for_ui(self) -> dict[str, Any]:
         """Get all config values, masking sensitive ones for UI display."""
         all_config = await self.get_all()
-        ui_config = {}
+        ui_config: dict[str, Any] = {}
 
         for key, value in all_config.items():
             if _is_sensitive(key) and value:

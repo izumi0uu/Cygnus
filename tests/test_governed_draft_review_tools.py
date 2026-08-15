@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from typing import cast
+from typing import TypedDict, cast
 import unittest
 import uuid
 from unittest.mock import AsyncMock, patch
@@ -22,6 +22,13 @@ from cygnus.review.contributions import (
 from cygnus.runtime.database.models import Employee, WikiPageDraft
 
 
+class _ProposalFixturePayload(TypedDict):
+    proposed_object_type: str
+    title: str
+    input_summary: str
+    audience_context: dict[str, str]
+
+
 class _LifecycleSession:
     async def refresh(self, _draft: object) -> None:
         return None
@@ -36,36 +43,53 @@ class _LifecycleSession:
         return None
 
 
-def _author() -> object:
+def _author(*, department_id: uuid.UUID | None = None) -> Employee:
+    department_id = department_id or uuid.uuid4()
+    return cast(
+        Employee,
+        SimpleNamespace(
+            id=uuid.uuid4(),
+            role="employee",
+            name="Draft author",
+            email="author@example.test",
+            department_ids=[department_id],
+        ),
+    )
+
+
+def _department_source(department_id: uuid.UUID) -> SimpleNamespace:
     return SimpleNamespace(
-        id=uuid.uuid4(),
-        role="employee",
-        name="Draft author",
-        email="author@example.test",
+        status="ready",
+        scope_type="department",
+        scope_id=department_id,
+        departments=(SimpleNamespace(department_id=department_id),),
     )
 
 
 def _draft(
     *, author_id: uuid.UUID | None, status: str = "draft", version: int = 1
-) -> object:
-    return SimpleNamespace(
-        id=uuid.uuid4(),
-        author_id=author_id,
-        page_id=None,
-        page=None,
-        draft_kind="create",
-        status=status,
-        version=version,
-        revision_round=0,
-        content_md="# Billing\n\nDraft content",
-        note=None,
-        source="mcp_other",
-        source_metadata={"review_type": "content"},
-        suggested_metadata={"title": "Billing", "slug": "billing"},
-        last_returned_note=None,
-        ai_check_status="pending",
-        ai_check_results=None,
-        ai_checked_at=None,
+) -> WikiPageDraft:
+    return cast(
+        WikiPageDraft,
+        SimpleNamespace(
+            id=uuid.uuid4(),
+            author_id=author_id,
+            page_id=None,
+            page=None,
+            draft_kind="create",
+            status=status,
+            version=version,
+            revision_round=0,
+            content_md="# Billing\n\nDraft content",
+            note=None,
+            source="mcp_other",
+            source_metadata={"review_type": "content"},
+            suggested_metadata={"title": "Billing", "slug": "billing"},
+            last_returned_note=None,
+            ai_check_status="pending",
+            ai_check_results=None,
+            ai_checked_at=None,
+        ),
     )
 
 
@@ -132,6 +156,7 @@ class DraftLifecycleOwnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(draft.note, "Ready for review")
         lock.assert_awaited_once()
         record.assert_awaited_once()
+        assert record.await_args is not None
         self.assertEqual(record.await_args.kwargs["expected_version"], 1)
         self.assertEqual(record.await_args.kwargs["review_type"], "content")
         audit.assert_awaited_once()
@@ -203,6 +228,7 @@ class DraftLifecycleOwnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(replayed)
         self.assertEqual(draft.version, 2)
         self.assertEqual(draft.status, "draft")
+        assert record.await_args is not None
         self.assertEqual(record.await_args.args[1].version, 2)
         self.assertEqual(record.await_args.kwargs["previous_draft_version"], 1)
         audit.assert_awaited_once()
@@ -387,6 +413,7 @@ class DraftLifecycleOwnerTests(unittest.IsolatedAsyncioTestCase):
         audit.assert_awaited_once()
         append.assert_awaited_once()
         self.assertIsInstance(draft, WikiPageDraft)
+        assert append.await_args is not None
         self.assertEqual(
             append.await_args.kwargs["event_type"],
             contributions.GovernanceEventType.WITHDRAWN,
@@ -431,6 +458,8 @@ class DraftLifecycleOwnerTests(unittest.IsolatedAsyncioTestCase):
         lock.assert_awaited_once_with(
             cast(AsyncSession, cast(object, session)), draft.id
         )
+        assert record.await_args is not None
+        assert append.await_args is not None
         self.assertEqual(record.await_args.kwargs["action"], "resubmit")
         self.assertEqual(record.await_args.kwargs["previous_draft_version"], 1)
         self.assertEqual(append.await_args.kwargs["from_state"], "draft")
@@ -445,7 +474,7 @@ class GovernedDraftReviewToolContractTests(unittest.TestCase):
         actor.global_role = "contributor"
         return GovernedDraftReviewTools(
             cast(AsyncSession, cast(object, _LifecycleSession())),
-            actor=cast(Employee, cast(object, actor)),
+            actor=actor,
         )
 
     def test_definitions_cover_the_four_ready_lifecycle_tools(self) -> None:
@@ -461,10 +490,16 @@ class GovernedDraftReviewToolContractTests(unittest.TestCase):
         )
         self.assertIn("expected_version", definitions[1].parameters["required"])
         self.assertIn("expected_version", definitions[2].parameters["required"])
+        proposal_schema = definitions[0].parameters
+        self.assertIn("scope_type", proposal_schema["properties"])
+        self.assertIn("scope_id", proposal_schema["properties"])
+        self.assertNotIn("scope_type", proposal_schema["required"])
+        self.assertNotIn("scope_id", proposal_schema["required"])
 
     def test_invalid_schema_returns_the_governed_envelope(self) -> None:
         result = asyncio.run(
             self._tools().propose_knowledge_object(
+                command_id="propose:test-invalid-1",
                 proposed_object_type="answer_card",
                 title="Billing policy",
                 input_summary="Use the approved policy.",
@@ -485,7 +520,7 @@ class GovernedDraftReviewToolContractTests(unittest.TestCase):
         actor.global_role = "contributor"
         tools = GovernedDraftReviewTools(
             cast(AsyncSession, cast(object, _LifecycleSession())),
-            actor=cast(Employee, cast(object, actor)),
+            actor=actor,
         )
         source_id = uuid.uuid4()
         draft = _draft(author_id=actor.id)
@@ -493,7 +528,11 @@ class GovernedDraftReviewToolContractTests(unittest.TestCase):
             patch.object(
                 GovernedDraftReviewTools,
                 "_visible_sources",
-                AsyncMock(return_value={source_id: SimpleNamespace(status="ready")}),
+                AsyncMock(
+                    return_value={
+                        source_id: _department_source(actor.department_ids[0])
+                    }
+                ),
             ),
             patch.object(
                 draft_tools,
@@ -501,9 +540,24 @@ class GovernedDraftReviewToolContractTests(unittest.TestCase):
                 AsyncMock(return_value=draft),
             ) as create,
             patch.object(draft_tools, "log_audit", AsyncMock()),
+            patch.object(
+                draft_tools,
+                "replay_tool_command_receipt",
+                AsyncMock(return_value=None),
+            ),
+            patch.object(
+                draft_tools,
+                "create_tool_command_receipt",
+                AsyncMock(
+                    return_value=SimpleNamespace(
+                        receipt_ref="tool-command-receipt:test-propose"
+                    )
+                ),
+            ) as receipt,
         ):
             result = asyncio.run(
                 tools.propose_knowledge_object(
+                    command_id="propose:test-metadata-1",
                     proposed_object_type="answer_card",
                     title="Billing policy",
                     input_summary="Use the approved policy.",
@@ -530,6 +584,19 @@ class GovernedDraftReviewToolContractTests(unittest.TestCase):
                 )
             )
 
+        receipt.assert_awaited_once()
+        assert receipt.await_args is not None
+        self.assertEqual(
+            receipt.await_args.kwargs["command_id"],
+            "propose:test-metadata-1",
+        )
+        self.assertEqual(
+            receipt.await_args.kwargs["tool_name"],
+            "propose_knowledge_object",
+        )
+        self.assertEqual(result["receipt_ref"], "tool-command-receipt:test-propose")
+
+        assert create.await_args is not None
         metadata = create.await_args.kwargs["source_metadata"]
         self.assertEqual(metadata["object_type"], "answer_card")
         self.assertEqual(metadata["audience_context"]["product_line"], "billing")
@@ -538,18 +605,100 @@ class GovernedDraftReviewToolContractTests(unittest.TestCase):
             create.await_args.kwargs["suggested_metadata"]["knowledge_type_slugs"],
             ["answer_card"],
         )
+        self.assertEqual(
+            create.await_args.kwargs["suggested_metadata"]["scope_type"],
+            "department",
+        )
+        self.assertEqual(
+            create.await_args.kwargs["suggested_metadata"]["scope_id"],
+            str(actor.department_ids[0]),
+        )
         self.assertTrue(result["persisted"])
+
+    def test_own_department_contributor_cannot_propose_global_or_cross_scope(
+        self,
+    ) -> None:
+        import cygnus.integrations.governed_draft_review_tools as draft_tools
+
+        actor = _author()
+        actor.global_role = "contributor"
+        tools = GovernedDraftReviewTools(
+            cast(AsyncSession, cast(object, _LifecycleSession())),
+            actor=actor,
+        )
+        own_department_id = actor.department_ids[0]
+        other_department_id = uuid.uuid4()
+        source_id = uuid.uuid4()
+
+        async def visible_sources(
+            source_ids: tuple[uuid.UUID, ...],
+        ) -> dict[uuid.UUID, object]:
+            if not source_ids:
+                return {}
+            return {source_id: _department_source(other_department_id)}
+
+        common: _ProposalFixturePayload = {
+            "proposed_object_type": "answer_card",
+            "title": "Billing policy",
+            "input_summary": "Use the approved policy.",
+            "audience_context": {"visibility": "external"},
+        }
+        with (
+            patch.object(
+                GovernedDraftReviewTools,
+                "_visible_sources",
+                AsyncMock(side_effect=visible_sources),
+            ),
+            patch.object(
+                draft_tools,
+                "replay_tool_command_receipt",
+                AsyncMock(return_value=None),
+            ) as replay,
+        ):
+            implicit_global = asyncio.run(
+                tools.propose_knowledge_object(
+                    command_id="propose:implicit-global",
+                    **common,
+                )
+            )
+            explicit_global = asyncio.run(
+                tools.propose_knowledge_object(
+                    command_id="propose:explicit-global",
+                    scope_type="global",
+                    **common,
+                )
+            )
+            cross_department = asyncio.run(
+                tools.propose_knowledge_object(
+                    command_id="propose:cross-department",
+                    source_refs=[
+                        {
+                            "source_id": str(source_id),
+                            "source_type": "wiki",
+                            "locator": "page:other",
+                        }
+                    ],
+                    **common,
+                )
+            )
+
+        self.assertEqual(str(own_department_id), str(actor.department_ids[0]))
+        for result in (implicit_global, explicit_global, cross_department):
+            self.assertEqual(result["status"], "invalid")
+            self.assertEqual(result["errors"], ["invalid_arguments"])
+        self.assertEqual(replay.await_count, 3)
 
     def test_direct_adapter_denies_proposal_without_write_permission(self) -> None:
         actor = _author()
         actor.global_role = "viewer"
         tools = GovernedDraftReviewTools(
             cast(AsyncSession, cast(object, _LifecycleSession())),
-            actor=cast(Employee, cast(object, actor)),
+            actor=actor,
         )
 
         result = asyncio.run(
             tools.propose_knowledge_object(
+                command_id="propose:test-denied-1",
                 proposed_object_type="answer_card",
                 title="Billing policy",
                 input_summary="Use the approved policy.",
@@ -566,7 +715,7 @@ class GovernedDraftReviewToolContractTests(unittest.TestCase):
         actor = _author()
         tools = GovernedDraftReviewTools(
             cast(AsyncSession, cast(object, _LifecycleSession())),
-            actor=cast(Employee, cast(object, actor)),
+            actor=actor,
         )
         draft = _draft(author_id=actor.id)
         with (
@@ -577,12 +726,18 @@ class GovernedDraftReviewToolContractTests(unittest.TestCase):
             ),
             patch.object(
                 draft_tools,
+                "replay_tool_command_receipt",
+                AsyncMock(return_value=None),
+            ),
+            patch.object(
+                draft_tools,
                 "update_wiki_draft",
                 AsyncMock(side_effect=DraftVersionConflict(1, 2)),
             ),
         ):
             result = asyncio.run(
                 tools.update_draft_object(
+                    command_id="update:test-stale-1",
                     draft_id=str(draft.id),
                     expected_version=1,
                     patch={"content": "# Billing\n\nUpdated content"},
@@ -592,13 +747,106 @@ class GovernedDraftReviewToolContractTests(unittest.TestCase):
         self.assertEqual(result["status"], "conflict")
         self.assertEqual(result["errors"], ["stale_draft"])
 
+    def test_update_linked_evidence_resolves_stored_source_refs(self) -> None:
+        import cygnus.integrations.governed_draft_review_tools as draft_tools
+
+        actor = _author()
+        tools = GovernedDraftReviewTools(
+            cast(AsyncSession, cast(object, _LifecycleSession())),
+            actor=actor,
+        )
+        stored_source_id = uuid.uuid4()
+        evidence_source_id = uuid.uuid4()
+        draft = _draft(author_id=actor.id)
+        draft.suggested_metadata = {
+            "title": "Billing",
+            "slug": "billing",
+            "scope_type": "department",
+            "scope_id": str(actor.department_ids[0]),
+        }
+        stored_source_refs = [
+            {
+                "source_id": str(stored_source_id),
+                "source_type": "wiki",
+                "locator": "page:billing",
+            }
+        ]
+        draft.source_metadata = {
+            "source_refs": stored_source_refs,
+            "evidence_refs": [],
+            "source_ids": [str(stored_source_id)],
+        }
+        evidence_ref = {
+            "evidence_id": "evidence:billing-policy",
+            "source_id": str(evidence_source_id),
+            "excerpt_ref": "page:policy#billing",
+            "confidence": 0.9,
+            "freshness": "fresh",
+        }
+        source_rows = {
+            stored_source_id: _department_source(actor.department_ids[0]),
+            evidence_source_id: _department_source(actor.department_ids[0]),
+        }
+
+        with (
+            patch.object(
+                draft_tools,
+                "replay_tool_command_receipt",
+                AsyncMock(return_value=None),
+            ),
+            patch.object(
+                GovernedDraftReviewTools,
+                "_scoped_draft",
+                AsyncMock(return_value=draft),
+            ),
+            patch.object(
+                GovernedDraftReviewTools,
+                "_visible_sources",
+                AsyncMock(return_value=source_rows),
+            ) as visible_sources,
+            patch.object(
+                draft_tools,
+                "update_wiki_draft",
+                AsyncMock(return_value=(None, False)),
+            ) as update,
+            patch.object(
+                draft_tools,
+                "create_tool_command_receipt",
+                AsyncMock(
+                    return_value=SimpleNamespace(
+                        receipt_ref="tool-command-receipt:test-linked-evidence"
+                    )
+                ),
+            ),
+        ):
+            result = asyncio.run(
+                tools.update_draft_object(
+                    command_id="update:test-linked-evidence",
+                    draft_id=str(draft.id),
+                    expected_version=1,
+                    patch={"linked_evidence_refs": [evidence_ref]},
+                )
+            )
+
+        self.assertEqual(result["status"], "success")
+        visible_sources.assert_awaited_once_with((stored_source_id, evidence_source_id))
+        update.assert_awaited_once()
+        assert update.await_args is not None
+        source_metadata = update.await_args.kwargs["source_metadata"]
+        self.assertEqual(source_metadata["source_refs"], stored_source_refs)
+        self.assertEqual(source_metadata["evidence_refs"], [evidence_ref])
+        self.assertEqual(
+            source_metadata["source_ids"],
+            [str(stored_source_id), str(evidence_source_id)],
+        )
+
     def test_wrong_state_review_request_returns_a_governed_conflict(self) -> None:
         import cygnus.integrations.governed_draft_review_tools as draft_tools
 
         actor = _author()
         tools = GovernedDraftReviewTools(
             cast(AsyncSession, cast(object, _LifecycleSession())),
-            actor=cast(Employee, cast(object, actor)),
+            actor=actor,
         )
         draft = _draft(author_id=actor.id, status="approved")
         with (

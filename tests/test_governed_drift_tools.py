@@ -10,6 +10,8 @@ import unittest
 from unittest.mock import AsyncMock, patch
 import uuid
 
+from mcp.types import TextContent
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cygnus.governance.audience_bindings import AudienceBindingLifecycle
@@ -22,7 +24,11 @@ from cygnus.governance.drift_signals import (
 from cygnus.governance.signals import GovernanceSignalStatus
 from cygnus.integrations.governed_drift_tools import GovernedDriftTools
 from cygnus.integrations.mcp_auth import ResolvedIdentity
-from cygnus.runtime.database.models import GovernanceAudienceBinding, GovernanceSignal
+from cygnus.runtime.database.models import (
+    Employee,
+    GovernanceAudienceBinding,
+    GovernanceSignal,
+)
 from cygnus.runtime.mcp import tools as mcp_tools
 from cygnus.runtime.mcp.server import create_mcp_server
 from cygnus.substrate.compilation_plan import UrgencyLevel
@@ -316,7 +322,7 @@ class DriftSignalProviderTests(unittest.TestCase):
         scope_clause = object()
         session = cast(AsyncSession, cast(object, SimpleNamespace()))
         user = cast(
-            object,
+            Employee,
             SimpleNamespace(role="admin", department_ids=()),
         )
         good_binding = _binding(
@@ -347,13 +353,13 @@ class DriftSignalProviderTests(unittest.TestCase):
             provider = asyncio.run(
                 load_drift_signal_provider(
                     session,
-                    current_user=cast(object, user),
+                    current_user=user,
                 )
             )
 
         list_signals.assert_awaited_once_with(
             session,
-            current_user=cast(object, user),
+            current_user=user,
             status=GovernanceSignalStatus.ACTIVE,
             signal_types=DRIFT_SIGNAL_TYPES,
         )
@@ -375,7 +381,7 @@ class DriftSignalProviderTests(unittest.TestCase):
 
     def test_provider_exception_propagates(self) -> None:
         session = cast(AsyncSession, cast(object, SimpleNamespace()))
-        user = cast(object, SimpleNamespace(role="admin", department_ids=()))
+        user = cast(Employee, SimpleNamespace(role="admin", department_ids=()))
         with patch(
             "cygnus.governance.drift_signals.list_governance_signals",
             AsyncMock(side_effect=RuntimeError("database unavailable")),
@@ -384,7 +390,7 @@ class DriftSignalProviderTests(unittest.TestCase):
                 asyncio.run(
                     load_drift_signal_provider(
                         session,
-                        current_user=cast(object, user),
+                        current_user=user,
                     )
                 )
 
@@ -443,7 +449,9 @@ class MCPDriftResolverTests(unittest.TestCase):
 
         get_identity.assert_not_awaited()
         for result in results:
-            payload = json.loads(result.content[0].text)
+            content = result.content[0]
+            assert isinstance(content, TextContent)
+            payload = json.loads(content.text)
             self.assertEqual(payload["status"], "invalid")
             self.assertEqual(payload["errors"], ["invalid_arguments"])
 

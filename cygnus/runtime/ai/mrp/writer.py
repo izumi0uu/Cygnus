@@ -26,6 +26,7 @@ from cygnus.runtime.ai.prompt_library import (
 from cygnus.runtime.ai.providers.base import EmbeddingProvider, LLMProvider
 from cygnus.runtime.config import settings
 from cygnus.runtime.utils.progress import ProgressTracker
+from cygnus.substrate.source_language import resolve_source_language
 
 if TYPE_CHECKING:
     from cygnus.runtime.database.models import SourceCompilationPlan
@@ -52,18 +53,36 @@ _TIER_B_PROXIMITY_CHARS = 5_000
 # Dataclass
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class PageWriteResult:
     slug: str
     title: str
     page_type: str
-    action: str          # CREATE | UPDATE
+    action: str  # CREATE | UPDATE
     content_md: str
     summary: str
     citations: list[dict] = field(default_factory=list)
     # [{"ref": "[^1]", "absolute_offset": int, "evidence_length": int}]
     entity_names: list[str] = field(default_factory=list)
     related_kb_pages: list[str] = field(default_factory=list)
+    # Structured generation failure for this page's writer unit. None means the
+    # unit produced a real, draftable result. A failed unit NEVER carries a
+    # placeholder body — content_md stays "" and the commit gate refuses to
+    # draft the plan while any failure is present. Schema:
+    # {"unit": str, "phase": "refine", "status": "error",
+    #  "error_type": "generation_failed" | "no_evidence",
+    #  "message": str, "retryable": bool}
+    failure: Optional[dict] = None
+    # Lifecycle status assessed by VERIFY (seed|developing|mature|evergreen).
+    # None before VERIFY: CREATE defaults to "seed", UPDATE preserves the
+    # existing page status. Verified drafts carry the assessed value so the
+    # COMMIT phase writes it without re-assessing.
+    status: Optional[str] = None
+
+    @property
+    def is_failed(self) -> bool:
+        return self.failure is not None
 
     def to_dict(self) -> dict:
         return {
@@ -76,6 +95,8 @@ class PageWriteResult:
             "citations": self.citations,
             "entity_names": self.entity_names,
             "related_kb_pages": self.related_kb_pages,
+            "failure": self.failure,
+            "status": self.status,
         }
 
     @classmethod
@@ -90,6 +111,8 @@ class PageWriteResult:
             citations=d.get("citations", []),
             entity_names=d.get("entity_names", []),
             related_kb_pages=d.get("related_kb_pages", []),
+            failure=d.get("failure"),
+            status=d.get("status"),
         )
 
 
@@ -115,6 +138,7 @@ class WriterPassBatch:
 # Evidence assembly
 # ---------------------------------------------------------------------------
 
+
 def assemble_evidence(
     plan_item: dict,
     claims: list[dict],
@@ -127,13 +151,18 @@ def assemble_evidence(
     """
     import re
 
-    entity_names_lower = [n.lower().strip() for n in plan_item.get("entity_names", []) if n and n.strip()]
+    entity_names_lower = [
+        n.lower().strip() for n in plan_item.get("entity_names", []) if n and n.strip()
+    ]
     if not entity_names_lower:
         return []
 
     # Pre-compile a word-boundary pattern per entity name. We escape the name so
     # punctuation in the name is treated literally.
-    patterns = [re.compile(rf"\b{re.escape(name)}\b", re.IGNORECASE) for name in entity_names_lower]
+    patterns = [
+        re.compile(rf"\b{re.escape(name)}\b", re.IGNORECASE)
+        for name in entity_names_lower
+    ]
 
     evidence = []
     for claim in claims:
@@ -154,15 +183,17 @@ def assemble_evidence(
 
         offset = claim.get("absolute_offset", 0)
         length = min(claim.get("evidence_length", 200), 2000)
-        excerpt = full_text[offset: offset + length] if full_text else ""
-        evidence.append({
-            "statement": claim.get("statement", ""),
-            "subject": claim.get("subject", ""),
-            "confidence": claim.get("confidence", "explicit"),
-            "source_excerpt": excerpt,
-            "absolute_offset": offset,
-            "evidence_length": length,
-        })
+        excerpt = full_text[offset : offset + length] if full_text else ""
+        evidence.append(
+            {
+                "statement": claim.get("statement", ""),
+                "subject": claim.get("subject", ""),
+                "confidence": claim.get("confidence", "explicit"),
+                "source_excerpt": excerpt,
+                "absolute_offset": offset,
+                "evidence_length": length,
+            }
+        )
     return evidence
 
 
@@ -171,6 +202,38 @@ def assemble_evidence(
 # ---------------------------------------------------------------------------
 
 WRITER_SYSTEM = build_wiki_writer_system_prompt()
+
+
+def _writer_system(language: Optional[str]) -> str:
+    """Base writer system prompt, honoring the source's declared language tag.
+
+    ``language`` is the persisted, normalized source language (en|zh). When
+    given, the language rule declares it explicitly so the writer never infers
+    the language from the document; ``None`` keeps the default system prompt
+    (callers without a persisted tag).
+    """
+    if not language:
+        return WRITER_SYSTEM
+    return build_wiki_writer_system_prompt(language=language)
+
+
+def _complex_writer_system(language: Optional[str]) -> str:
+    if not language:
+        return _COMPLEX_WRITER_SYSTEM
+    return _writer_system(language) + _COMPLEX_WRITER_SUFFIX
+
+
+def _extend_writer_system(language: Optional[str]) -> str:
+    if not language:
+        return WRITER_SYSTEM_EXTEND
+    return _writer_system(language) + _WRITER_EXTEND_SUFFIX
+
+
+def _polish_writer_system(language: Optional[str]) -> str:
+    if not language:
+        return WRITER_SYSTEM_POLISH
+    return _writer_system(language) + _WRITER_POLISH_SUFFIX
+
 
 SOURCE_CONTEXT_FALLBACK_CHARS = 120_000  # fallback when no spec is available
 
@@ -202,6 +265,7 @@ def _get_source_context_budget(llm: Optional[LLMProvider]) -> int:
 # ---------------------------------------------------------------------------
 # Source context builder
 # ---------------------------------------------------------------------------
+
 
 def _build_source_context(
     full_text: str,
@@ -253,7 +317,9 @@ def _build_source_context(
             # Try to fit a truncated version if section is very long
             remaining = budget - total
             if remaining > 1000:
-                result_parts.append((orig_idx, text[:remaining] + "\n\n[…section truncated…]"))
+                result_parts.append(
+                    (orig_idx, text[:remaining] + "\n\n[…section truncated…]")
+                )
                 total += remaining
             break
         # Skip if overlaps with intro
@@ -273,12 +339,18 @@ def _build_source_context(
         parts.append(text)
 
     if total < len(full_text):
-        parts.append(f"\n\n[…document continues… total {len(full_text)} chars, showing {total}…]")
+        parts.append(
+            f"\n\n[…document continues… total {len(full_text)} chars, showing {total}…]"
+        )
 
-    spec_id = getattr(getattr(llm, "config", None), "extra", {}).get("spec_id") if llm else None
+    spec_id = (
+        getattr(getattr(llm, "config", None), "extra", {}).get("spec_id")
+        if llm
+        else None
+    )
     logger.info(
         f"MRP WRITER source context: {len(full_text)} chars → {total} chars "
-        f"({total*100//len(full_text)}%), budget={budget}, spec={spec_id}"
+        f"({total * 100 // len(full_text)}%), budget={budget}, spec={spec_id}"
     )
 
     return "".join(parts)
@@ -291,7 +363,8 @@ def _split_into_sections(text: str) -> list[tuple[int, str]]:
     If no headings found, splits by double-newline paragraphs.
     """
     import re
-    heading_pattern = re.compile(r'^(#{1,4})\s+', re.MULTILINE)
+
+    heading_pattern = re.compile(r"^(#{1,4})\s+", re.MULTILINE)
 
     matches = list(heading_pattern.finditer(text))
     if not matches:
@@ -310,7 +383,7 @@ def _split_into_sections(text: str) -> list[tuple[int, str]]:
     sections = []
     # Text before first heading
     if matches[0].start() > 0:
-        sections.append((0, text[:matches[0].start()]))
+        sections.append((0, text[: matches[0].start()]))
 
     for i, m in enumerate(matches):
         start = m.start()
@@ -372,6 +445,7 @@ def _score_sections(
 # Section selection (3-tier) — replaces _score_sections greedy logic
 # ---------------------------------------------------------------------------
 
+
 def _sections_from_outline(
     full_text: str,
     outline_json: list,
@@ -390,13 +464,15 @@ def _sections_from_outline(
         if cs is None or ce is None or ce <= cs:
             continue
         ce = min(ce, len(full_text))
-        refs.append(SectionRef(
-            title=node.get("title", ""),
-            level=int(node.get("level", 1)),
-            char_start=cs,
-            char_end=ce,
-            text=full_text[cs:ce],
-        ))
+        refs.append(
+            SectionRef(
+                title=node.get("title", ""),
+                level=int(node.get("level", 1)),
+                char_start=cs,
+                char_end=ce,
+                text=full_text[cs:ce],
+            )
+        )
     refs.sort(key=lambda s: s.char_start)
     return refs
 
@@ -446,7 +522,8 @@ def select_relevant_sections(
     a_indices: set[int] = set()
     for idx, sec in enumerate(sections):
         hits = [
-            ev_idx for ev_idx, off in enumerate(ev_offsets)
+            ev_idx
+            for ev_idx, off in enumerate(ev_offsets)
             if sec.char_start <= off < sec.char_end
         ]
         if hits:
@@ -465,7 +542,8 @@ def select_relevant_sections(
         is_adjacent = (idx - 1) in a_indices or (idx + 1) in a_indices
         # Close-by evidence?
         close = any(
-            min(abs(off - sec.char_start), abs(off - sec.char_end)) < _TIER_B_PROXIMITY_CHARS
+            min(abs(off - sec.char_start), abs(off - sec.char_end))
+            < _TIER_B_PROXIMITY_CHARS
             for off in ev_offsets
         )
         if is_adjacent or close:
@@ -482,7 +560,7 @@ def select_relevant_sections(
 
 
 def _format_skipped_marker(sec: SectionRef) -> str:
-    return f"\n\n[…skipped: \"{sec.title}\" ({sec.char_end - sec.char_start} chars)…]\n\n"
+    return f'\n\n[…skipped: "{sec.title}" ({sec.char_end - sec.char_start} chars)…]\n\n'
 
 
 def build_writer_batches(
@@ -526,7 +604,9 @@ def _make_batch(sections: list[SectionRef], evidence: list[dict]) -> WriterPassB
         seen.update(s.evidence_indices)
     batch_evidence = [evidence[i] for i in sorted(seen) if 0 <= i < len(evidence)]
     total = sum(len(s.text) for s in sections)
-    return WriterPassBatch(sections=sections, evidence=batch_evidence, total_chars=total)
+    return WriterPassBatch(
+        sections=sections, evidence=batch_evidence, total_chars=total
+    )
 
 
 def _decide_writer_strategy(
@@ -624,8 +704,7 @@ def _format_evidence_blocks(evidence: list[dict]) -> tuple[str, list[dict]]:
     lines = []
     for i, ev in enumerate(evidence, 1):
         lines.append(
-            f"{i}. [{ev['confidence'].upper()}] {ev['subject']}\n"
-            f"   {ev['statement']}"
+            f"{i}. [{ev['confidence'].upper()}] {ev['subject']}\n   {ev['statement']}"
         )
     return "\n\n".join(lines), []
 
@@ -667,6 +746,7 @@ async def _write_page_simple(
     all_plan_slugs: list[str],
     source_context: str = "",
     image_markers: Optional[list[str]] = None,
+    language: Optional[str] = None,
 ) -> tuple[str, str, list[dict]]:
     """
     Returns (content_md, summary, citations_meta).
@@ -674,11 +754,16 @@ async def _write_page_simple(
     # Format available slugs for the prompt (exclude self)
     own_slug = plan_item.get("slug", "")
     available = [s for s in all_plan_slugs if s != own_slug]
-    all_plan_slugs_str = "\n".join(f"- [[{s}]]" for s in available) if available else "(none — this is the only page)"
+    all_plan_slugs_str = (
+        "\n".join(f"- [[{s}]]" for s in available)
+        if available
+        else "(none — this is the only page)"
+    )
 
     existing_section = (
         f"## Existing page content (UPDATE — integrate new evidence into this)\n\n{existing_content}\n"
-        if existing_content else ""
+        if existing_content
+        else ""
     )
     evidence_blocks, citations_meta = _format_evidence_blocks(evidence)
 
@@ -707,7 +792,7 @@ async def _write_page_simple(
     )
 
     raw = await asyncio.wait_for(
-        llm.generate(prompt, system=WRITER_SYSTEM, temperature=0.15),
+        llm.generate(prompt, system=_writer_system(language), temperature=0.15),
         timeout=WRITER_AGENT_TIMEOUT,
     )
 
@@ -767,8 +852,14 @@ _COMPLEX_WRITER_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "content_md": {"type": "string", "description": "Full markdown content using [[slug]] wikilinks"},
-                    "summary": {"type": "string", "description": "One-sentence summary"},
+                    "content_md": {
+                        "type": "string",
+                        "description": "Full markdown content using [[slug]] wikilinks",
+                    },
+                    "summary": {
+                        "type": "string",
+                        "description": "One-sentence summary",
+                    },
                 },
                 "required": ["content_md", "summary"],
             },
@@ -776,13 +867,15 @@ _COMPLEX_WRITER_TOOLS = [
     },
 ]
 
-_COMPLEX_WRITER_SYSTEM = WRITER_SYSTEM + """
+_COMPLEX_WRITER_SUFFIX = """
 
 # Tool workflow
 1. Optionally call read_kb_page for any related page you want to reference.
 2. Optionally call read_source_excerpt to read more context from the source.
 3. Call finish with the complete page content and summary.
 """
+
+_COMPLEX_WRITER_SYSTEM = WRITER_SYSTEM + _COMPLEX_WRITER_SUFFIX
 
 
 async def _write_page_complex(
@@ -794,12 +887,16 @@ async def _write_page_complex(
     session: AsyncSession,
     source,
     all_plan_slugs: list[str],
+    language: Optional[str] = None,
 ) -> tuple[str, str, list[dict]]:
     """
     Mini agent loop for pages with many evidence items or large existing content.
     Returns (content_md, summary, citations_meta).
     """
-    from cygnus.substrate.agent_protocol import assistant_message_from_turn, tool_results_message
+    from cygnus.substrate.agent_protocol import (
+        assistant_message_from_turn,
+        tool_results_message,
+    )
     from cygnus.runtime.services import wiki_service
 
     scope_type = source.scope_type or "global"
@@ -808,7 +905,8 @@ async def _write_page_complex(
     evidence_blocks, citations_meta = _format_evidence_blocks(evidence)
     existing_section = (
         f"\n## Existing page content (UPDATE — integrate):\n{existing_content}\n"
-        if existing_content else ""
+        if existing_content
+        else ""
     )
 
     # Format available slugs (exclude self)
@@ -847,19 +945,22 @@ async def _write_page_complex(
 
     for step in range(WRITER_AGENT_MAX_STEPS):
         from cygnus.substrate.agent_protocol import AssistantTurn
+
         try:
             turn: AssistantTurn = await asyncio.wait_for(
                 llm.generate_with_tools(
                     messages=messages,
                     tools=_COMPLEX_WRITER_TOOLS,
-                    system=_COMPLEX_WRITER_SYSTEM,
+                    system=_complex_writer_system(language),
                     temperature=0.15,
                 ),
                 timeout=WRITER_AGENT_TIMEOUT,
             )
         except Exception as e:
             err_msg = f"{type(e).__name__}: {str(e)}"
-            logger.error(f"MRP complex writer LLM call failed at step {step}: {err_msg}")
+            logger.error(
+                f"MRP complex writer LLM call failed at step {step}: {err_msg}"
+            )
             raise
 
         messages.append(assistant_message_from_turn(turn))
@@ -867,7 +968,7 @@ async def _write_page_complex(
         if not turn.tool_calls:
             break
 
-        tool_results = []
+        tool_results: list[tuple[str, str, dict[str, object]]] = []
         for call in turn.tool_calls:
             if call.name == "finish":
                 result_content = call.arguments.get("content_md", "")
@@ -876,19 +977,29 @@ async def _write_page_complex(
                 break
             elif call.name == "read_kb_page":
                 slug = call.arguments.get("slug", "")
-                page = await wiki_service.get_page_by_slug(session, slug, scope_type=scope_type, scope_id=scope_id)
+                page = await wiki_service.get_page_by_slug(
+                    session, slug, scope_type=scope_type, scope_id=scope_id
+                )
                 if page:
-                    result: Any = {"slug": page.slug, "title": page.title, "content_md": page.content_md}
+                    result: Any = {
+                        "slug": page.slug,
+                        "title": page.title,
+                        "content_md": page.content_md,
+                    }
                 else:
                     result = {"error": f"Page '{slug}' not found"}
                 tool_results.append((call.id, call.name, result))
             elif call.name == "read_source_excerpt":
                 start = max(0, int(call.arguments.get("start_char", 0)))
                 length = min(int(call.arguments.get("length", 5000)), 10000)
-                excerpt = full_text[start: start + length] if full_text else ""
-                tool_results.append((call.id, call.name, {"excerpt": excerpt, "start_char": start}))
+                excerpt = full_text[start : start + length] if full_text else ""
+                tool_results.append(
+                    (call.id, call.name, {"excerpt": excerpt, "start_char": start})
+                )
             else:
-                tool_results.append((call.id, call.name, {"error": f"Unknown tool: {call.name}"}))
+                tool_results.append(
+                    (call.id, call.name, {"error": f"Unknown tool: {call.name}"})
+                )
 
         if result_content is not None:
             break
@@ -909,7 +1020,13 @@ async def _write_page_complex(
                     result_content = content
                 if result_content:
                     break
-        result_content = result_content or f"# {plan_item.get('title', '')}\n\n(content generation incomplete)"
+        if not result_content:
+            # Never fabricate a placeholder draft: a writer unit that produced
+            # no content is a structured failure, not a page.
+            raise RuntimeError(
+                f"complex writer for page '{plan_item.get('slug', '')}' "
+                "finished without producing page content"
+            )
         result_summary = plan_item.get("title", "")
 
     # Quick summary extraction if not provided
@@ -928,7 +1045,7 @@ async def _write_page_complex(
 # Multi-pass writer (Tier 2)
 # ---------------------------------------------------------------------------
 
-WRITER_SYSTEM_EXTEND = WRITER_SYSTEM + """
+_WRITER_EXTEND_SUFFIX = """
 
 # Multi-pass extension mode
 You are EXTENDING an existing draft of a wiki page with NEW source sections that
@@ -945,7 +1062,9 @@ were not visible in earlier passes. CRITICAL RULES:
 5. Do NOT add image markers in this pass — they will be added in the final pass.
 """
 
-WRITER_SYSTEM_POLISH = WRITER_SYSTEM + """
+WRITER_SYSTEM_EXTEND = WRITER_SYSTEM + _WRITER_EXTEND_SUFFIX
+
+_WRITER_POLISH_SUFFIX = """
 
 # Multi-pass polish mode
 You are receiving a multi-pass draft that may have:
@@ -963,6 +1082,8 @@ POLISH RULES:
 5. Ensure a final See also section with wikilinks (if any).
 6. Output MUST be at least 95% the length of the input draft.
 """
+
+WRITER_SYSTEM_POLISH = WRITER_SYSTEM + _WRITER_POLISH_SUFFIX
 
 
 _EXTEND_PROMPT = """\
@@ -1013,14 +1134,20 @@ async def _writer_pass_create(
     tier_c: list[SectionRef],
     existing_content: Optional[str],
     all_plan_slugs: list[str],
+    language: Optional[str] = None,
 ) -> str:
     own_slug = plan_item.get("slug", "")
     available = [s for s in all_plan_slugs if s != own_slug]
-    all_plan_slugs_str = "\n".join(f"- [[{s}]]" for s in available) if available else "(none — this is the only page)"
+    all_plan_slugs_str = (
+        "\n".join(f"- [[{s}]]" for s in available)
+        if available
+        else "(none — this is the only page)"
+    )
 
     existing_section = (
         f"## Existing page content (UPDATE — integrate new evidence into this)\n\n{existing_content}\n"
-        if existing_content else ""
+        if existing_content
+        else ""
     )
     evidence_blocks, _ = _format_evidence_blocks(batch.evidence)
     source_context = _render_batch_source(batch, tier_c)
@@ -1039,7 +1166,7 @@ async def _writer_pass_create(
     )
 
     raw = await asyncio.wait_for(
-        llm.generate(prompt, system=WRITER_SYSTEM, temperature=0.15),
+        llm.generate(prompt, system=_writer_system(language), temperature=0.15),
         timeout=WRITER_AGENT_TIMEOUT,
     )
     return raw.strip()
@@ -1051,9 +1178,12 @@ async def _writer_pass_extend(
     batch: WriterPassBatch,
     all_plan_slugs: list[str],
     own_slug: str,
+    language: Optional[str] = None,
 ) -> str:
     available = [s for s in all_plan_slugs if s != own_slug]
-    all_plan_slugs_str = "\n".join(f"- [[{s}]]" for s in available) if available else "(none)"
+    all_plan_slugs_str = (
+        "\n".join(f"- [[{s}]]" for s in available) if available else "(none)"
+    )
     evidence_blocks, _ = _format_evidence_blocks(batch.evidence)
     batch_source = _render_batch_source(batch, [])
 
@@ -1065,7 +1195,7 @@ async def _writer_pass_extend(
         all_plan_slugs=all_plan_slugs_str,
     )
     raw = await asyncio.wait_for(
-        llm.generate(prompt, system=WRITER_SYSTEM_EXTEND, temperature=0.15),
+        llm.generate(prompt, system=_extend_writer_system(language), temperature=0.15),
         timeout=WRITER_AGENT_TIMEOUT,
     )
     return raw.strip()
@@ -1077,11 +1207,18 @@ async def _writer_pass_polish(
     image_markers: list[str],
     all_plan_slugs: list[str],
     own_slug: str,
+    language: Optional[str] = None,
 ) -> str:
     available = [s for s in all_plan_slugs if s != own_slug]
-    all_plan_slugs_str = "\n".join(f"- [[{s}]]" for s in available) if available else "(none)"
+    all_plan_slugs_str = (
+        "\n".join(f"- [[{s}]]" for s in available) if available else "(none)"
+    )
 
-    image_section = "\n".join(f"- {m}" for m in image_markers) if image_markers else "(no image markers)"
+    image_section = (
+        "\n".join(f"- {m}" for m in image_markers)
+        if image_markers
+        else "(no image markers)"
+    )
 
     prompt = _POLISH_PROMPT.format(
         draft=draft,
@@ -1089,7 +1226,7 @@ async def _writer_pass_polish(
         all_plan_slugs=all_plan_slugs_str,
     )
     raw = await asyncio.wait_for(
-        llm.generate(prompt, system=WRITER_SYSTEM_POLISH, temperature=0.1),
+        llm.generate(prompt, system=_polish_writer_system(language), temperature=0.1),
         timeout=WRITER_AGENT_TIMEOUT,
     )
     return raw.strip()
@@ -1106,6 +1243,7 @@ async def _write_page_multipass(
     budget_per_pass: int,
     all_plan_slugs: list[str],
     image_markers: list[str],
+    language: Optional[str] = None,
 ) -> tuple[str, str, list[dict]]:
     """Orchestrate multi-pass writing: CREATE → EXTEND* → optional POLISH.
 
@@ -1116,10 +1254,14 @@ async def _write_page_multipass(
     batches = build_writer_batches(tier_a, tier_b, evidence, budget_per_pass)
     if not batches:
         content, summary, citations = await _write_page_simple(
-            llm, plan_item, evidence, existing_content,
+            llm,
+            plan_item,
+            evidence,
+            existing_content,
             all_plan_slugs=all_plan_slugs,
             source_context="",
             image_markers=image_markers,
+            language=language,
         )
         return content, summary, citations
 
@@ -1130,7 +1272,13 @@ async def _write_page_multipass(
     )
 
     draft = await _writer_pass_create(
-        llm, plan_item, batches[0], tier_c, existing_content, all_plan_slugs,
+        llm,
+        plan_item,
+        batches[0],
+        tier_c,
+        existing_content,
+        all_plan_slugs,
+        language=language,
     )
 
     for i, batch in enumerate(batches[1:], start=1):
@@ -1139,17 +1287,24 @@ async def _write_page_multipass(
         for attempt in range(_MAX_EXTEND_RETRIES + 1):
             try:
                 new_draft = await _writer_pass_extend(
-                    llm, attempt_draft, batch, all_plan_slugs, own_slug,
+                    llm,
+                    attempt_draft,
+                    batch,
+                    all_plan_slugs,
+                    own_slug,
+                    language=language,
                 )
             except Exception as exc:
-                logger.warning(f"MRP MULTIPASS extend pass {i} failed for '{own_slug}': {exc}")
+                logger.warning(
+                    f"MRP MULTIPASS extend pass {i} failed for '{own_slug}': {exc}"
+                )
                 break
             if len(new_draft) >= len(attempt_draft) * _EXTEND_SHRINK_THRESHOLD:
                 draft = new_draft
                 success = True
                 break
             logger.warning(
-                f"MRP MULTIPASS extend pass {i} attempt {attempt+1} shrunk "
+                f"MRP MULTIPASS extend pass {i} attempt {attempt + 1} shrunk "
                 f"{len(attempt_draft)}→{len(new_draft)} for '{own_slug}'"
             )
         if not success:
@@ -1163,7 +1318,12 @@ async def _write_page_multipass(
     if enable_polish:
         try:
             polished = await _writer_pass_polish(
-                llm, draft, image_markers, all_plan_slugs, own_slug,
+                llm,
+                draft,
+                image_markers,
+                all_plan_slugs,
+                own_slug,
+                language=language,
             )
             if len(polished) >= len(draft) * 0.95:
                 draft = polished
@@ -1189,6 +1349,43 @@ async def _write_page_multipass(
 # ---------------------------------------------------------------------------
 # Phase 3 orchestrator
 # ---------------------------------------------------------------------------
+
+
+def _failed_page_result(
+    plan_item: dict,
+    *,
+    error_type: str,
+    message: str,
+    retryable: bool,
+) -> PageWriteResult:
+    """Build a PageWriteResult for a page whose writer unit failed.
+
+    A failed unit NEVER fabricates a placeholder body: content_md stays empty
+    and the structured failure is what the commit completeness gate reads.
+    The plan is kept non-done and the source non-ready until the unit is
+    regenerated successfully.
+    """
+    slug = plan_item.get("slug", "")
+    return PageWriteResult(
+        slug=slug,
+        title=plan_item.get("title", slug),
+        page_type=plan_item.get("page_type", "concept"),
+        action=plan_item.get("action", "CREATE").upper(),
+        content_md="",
+        summary="",
+        citations=[],
+        entity_names=plan_item.get("entity_names", []),
+        related_kb_pages=plan_item.get("related_kb_pages", []),
+        failure={
+            "unit": f"refine:page:{slug}",
+            "phase": "refine",
+            "status": "error",
+            "error_type": error_type,
+            "message": message[:500],
+            "retryable": retryable,
+        },
+    )
+
 
 async def run_refine_phase(
     session: AsyncSession,
@@ -1220,6 +1417,11 @@ async def run_refine_phase(
     scope_type = source.scope_type or "global"
     scope_id = source.scope_id
 
+    # Persisted source language tag: drives both the writer's declared-language
+    # prompt rule and which canonical-identity page the writer reads back for
+    # UPDATEs. Never auto-detected.
+    source_language = resolve_source_language(source)
+
     await tracker.update(78, f"Writing {len(pages_spec)} wiki pages...")
 
     from cygnus.runtime.database import async_session_factory
@@ -1237,6 +1439,20 @@ async def run_refine_phase(
             # Assemble evidence
             evidence = assemble_evidence(plan_item, all_claims, full_text)
 
+            if not evidence:
+                # A page with no evidence-backed claims cannot be drafted:
+                # record a structured failure instead of letting the writer
+                # hallucinate from an empty checklist.
+                return _failed_page_result(
+                    plan_item,
+                    error_type="no_evidence",
+                    message=(
+                        "no source claims matched this page's entity_names; "
+                        "a page without evidence cannot be drafted"
+                    ),
+                    retryable=False,
+                )
+
             # Each writer owns its own AsyncSession — SQLAlchemy AsyncSession is not
             # safe for concurrent use, so sharing the orchestrator's session across
             # the asyncio.gather fan-out previously caused race conditions when
@@ -1245,64 +1461,112 @@ async def run_refine_phase(
                 existing_content: Optional[str] = None
                 if action == "UPDATE":
                     existing_page = await wiki_service.get_page_by_slug(
-                        worker_session, slug, scope_type=scope_type, scope_id=scope_id,
+                        worker_session,
+                        slug,
+                        scope_type=scope_type,
+                        scope_id=scope_id,
+                        language=source_language,
                     )
                     if existing_page:
                         existing_content = existing_page.content_md
 
                 budget = _get_source_context_budget(llm)
                 tier_a, tier_b, tier_c = select_relevant_sections(
-                    full_text, source.outline_json, evidence, budget,
+                    full_text,
+                    source.outline_json,
+                    evidence,
+                    budget,
                 )
                 relevant_chars = sum(len(s.text) for s in tier_a + tier_b)
                 evidence_overhead = len(_format_evidence_blocks(evidence)[0])
                 mode, budget_per_pass = _decide_writer_strategy(
-                    relevant_chars, budget, evidence_overhead, len(existing_content or ""),
+                    relevant_chars,
+                    budget,
+                    evidence_overhead,
+                    len(existing_content or ""),
                 )
 
                 image_markers = _collect_relevant_image_markers(evidence, full_text)
-                multipass_enabled = getattr(settings, "mrp_multipass_writer_enabled", True)
+                multipass_enabled = getattr(
+                    settings, "mrp_multipass_writer_enabled", True
+                )
 
                 logger.info(
                     f"MRP REFINE '{slug}': mode={mode} multipass_enabled={multipass_enabled} "
                     f"tier_a={len(tier_a)} tier_b={len(tier_b)} tier_c={len(tier_c)} "
-                    f"relevant_chars={relevant_chars} budget={budget}"
+                    f"relevant_chars={relevant_chars} budget={budget} language={source_language}"
                 )
 
                 try:
                     if mode == "multipass" and multipass_enabled:
                         content_md, summary, citations = await _write_page_multipass(
-                            llm, plan_item, evidence, existing_content,
-                            tier_a, tier_b, tier_c, budget_per_pass,
+                            llm,
+                            plan_item,
+                            evidence,
+                            existing_content,
+                            tier_a,
+                            tier_b,
+                            tier_c,
+                            budget_per_pass,
                             all_plan_slugs=all_plan_slugs,
                             image_markers=image_markers,
+                            language=source_language,
                         )
                     else:
                         source_context = _render_single_pass_source(
-                            tier_a, tier_b, tier_c, budget,
+                            tier_a,
+                            tier_b,
+                            tier_c,
+                            budget,
                         )
                         is_complex = (
                             len(evidence) > WRITER_COMPLEX_THRESHOLD_EVIDENCE
-                            or len(existing_content or "") > WRITER_COMPLEX_THRESHOLD_EXISTING_CHARS
+                            or len(existing_content or "")
+                            > WRITER_COMPLEX_THRESHOLD_EXISTING_CHARS
                         )
                         if is_complex:
                             content_md, summary, citations = await _write_page_complex(
-                                llm, plan_item, evidence, existing_content, full_text, worker_session, source,
+                                llm,
+                                plan_item,
+                                evidence,
+                                existing_content,
+                                full_text,
+                                worker_session,
+                                source,
                                 all_plan_slugs=all_plan_slugs,
+                                language=source_language,
                             )
                         else:
                             content_md, summary, citations = await _write_page_simple(
-                                llm, plan_item, evidence, existing_content,
+                                llm,
+                                plan_item,
+                                evidence,
+                                existing_content,
                                 all_plan_slugs=all_plan_slugs,
                                 source_context=source_context,
                                 image_markers=image_markers,
+                                language=source_language,
                             )
                 except Exception as e:
                     err_msg = f"{type(e).__name__}: {str(e)}"
                     logger.error(f"MRP REFINE writer failed for '{slug}': {err_msg}")
-                    content_md = f"# {title}\n\n(Page generation failed: {err_msg[:200]})"
-                    summary = title
-                    citations = []
+                    return _failed_page_result(
+                        plan_item,
+                        error_type="generation_failed",
+                        message=err_msg,
+                        retryable=True,
+                    )
+
+                if not content_md.strip():
+                    logger.error(
+                        f"MRP REFINE writer returned empty content for '{slug}'"
+                    )
+                    return _failed_page_result(
+                        plan_item,
+                        error_type="generation_failed",
+                        message="writer returned empty page content",
+                        retryable=True,
+                    )
 
                 return PageWriteResult(
                     slug=slug,
@@ -1320,13 +1584,20 @@ async def run_refine_phase(
     page_results = [r for r in results if r is not None]
 
     # Persist drafts into plan_json so VERIFY/COMMIT can resume without re-running REFINE.
+    # Failed units are persisted WITH their structured failure dicts so the commit
+    # completeness gate can reject the plan even across worker restarts.
     try:
         plan_json = dict(plan.plan_json or {})
         plan_json["_page_drafts"] = [pr.to_dict() for pr in page_results]
+        plan_json["_failures"] = [
+            pr.failure for pr in page_results if pr.failure is not None
+        ]
         plan.plan_json = plan_json
         await session.commit()
     except Exception as exc:
         logger.warning(f"MRP REFINE failed to persist page drafts: {exc}")
 
-    logger.info(f"MRP REFINE complete: {len(page_results)} pages written for source={source.id}")
+    logger.info(
+        f"MRP REFINE complete: {len(page_results)} pages written for source={source.id}"
+    )
     return page_results

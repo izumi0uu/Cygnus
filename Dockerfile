@@ -71,8 +71,7 @@ LABEL org.opencontainers.image.title="cygnus-backend" \
 
 ENV PATH="/opt/cygnus/venv/bin:${PATH}" \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
@@ -81,9 +80,12 @@ COPY --from=deps /build/alembic.ini ./
 COPY --from=deps /build/migrations ./migrations
 COPY deploy/healthchecks/worker_healthcheck.py /opt/cygnus/worker_healthcheck.py
 
-# Unprivileged runtime identity — created with plain file entries so the
-# image never depends on a `useradd`/`passwd` package being present.
-RUN echo 'cygnus:x:10001:10001::/app:/usr/sbin/nologin' >> /etc/passwd \
+# The pinned Python base ships pip for build-time convenience. The production
+# image installs nothing at runtime, so remove that unnecessary attack surface.
+RUN rm -rf /usr/local/lib/python3.12/site-packages/pip \
+        /usr/local/lib/python3.12/site-packages/pip-*.dist-info \
+        /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.12 \
+    && echo 'cygnus:x:10001:10001::/app:/usr/sbin/nologin' >> /etc/passwd \
     && echo 'cygnus:x:10001:' >> /etc/group \
     && chown -R 10001:10001 /app
 

@@ -109,13 +109,13 @@
     {
       "name": "trivy",
       "purpose": "release image vulnerability scanner",
-      "tag": "aquasec/trivy:0.58.0",
-      "reference": "aquasec/trivy:0.58.0@sha256:b88012e2a0a309d6a8a00463d4e63e5e513377fb74eccbc8f9b0f8f81940ebeb",
-      "manifest_digest": "sha256:b88012e2a0a309d6a8a00463d4e63e5e513377fb74eccbc8f9b0f8f81940ebeb",
+      "tag": "aquasec/trivy:0.74.0",
+      "reference": "aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969",
+      "manifest_digest": "sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969",
       "registry": "docker.io",
-      "media_type": "application/vnd.docker.distribution.manifest.list.v2+json",
+      "media_type": "application/vnd.oci.image.index.v1+json",
       "platforms": ["linux/amd64", "linux/arm64"],
-      "metadata_source": "Docker Hub v2 tag metadata for aquasec/trivy:0.58.0",
+      "metadata_source": "Docker Hub v2 tag metadata for aquasec/trivy:0.74.0",
       "verified_at": "2026-08-15",
       "status": "verified"
     }

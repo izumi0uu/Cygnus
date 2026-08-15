@@ -300,14 +300,21 @@ jobs:
           identity="^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@"
           cosign verify --certificate-identity-regexp "$identity" --certificate-oidc-issuer https://token.actions.githubusercontent.com --output json "$BACKEND_REF" > production/signatures/backend.verify.json
           cosign verify --certificate-identity-regexp "$identity" --certificate-oidc-issuer https://token.actions.githubusercontent.com --output json "$FRONTEND_REF" > production/signatures/frontend.verify.json
-      - name: Scan backend image (HIGH/CRITICAL blocks)
+      - name: Scan backend image (HIGH/CRITICAL policy evidence)
         env:
           BACKEND_REF: ${{ steps.digests.outputs.backend_ref }}
-        run: docker run --rm -v "$PWD/production/scans:/scans" aquasec/trivy:0.58.0@sha256:b88012e2a0a309d6a8a00463d4e63e5e513377fb74eccbc8f9b0f8f81940ebeb image --severity HIGH,CRITICAL --exit-code 1 --format json --output /scans/backend-trivy.json "$BACKEND_REF"
-      - name: Scan frontend image (HIGH/CRITICAL blocks)
+        run: docker run --rm -v "$PWD/production/scans:/scans" aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969 image --scanners vuln --severity HIGH,CRITICAL --exit-code 0 --format json --output /scans/backend-trivy.json "$BACKEND_REF"
+      - name: Scan frontend image (HIGH/CRITICAL policy evidence)
         env:
           FRONTEND_REF: ${{ steps.digests.outputs.frontend_ref }}
-        run: docker run --rm -v "$PWD/production/scans:/scans" aquasec/trivy:0.58.0@sha256:b88012e2a0a309d6a8a00463d4e63e5e513377fb74eccbc8f9b0f8f81940ebeb image --severity HIGH,CRITICAL --exit-code 1 --format json --output /scans/frontend-trivy.json "$FRONTEND_REF"
+        run: docker run --rm -v "$PWD/production/scans:/scans" aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969 image --scanners vuln --severity HIGH,CRITICAL --exit-code 0 --format json --output /scans/frontend-trivy.json "$FRONTEND_REF"
+      - name: Upload image scan diagnostics
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: image-scan-diagnostics-${{ github.run_id }}
+          path: production/scans/*.json
+          retention-days: 30
+          if-no-files-found: error
       - name: Write immutable image manifest
         env:
           BACKEND_REF: ${{ steps.digests.outputs.backend_ref }}

@@ -10,8 +10,8 @@ signed request -> signed ack loop:
 - returns a signed ack binding ``publication_id`` / ``surface_id`` /
   ``object_version`` / ``digest`` so the governed adapter can verify it
 
-Real Production V1 acceptance still requires an external internal-copilot
-endpoint; this fixture only proves the adapter contract deterministically.
+Production uses the Cygnus-owned durable ASGI consumer; this fixture remains
+only for deterministic adapter unit tests.
 """
 
 from __future__ import annotations
@@ -47,6 +47,7 @@ class FakeConsumer:
         self.redirect_to = redirect_to
         self.received_bodies: list[bytes] = []
         self.received_headers: list[dict[str, str]] = []
+        self.received_methods: list[str] = []
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         if scope.get("type") != "http":
@@ -54,7 +55,10 @@ class FakeConsumer:
             return
         method = cast(str, scope.get("method", "GET"))
         path = cast(str, scope.get("path", ""))
-        if method != "POST" or path != "/api/internal/propagation-delivery":
+        if (
+            method not in {"HEAD", "POST"}
+            or path != "/api/internal/propagation-delivery"
+        ):
             await self._send_json(send, 404, {"error": "not found"})
             return
         headers = {
@@ -71,6 +75,7 @@ class FakeConsumer:
                 break
         self.received_bodies.append(body)
         self.received_headers.append(headers)
+        self.received_methods.append(method)
 
         if self.fail_with is not None:
             await self._send_json(send, self.fail_with, {"error": "synthetic failure"})
@@ -91,6 +96,16 @@ class FakeConsumer:
         signature = headers.get("x-cygnus-signature", "")
         if not _verify_signature(body, signature, self.secret):
             await self._send_json(send, 401, {"error": "signature verification failed"})
+            return
+        if method == "HEAD":
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 204,
+                    "headers": [],
+                }
+            )
+            await send({"type": "http.response.body", "body": b""})
             return
         try:
             payload = json.loads(body.decode("utf-8"))

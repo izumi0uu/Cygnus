@@ -66,22 +66,33 @@ def validate_repository(root: Path = REPO_ROOT) -> GateResult:
         "frontend/scripts/run-browser-certification.mjs",
         "docker-compose.yml",
         "deploy/docker-compose.prod.yml",
+        "deploy/docker-compose.certification.yml",
+        "deploy/nginx/nginx.prod.conf.template",
         "deploy/image-lock.json",
         "config/observability/alert_rules.yml",
         "config/observability/alert_thresholds.schema.json",
         "cygnus/observability/alert_rules.py",
+        "cygnus/publish/delivery.py",
+        "cygnus/integrations/delivery_consumer.py",
+        "migrations/versions/20260816_01_delivery_consumer_receipts.py",
         "deploy/production-inputs.example.json",
+        "deploy/.env.prod.example",
         ".github/workflows/release.yml",
         ".github/workflows/repo-guard.yml",
         ".github/workflows/backup-restore-drill.yml",
         "scripts/prod/deploy.sh",
         "scripts/prod/rollback.sh",
+        "scripts/prod/compose-control.sh",
         "scripts/prod/backup_restore_drill.sh",
+        "scripts/prod/certification-stack.sh",
+        "scripts/prod/security-certification.py",
         "scripts/run_live_production_certification.sh",
         "scripts/prod/write-release-env.py",
         "scripts/prod/rotate-secrets.sh",
         "scripts/prod/incident.sh",
+        "scripts/prod/lib.sh",
         "scripts/production_inputs_gate.py",
+        "scripts/production_delivery_config_gate.py",
         "scripts/collect_image_attestations.py",
         "scripts/render_alert_rules.py",
         "scripts/release_gate.py",
@@ -122,6 +133,22 @@ def validate_repository(root: Path = REPO_ROOT) -> GateResult:
 
     local_compose = _read(root, "docker-compose.yml")
     production_compose = _read(root, "deploy/docker-compose.prod.yml")
+    certification_compose = _read(root, "deploy/docker-compose.certification.yml")
+    nginx_template = _read(root, "deploy/nginx/nginx.prod.conf.template")
+    certification_stack = _read(root, "scripts/prod/certification-stack.sh")
+    production_env_example = _read(root, "deploy/.env.prod.example")
+    security_certification = _read(root, "scripts/prod/security-certification.py")
+    production_inputs_example = _read(root, "deploy/production-inputs.example.json")
+    delivery_config_gate = _read(root, "scripts/production_delivery_config_gate.py")
+    production_inputs_gate = _read(root, "scripts/production_inputs_gate.py")
+    delivery_sender = _read(root, "cygnus/publish/delivery.py")
+    delivery_consumer_source = _read(root, "cygnus/integrations/delivery_consumer.py")
+    production_worker = _read(root, "cygnus/runtime/worker.py")
+    production_helpers = _read(root, "scripts/prod/lib.sh")
+    backup_restore_drill = _read(root, "scripts/prod/backup_restore_drill.sh")
+    production_deploy = _read(root, "scripts/prod/deploy.sh")
+    production_rollback = _read(root, "scripts/prod/rollback.sh")
+    production_compose_control = _read(root, "scripts/prod/compose-control.sh")
     workflow = _read(root, ".github/workflows/release.yml")
     repo_guard_workflow = _read(root, ".github/workflows/repo-guard.yml")
     checks["local_profile_marked_development"] = "DEVELOPMENT ONLY" in local_compose
@@ -129,6 +156,36 @@ def validate_repository(root: Path = REPO_ROOT) -> GateResult:
         failures.append(
             "local docker-compose.yml is not explicitly marked DEVELOPMENT ONLY"
         )
+    delivery_target_origin = "https://REPLACE_WITH_INTERNAL_DELIVERY_HOST"
+    delivery_origin_checks = {
+        "env_template_uses_base_origin": (
+            f'DELIVERY_TARGETS_JSON={{"REPLACE_WITH_CHANNEL_ID":"{delivery_target_origin}"}}'
+            in production_env_example
+        ),
+        "manifest_template_uses_base_origin": (
+            f'"endpoint": "{delivery_target_origin}"' in production_inputs_example
+        ),
+        "legacy_delivery_suffix_absent": (
+            "/v1/delivery" not in production_env_example
+            and "/v1/delivery" not in production_inputs_example
+        ),
+        "env_gate_rejects_nonroot_paths": (
+            'parsed.path not in ("", "/")' in delivery_config_gate
+        ),
+        "input_gate_rejects_nonroot_paths": (
+            production_inputs_gate.count('parsed.path not in ("", "/")') >= 2
+        ),
+        "sender_appends_fixed_delivery_path": (
+            '_DELIVERY_PATH = "api/internal/propagation-delivery"' in delivery_sender
+            and 'return urljoin(normalized + "/", _DELIVERY_PATH)' in delivery_sender
+        ),
+    }
+    checks["delivery_target_origin_contract"] = delivery_origin_checks
+    failures.extend(
+        f"delivery target origin contract failed: {name}"
+        for name, passed in delivery_origin_checks.items()
+        if not passed
+    )
     if re.search(r"^\s*build:\s*", production_compose, re.MULTILINE):
         failures.append("production compose must not contain build instructions")
     for fragment in (
@@ -163,7 +220,7 @@ def validate_repository(root: Path = REPO_ROOT) -> GateResult:
         )
     if any(
         token in production_compose
-        for token in ("8077:", "5432:", "6379:", "9000:", "9001:")
+        for token in ("8077:", "8090:", "5432:", "6379:", "9000:", "9001:")
     ):
         failures.append("production compose exposes a non-proxy service port")
     service_sections = {
@@ -195,6 +252,428 @@ def validate_repository(root: Path = REPO_ROOT) -> GateResult:
                 )
     checks["production_service_secret_scoping"] = not any(
         "env_file:" in section for section in service_sections.values()
+    )
+    delivery_consumer_match = re.search(
+        r"(?ms)^  delivery-consumer:\n(.*?)(?=^  [a-z][a-z0-9-]*:\n|^secrets:|\Z)",
+        production_compose,
+    )
+    delivery_consumer = (
+        delivery_consumer_match.group(1) if delivery_consumer_match else ""
+    )
+    backend_app = production_compose.partition("x-backend-app: &backend-app\n")[
+        2
+    ].partition("\nservices:\n")[0]
+    required_backend_runtime_fragments = (
+        "image: ${CYGNUS_API_IMAGE:",
+        "env_file:",
+        "${CYGNUS_PRODUCTION_ENV_FILE:-.env.prod}",
+        "read_only: true",
+        'user: "65534:65534"',
+        "cap_drop: [ALL]",
+        "no-new-privileges:true",
+        "tmpfs:",
+        "resources:",
+    )
+    missing_backend_runtime = [
+        fragment
+        for fragment in required_backend_runtime_fragments
+        if fragment not in backend_app
+    ]
+    if missing_backend_runtime:
+        failures.append(
+            "shared backend runtime is missing delivery-consumer hardening/config: "
+            + ", ".join(missing_backend_runtime)
+        )
+    required_delivery_consumer_fragments = (
+        "<<: *backend-app",
+        'command: ["uvicorn", "cygnus.integrations.delivery_consumer:app", '
+        '"--host", "0.0.0.0", "--port", "8090"]',
+        "migrator:\n        condition: service_completed_successfully",
+        "http://localhost:8090/health",
+    )
+    missing_delivery_consumer = [
+        fragment
+        for fragment in required_delivery_consumer_fragments
+        if fragment not in delivery_consumer
+    ]
+    delivery_consumer_has_port = bool(
+        re.search(r"^    ports:\s*$", delivery_consumer, re.MULTILINE)
+    )
+    delivery_consumer_has_volume = "volumes:" in delivery_consumer
+    delivery_consumer_has_direct_image = bool(
+        re.search(r"^    image:", delivery_consumer, re.MULTILINE)
+    )
+    frontend_section = service_sections["frontend"]
+    frontend_waits_for_delivery_consumer = (
+        "delivery-consumer:\n        condition: service_healthy" in frontend_section
+    )
+    published_services = [
+        name
+        for name, section in re.findall(
+            r"(?ms)^  ([a-z][a-z0-9-]*):\n(.*?)(?=^  [a-z][a-z0-9-]*:\n|^secrets:|\Z)",
+            production_compose,
+        )
+        if re.search(r"^    ports:\s*$", section, re.MULTILINE)
+    ]
+    delivery_consumer_checks = {
+        "missing": missing_delivery_consumer,
+        "host_port": delivery_consumer_has_port,
+        "persistent_volume": delivery_consumer_has_volume,
+        "direct_image_override": delivery_consumer_has_direct_image,
+        "frontend_waits_for_healthy_consumer": frontend_waits_for_delivery_consumer,
+        "published_services": published_services,
+    }
+    checks["delivery_consumer_compose_contract"] = delivery_consumer_checks
+    failures.extend(
+        f"delivery-consumer compose contract missing: {fragment}"
+        for fragment in missing_delivery_consumer
+    )
+    if delivery_consumer_has_port:
+        failures.append("delivery-consumer must not publish a host port")
+    if delivery_consumer_has_volume:
+        failures.append("delivery-consumer receipts must not use a persistent volume")
+    if delivery_consumer_has_direct_image:
+        failures.append("delivery-consumer must inherit the immutable backend image")
+    if not frontend_waits_for_delivery_consumer:
+        failures.append("frontend must wait for a healthy delivery-consumer")
+    if published_services != ["frontend"]:
+        failures.append(
+            "production compose must keep frontend as the sole host-published ingress"
+        )
+    delivery_wait_match = re.search(
+        r"(?ms)^compose_wait_for_delivery_consumer\(\) \{\n(.*?)^\}",
+        production_helpers,
+    )
+    frontend_rollout_match = re.search(
+        r"(?ms)^compose_up_frontend\(\) \{\n(.*?)^\}",
+        production_helpers,
+    )
+    deploy_delivery_order = (
+        "compose_up_ingress_backend",
+        "compose_up_frontend",
+        'verify_delivery_ingress "$CYGNUS_DOMAIN"',
+        "compose_up_workers",
+        'verify_ingress "$CYGNUS_DOMAIN"',
+    )
+    rollback_delivery_order = deploy_delivery_order
+    worker_startup = production_worker.partition(
+        "async def on_startup(ctx: WorkerContext):"
+    )[2].partition("await heartbeat.mark_ready()")[0]
+    delivery_rollout_checks = {
+        "backend_rollout_includes_consumer": (
+            "PRODUCTION_BACKEND_SERVICES=(api worker worker-skills delivery-consumer)"
+            in production_helpers
+        ),
+        "backend_roles_are_split": (
+            "PRODUCTION_INGRESS_BACKEND_SERVICES=(api delivery-consumer)"
+            in production_helpers
+            and "PRODUCTION_WORKER_SERVICES=(worker worker-skills)"
+            in production_helpers
+        ),
+        "deploy_workers_follow_route_proof": (
+            all(fragment in production_deploy for fragment in deploy_delivery_order)
+            and [
+                production_deploy.index(fragment) for fragment in deploy_delivery_order
+            ]
+            == sorted(
+                production_deploy.index(fragment) for fragment in deploy_delivery_order
+            )
+        ),
+        "rollback_workers_follow_route_proof": (
+            all(fragment in production_rollback for fragment in rollback_delivery_order)
+            and [
+                production_rollback.index(fragment)
+                for fragment in rollback_delivery_order
+            ]
+            == sorted(
+                production_rollback.index(fragment)
+                for fragment in rollback_delivery_order
+            )
+        ),
+        "route_probe_requires_consumer_signature_error": (
+            "/api/internal/propagation-delivery" in production_helpers
+            and '{"detail": "delivery signature is invalid"}' in production_helpers
+        ),
+        "consumer_waits_for_health": (
+            delivery_wait_match is not None
+            and '"${COMPOSE[@]}" up -d --no-deps --wait delivery-consumer'
+            in delivery_wait_match.group(1)
+        ),
+        "frontend_waits_before_no_deps_rollout": (
+            frontend_rollout_match is not None
+            and "compose_wait_for_delivery_consumer" in frontend_rollout_match.group(1)
+            and '"${COMPOSE[@]}" up -d --no-deps --force-recreate frontend'
+            in frontend_rollout_match.group(1)
+            and frontend_rollout_match.group(1).index(
+                "compose_wait_for_delivery_consumer"
+            )
+            < frontend_rollout_match.group(1).index(
+                '"${COMPOSE[@]}" up -d --no-deps --force-recreate frontend'
+            )
+        ),
+        "worker_restart_probe_precedes_delivery_claim": (
+            "async def delivery_targets_ready(" in delivery_sender
+            and '"HEAD",' in delivery_sender
+            and "X-Cygnus-Signature" in delivery_sender
+            and '@app.head("/api/internal/propagation-delivery")'
+            in delivery_consumer_source
+            and "if not await _receipt_store_ready():" in delivery_consumer_source
+            and "delivery_route_ready = await delivery_targets_ready()"
+            in worker_startup
+            and "if not delivery_route_ready:" in worker_startup
+            and "count = await drain_propagation_deliveries()" in worker_startup
+            and worker_startup.index(
+                "delivery_route_ready = await delivery_targets_ready()"
+            )
+            < worker_startup.index("count = await drain_propagation_deliveries()")
+        ),
+        "certification_proves_signed_receipt_store_readiness": (
+            "X-Cygnus-Signature: sha256=$delivery_signature" in certification_stack
+            and 'readiness_status" = 204' in certification_stack
+        ),
+        "backup_drill_quiesces_consumer": (
+            "compose-control.sh --release $CYGNUS_RELEASE -- quiesce-backend"
+            in backup_restore_drill
+            and "quiesce-backend" in production_compose_control
+        ),
+        "backup_drill_resumes_consumer_after_route_proof": (
+            "compose-control.sh --release $CYGNUS_RELEASE -- resume-backend"
+            in backup_restore_drill
+            and "compose_resume_backend" in production_compose_control
+        ),
+        "rollback_downgrades_with_source_before_legacy_handoff": all(
+            fragment in production_rollback
+            for fragment in (
+                'load_release "$SOURCE_RELEASE"',
+                '"${COMPOSE[@]}" run --rm --no-deps api alembic downgrade "$DOWNGRADE_REV"',
+                '"${COMPOSE[@]}" rm --stop --force delivery-consumer',
+                '"$TARGET_CHECKOUT/scripts/prod/rollback.sh" --release "$RELEASE" --yes',
+            )
+        )
+        and [
+            production_rollback.index(fragment)
+            for fragment in (
+                'load_release "$SOURCE_RELEASE"',
+                '"${COMPOSE[@]}" run --rm --no-deps api alembic downgrade "$DOWNGRADE_REV"',
+                '"${COMPOSE[@]}" rm --stop --force delivery-consumer',
+                '"$TARGET_CHECKOUT/scripts/prod/rollback.sh" --release "$RELEASE" --yes',
+            )
+        ]
+        == sorted(
+            production_rollback.index(fragment)
+            for fragment in (
+                'load_release "$SOURCE_RELEASE"',
+                '"${COMPOSE[@]}" run --rm --no-deps api alembic downgrade "$DOWNGRADE_REV"',
+                '"${COMPOSE[@]}" rm --stop --force delivery-consumer',
+                '"$TARGET_CHECKOUT/scripts/prod/rollback.sh" --release "$RELEASE" --yes',
+            )
+        ),
+        "rollback_requires_target_schema_head": (
+            '"$SOURCE_EXPECTED_ALEMBIC_HEAD" != "$TARGET_EXPECTED_ALEMBIC_HEAD"'
+            in production_rollback
+            and '"$DOWNGRADE_REV" != "$TARGET_EXPECTED_ALEMBIC_HEAD"'
+            in production_rollback
+        ),
+        "rollback_preflight_stdout_is_contract_only": (
+            "preflight_target_checkout() (\n  exec 3>&1\n  exec 1>&2"
+            in production_rollback
+            and 'printf \'%s|%s\' "$EXPECTED_ALEMBIC_HEAD" "$target_has_consumer" >&3'
+            in production_rollback
+        ),
+        "failed_deploy_uses_current_source_rollback": (
+            '"$SCRIPT_DIR/rollback.sh" --release "$PREVIOUS" --downgrade target --yes'
+            in production_deploy
+            and 'CYGNUS_ROLLBACK_SOURCE_METADATA_FILE="$LOADED_RELEASE_FILE"'
+            in production_deploy
+            and 'CYGNUS_ROLLBACK_SOURCE_INPUTS_FILE="$LOADED_RELEASE_INPUTS_FILE"'
+            in production_deploy
+            and '"$CHECKOUTS_DIR/$PREVIOUS/scripts/prod/rollback.sh" --release'
+            not in production_deploy
+        ),
+    }
+    checks["delivery_consumer_rollout_contract"] = delivery_rollout_checks
+    failures.extend(
+        f"delivery-consumer rollout contract failed: {name}"
+        for name, passed in delivery_rollout_checks.items()
+        if not passed
+    )
+
+    delivery_route_match = re.search(
+        r"(?ms)^    location = /api/internal/propagation-delivery \{\n(.*?)^    \}",
+        nginx_template,
+    )
+    delivery_route = delivery_route_match.group(1) if delivery_route_match else ""
+    delivery_route_index = nginx_template.find(
+        "location = /api/internal/propagation-delivery"
+    )
+    generic_api_route_index = nginx_template.find("location ^~ /api/")
+    nginx_delivery_checks = {
+        "exact_route": bool(delivery_route_match),
+        "route_precedes_generic_api": 0
+        <= delivery_route_index
+        < generic_api_route_index,
+        "consumer_proxy": "proxy_pass http://delivery-consumer:8090;" in delivery_route,
+        "body_size_bound": "client_max_body_size 1m;" in delivery_route,
+        "no_store": 'add_header Cache-Control "no-store" always;' in delivery_route,
+        "security_headers": "include /etc/nginx/security-headers.conf;"
+        in delivery_route,
+        "request_headers_preserved": "proxy_pass_request_headers off;"
+        not in nginx_template,
+        "ack_header_preserved": (
+            "proxy_hide_header X-Cygnus-Ack-Signature;" not in nginx_template
+        ),
+        "public_readiness_gates_on_consumer": (
+            "auth_request /_delivery-consumer-health;" in nginx_template
+            and "proxy_pass http://delivery-consumer:8090/health;" in nginx_template
+            and "proxy_connect_timeout 1s;" in nginx_template
+            and "proxy_read_timeout 2s;" in nginx_template
+            and "proxy_send_timeout 2s;" in nginx_template
+            and "error_page 500 =503 /_delivery-consumer-not-ready;" in nginx_template
+            and '"delivery_consumer":{"status":"failed"}' in nginx_template
+            and "https://127.0.0.1:8443/readyz" in production_compose
+        ),
+    }
+    checks["delivery_consumer_nginx_contract"] = nginx_delivery_checks
+    failures.extend(
+        f"delivery-consumer Nginx contract failed: {name}"
+        for name, passed in nginx_delivery_checks.items()
+        if not passed
+    )
+
+    certification_resume_match = re.search(
+        r"(?ms)^  resume\)\n(.*?)^    ;;",
+        certification_stack,
+    )
+    certification_resume = (
+        certification_resume_match.group(1) if certification_resume_match else ""
+    )
+    certification_restart_match = re.search(
+        r"(?ms)^  restart\)\n(.*?)^    ;;",
+        certification_stack,
+    )
+    certification_restart = (
+        certification_restart_match.group(1) if certification_restart_match else ""
+    )
+    certification_gated_order = (
+        "compose_up_ingress_backend",
+        "compose_up_frontend",
+        "verify_certification_delivery_ingress",
+        "compose_up_workers",
+        "verify_certification_ingress",
+    )
+    certification_resume_order = (
+        '"${COMPOSE[@]}" start "${PRODUCTION_INGRESS_BACKEND_SERVICES[@]}"',
+        "compose_wait_for_delivery_consumer",
+        "verify_certification_delivery_ingress",
+        '"${COMPOSE[@]}" start "${PRODUCTION_WORKER_SERVICES[@]}"',
+        "verify_certification_ingress",
+    )
+    certification_restart_order = (
+        '"${COMPOSE[@]}" restart "${PRODUCTION_INGRESS_BACKEND_SERVICES[@]}"',
+        "compose_wait_for_delivery_consumer",
+        '"${COMPOSE[@]}" restart frontend',
+        "verify_certification_delivery_ingress",
+        '"${COMPOSE[@]}" restart "${PRODUCTION_WORKER_SERVICES[@]}"',
+        "verify_certification_ingress",
+    )
+    certification_recover = certification_stack.partition("  recover)\n")[2].partition(
+        "  smoke-exercise)\n"
+    )[0]
+    certification_rollout = certification_stack.partition("  up|redeploy)\n")[
+        2
+    ].partition("esac")[0]
+    certification_delivery_checks = {
+        "uses_production_compose_first": (
+            '-f "$COMPOSE_FILE" -f "$CERTIFICATION_COMPOSE_FILE"' in certification_stack
+        ),
+        "does_not_override_consumer": not bool(
+            re.search(r"(?m)^  delivery-consumer:", certification_compose)
+        ),
+        "does_not_override_frontend": not bool(
+            re.search(r"(?m)^  frontend:", certification_compose)
+        ),
+        "uses_https_origin": (
+            'CERTIFICATION_ORIGIN="https://127.0.0.1:$CYGNUS_HTTPS_BIND_PORT"'
+            in certification_stack
+        ),
+        "targets_isolated_candidate_ingress": (
+            'CERTIFICATION_DELIVERY_ORIGIN="https://frontend:8443"'
+            in certification_stack
+            and certification_compose.count(
+                "CYGNUS_CERTIFICATION_DELIVERY_TARGETS_JSON"
+            )
+            == 2
+            and certification_compose.count('CYGNUS_DELIVERY_ALLOWED_HOSTS: "frontend"')
+            == 2
+        ),
+        "candidate_tls_trusted_by_senders": (
+            "DNS:frontend" in certification_stack
+            and certification_compose.count(
+                "SSL_CERT_FILE: /run/secrets/cygnus_tls_cert"
+            )
+            == 2
+            and certification_compose.count("- cygnus_tls_cert") == 2
+        ),
+        "validates_tls_ingress": (
+            'curl -fsS --cacert "$CYGNUS_TLS_CERT_FILE"' in certification_stack
+        ),
+        "validates_exact_delivery_route": (
+            "/api/internal/propagation-delivery" in certification_stack
+            and '{"detail": "delivery signature is invalid"}' in certification_stack
+        ),
+        "workers_follow_candidate_route_proof": all(
+            all(fragment in section for fragment in certification_gated_order)
+            and [section.index(fragment) for fragment in certification_gated_order]
+            == sorted(section.index(fragment) for fragment in certification_gated_order)
+            for section in (certification_recover, certification_rollout)
+        ),
+        "quiesces_consumer": (
+            '"${COMPOSE[@]}" stop api worker worker-skills delivery-consumer'
+            in certification_stack
+        ),
+        "resume_starts_workers_after_route_proof": (
+            all(
+                fragment in certification_resume
+                for fragment in certification_resume_order
+            )
+            and [
+                certification_resume.index(fragment)
+                for fragment in certification_resume_order
+            ]
+            == sorted(
+                certification_resume.index(fragment)
+                for fragment in certification_resume_order
+            )
+        ),
+        "restart_starts_workers_after_route_proof": (
+            all(
+                fragment in certification_restart
+                for fragment in certification_restart_order
+            )
+            and [
+                certification_restart.index(fragment)
+                for fragment in certification_restart_order
+            ]
+            == sorted(
+                certification_restart.index(fragment)
+                for fragment in certification_restart_order
+            )
+        ),
+        "consumer_failure_flips_public_readiness": (
+            '"consumer-stop"' in security_certification
+            and '"consumer-restart"' in security_certification
+            and "consumer_not_ready.status_code != 503" in security_certification
+            and "fault-off|consumer-stop|consumer-restart) ;;" in certification_stack
+            and "consumer_recovered.status_code != 200" in security_certification
+            and "consumer-stop)" in certification_stack
+            and "consumer-restart)" in certification_stack
+        ),
+    }
+    checks["certification_delivery_consumer_contract"] = certification_delivery_checks
+    failures.extend(
+        f"certification delivery-consumer contract failed: {name}"
+        for name, passed in certification_delivery_checks.items()
+        if not passed
     )
     if "npm ci --no-audit --no-fund" not in _read(root, "frontend/Dockerfile"):
         failures.append("frontend Dockerfile must install through npm ci")

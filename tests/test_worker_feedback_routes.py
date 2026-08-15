@@ -424,6 +424,32 @@ class FeedbackRouteWorkerWiringTests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
+    async def test_startup_skips_delivery_claims_while_route_is_unavailable(
+        self,
+    ) -> None:
+        import cygnus.runtime.worker as worker_module
+
+        pre_review_sweep = AsyncMock(return_value=0)
+        feedback_drain = AsyncMock(return_value=0)
+        route_ready = AsyncMock(return_value=False)
+        delivery_drain = AsyncMock(return_value=1)
+        with (
+            patch(
+                "cygnus.review.pre_review.dispatch.sweep_ai_pre_review_dispatches",
+                pre_review_sweep,
+            ),
+            patch.object(worker_module, "drain_feedback_routes", feedback_drain),
+            patch("cygnus.publish.delivery.delivery_targets_ready", route_ready),
+            patch(
+                "cygnus.publish.delivery.drain_propagation_deliveries",
+                delivery_drain,
+            ),
+        ):
+            await worker_module.WorkerSettings.on_startup({"redis": _HeartbeatRedis()})
+
+        route_ready.assert_awaited_once_with()
+        delivery_drain.assert_not_awaited()
+
     async def test_feedback_startup_failure_does_not_skip_pre_review_recovery(
         self,
     ) -> None:

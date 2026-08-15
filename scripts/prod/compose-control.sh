@@ -25,4 +25,16 @@ validate_secrets
 validate_resources
 validate_production_inputs "$RELEASE"
 validate_compose
+case "$1" in
+  quiesce-backend)
+    [ "$#" -eq 1 ] || die "quiesce-backend accepts no additional arguments"
+    compose_quiesce_backend
+    exit 0
+    ;;
+  resume-backend)
+    [ "$#" -eq 1 ] || die "resume-backend accepts no additional arguments"
+    compose_resume_backend
+    exit 0
+    ;;
+esac
 exec "${COMPOSE[@]}" "$@"

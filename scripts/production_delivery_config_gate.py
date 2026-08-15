@@ -83,11 +83,13 @@ def validate(targets_json: str, allowed_hosts_raw: str) -> DeliveryGateResult:
             or not host
             or parsed.username
             or parsed.password
+            or parsed.path not in ("", "/")
             or parsed.query
             or parsed.fragment
         ):
             failures.append(
-                f"delivery target {channel!r} must be a credential-free HTTPS URL without query or fragment"
+                f"delivery target {channel!r} must be a credential-free HTTPS "
+                "base origin without a non-root path, query, or fragment"
             )
             continue
         if host not in allowed_hosts:

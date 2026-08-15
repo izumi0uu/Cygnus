@@ -2896,21 +2896,37 @@ class WorkerSettings:
             if count:
                 logger.info("Feedback route startup sweep claimed {} route(s)", count)
 
-        from cygnus.publish.delivery import drain_propagation_deliveries
+        from cygnus.publish.delivery import (
+            delivery_targets_ready,
+            drain_propagation_deliveries,
+        )
 
         try:
-            count = await drain_propagation_deliveries()
+            delivery_route_ready = await delivery_targets_ready()
         except Exception as exc:
             logger.warning(
-                "Propagation delivery startup sweep failed class {}",
+                "Propagation delivery startup readiness probe failed class {}",
                 type(exc).__name__,
             )
         else:
-            if count:
-                logger.info(
-                    "Propagation delivery startup sweep dispatched {} delivery(ies)",
-                    count,
+            if not delivery_route_ready:
+                logger.warning(
+                    "Propagation delivery startup sweep skipped; route is unavailable"
                 )
+            else:
+                try:
+                    count = await drain_propagation_deliveries()
+                except Exception as exc:
+                    logger.warning(
+                        "Propagation delivery startup sweep failed class {}",
+                        type(exc).__name__,
+                    )
+                else:
+                    if count:
+                        logger.info(
+                            "Propagation delivery startup sweep dispatched {} delivery(ies)",
+                            count,
+                        )
 
         await heartbeat.mark_ready()
         # CYG-142 telemetry: publish heartbeat freshness for the

@@ -71,7 +71,7 @@
     "targets": [
       {
         "channel_id": "REPLACE_WITH_CHANNEL_ID",
-        "endpoint": "https://REPLACE_WITH_INTERNAL_DELIVERY_HOST/v1/delivery"
+        "endpoint": "https://REPLACE_WITH_INTERNAL_DELIVERY_HOST"
       }
     ],
     "hmac_secret_ref": "secret-store://REPLACE_WITH_DELIVERY_HMAC_SECRET_REF",

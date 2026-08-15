@@ -171,7 +171,7 @@ def _parse_delivery_env(
             continue
         if not isinstance(endpoint, str):
             failures.append(
-                f"DELIVERY_TARGETS_JSON.{channel} must be an HTTPS endpoint string"
+                f"DELIVERY_TARGETS_JSON.{channel} must be a base HTTPS origin string"
             )
             continue
         parsed = urlsplit(endpoint)
@@ -181,11 +181,13 @@ def _parse_delivery_env(
             or not host
             or parsed.username
             or parsed.password
+            or parsed.path not in ("", "/")
             or parsed.query
             or parsed.fragment
         ):
             failures.append(
-                f"DELIVERY_TARGETS_JSON.{channel} must be a credential-free HTTPS URL without query/fragment"
+                f"DELIVERY_TARGETS_JSON.{channel} must be a credential-free HTTPS "
+                "base origin without a non-root path, query, or fragment"
             )
             continue
         if host not in allowed_hosts:
@@ -227,11 +229,13 @@ def _validate_delivery(
                 or parsed.scheme != "https"
                 or parsed.username
                 or parsed.password
+                or parsed.path not in ("", "/")
                 or parsed.query
                 or parsed.fragment
             ):
                 failures.append(
-                    f"delivery.targets[{index}].endpoint must be a credential-free HTTPS URL without query/fragment"
+                    f"delivery.targets[{index}].endpoint must be a credential-free "
+                    "HTTPS base origin without a non-root path, query, or fragment"
                 )
             elif hostname.lower().rstrip(".") not in env_hosts:
                 failures.append(

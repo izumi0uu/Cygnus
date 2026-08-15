@@ -2328,6 +2328,63 @@ class GovernancePropagationDelivery(Base):
     )
 
 
+class DeliveryConsumerReceipt(Base):
+    """Append-only acceptance receipt for one signed propagation delivery.
+
+    The receipt intentionally stores only replay identity and binding metadata.
+    It never retains the delivered support payload, so the consumer can prove
+    one accepted exact body without becoming another knowledge store.
+    """
+
+    __tablename__ = "delivery_consumer_receipts"
+
+    delivery_id: Mapped[str] = mapped_column(String(220), primary_key=True)
+    body_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    publication_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    surface_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    object_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    receipt_ref: Mapped[str] = mapped_column(String(220), nullable=False)
+    accepted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "delivery_id = btrim(delivery_id) "
+            "AND char_length(delivery_id) BETWEEN 1 AND 220",
+            name="ck_delivery_consumer_receipts_delivery_id_shape",
+        ),
+        CheckConstraint(
+            "delivery_id = 'delivery:' || publication_id::text || ':' || surface_id",
+            name="ck_delivery_consumer_receipts_identity_binding",
+        ),
+        CheckConstraint(
+            "char_length(body_sha256) = 64",
+            name="ck_delivery_consumer_receipts_body_sha256_shape",
+        ),
+        CheckConstraint(
+            "surface_id = btrim(surface_id) "
+            "AND char_length(surface_id) BETWEEN 1 AND 120",
+            name="ck_delivery_consumer_receipts_surface_id_shape",
+        ),
+        CheckConstraint(
+            "object_version >= 1",
+            name="ck_delivery_consumer_receipts_object_version",
+        ),
+        CheckConstraint(
+            "receipt_ref = btrim(receipt_ref) "
+            "AND char_length(receipt_ref) BETWEEN 1 AND 220",
+            name="ck_delivery_consumer_receipts_receipt_ref_shape",
+        ),
+        UniqueConstraint(
+            "receipt_ref",
+            name="uq_delivery_consumer_receipts_receipt_ref",
+        ),
+    )
+
+
 class Notification(Base):
     """
     In-app notification delivered to one recipient. Created synchronously by

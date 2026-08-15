@@ -11,8 +11,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 from datetime import datetime, timezone
-import hashlib
-import hmac
 import json
 import os
 from pathlib import Path
@@ -21,7 +19,11 @@ import uuid
 
 from sqlalchemy import select
 
-from cygnus.publish.delivery import acknowledge_propagation_delivery
+from cygnus.publish.delivery import (
+    DeliveryStatus,
+    delivery_to_dict,
+    drain_propagation_deliveries,
+)
 from cygnus.runtime.bootstrap.governance_smoke import (
     GoldenPathSmokeError,
     _authenticated_client,
@@ -29,7 +31,6 @@ from cygnus.runtime.bootstrap.governance_smoke import (
     _request_json,
     _require,
 )
-from cygnus.runtime.config import get_settings
 from cygnus.runtime.database import get_async_session_factory
 from cygnus.runtime.database.models import GovernancePropagationDelivery, Source
 
@@ -73,7 +74,7 @@ def _query(client, *, run_id: str, visibility: str, turn: str) -> dict[str, obje
     return _mapping(payload.get("data"), f"{turn} governed query data")
 
 
-async def _acknowledge_deliveries(
+async def _dispatch_deliveries(
     receipt: dict[str, object],
 ) -> list[dict[str, object]]:
     raw_ids = receipt.get("delivery_ids")
@@ -81,49 +82,50 @@ async def _acknowledge_deliveries(
         isinstance(raw_ids, list) and raw_ids, "governance receipt has no deliveries"
     )
     delivery_ids = [uuid.UUID(cast(str, item)) for item in cast(list[object], raw_ids)]
-    secret = get_settings().delivery_hmac_secret
     session_factory = get_async_session_factory()
-    results: list[dict[str, object]] = []
-    async with session_factory() as session:
-        deliveries = (
-            (
-                await session.execute(
-                    select(GovernancePropagationDelivery).where(
-                        GovernancePropagationDelivery.id.in_(delivery_ids)
+    observed: list[GovernancePropagationDelivery] = []
+    for _ in range(10):
+        _ = await drain_propagation_deliveries(
+            limit=min(len(delivery_ids), 10),
+            session_factory=session_factory,
+        )
+        async with session_factory() as session:
+            observed = list(
+                (
+                    (
+                        await session.execute(
+                            select(GovernancePropagationDelivery).where(
+                                GovernancePropagationDelivery.id.in_(delivery_ids)
+                            )
+                        )
                     )
+                    .scalars()
+                    .all()
                 )
             )
-            .scalars()
-            .all()
-        )
         _require(
-            len(deliveries) == len(delivery_ids),
+            len(observed) == len(delivery_ids),
             "one or more delivery rows are missing",
         )
-        for delivery in deliveries:
-            payload = {
-                "publication_id": str(delivery.publication_id),
-                "surface_id": delivery.surface_id,
-                "version": delivery.expected_page_version,
-                "digest": delivery.desired_digest,
-                "receipt_ref": f"certification://{delivery.id}",
-            }
-            body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-            signature = (
-                "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-            )
-            results.append(
-                await acknowledge_propagation_delivery(
-                    session,
-                    delivery_id=delivery.id,
-                    ack_body=body,
-                    signature=signature,
-                    secret=secret,
-                    correlation_id=str(uuid.uuid4()),
-                )
-            )
-        await session.commit()
-    return results
+        if all(row.status == DeliveryStatus.SYNCED.value for row in observed):
+            return [
+                delivery_to_dict(row)
+                for row in sorted(observed, key=lambda item: item.surface_id)
+            ]
+        if any(
+            row.status
+            in {DeliveryStatus.FAILED.value, DeliveryStatus.DEAD_LETTER.value}
+            for row in observed
+        ):
+            break
+        await asyncio.sleep(1)
+    states = ", ".join(
+        f"{row.surface_id}={row.status}:{row.last_error or 'none'}"
+        for row in sorted(observed, key=lambda item: item.surface_id)
+    )
+    raise GoldenPathSmokeError(
+        "real internal delivery consumer did not acknowledge every surface: " + states
+    )
 
 
 async def _mark_source_stale(source_id: str) -> None:
@@ -155,7 +157,7 @@ def prepare(receipt_path: Path, state_path: Path) -> None:
         before.get("governance_state") == "restricted",
         "pre-ack query was not restricted",
     )
-    acknowledgements = asyncio.run(_acknowledge_deliveries(receipt))
+    acknowledgements = asyncio.run(_dispatch_deliveries(receipt))
     with _authenticated_client(
         base_url="http://127.0.0.1:8077",
         admin_email=admin_email,

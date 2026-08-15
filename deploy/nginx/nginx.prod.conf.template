@@ -49,8 +49,8 @@ server {
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto https;
 
-    # These probes must reach the API. Keep them ahead of the SPA fallback so
-    # an unavailable API can never look like a successful index.html response.
+    # Liveness reaches only the API process. Readiness additionally gates the
+    # API report on the delivery consumer's signing + durable-store health.
     location = /health {
         proxy_pass http://api:8077/health;
         add_header Cache-Control "no-store" always;
@@ -63,7 +63,25 @@ server {
         include /etc/nginx/security-headers.conf;
     }
 
+    location = /_delivery-consumer-health {
+        internal;
+        proxy_pass http://delivery-consumer:8090/health;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_connect_timeout 1s;
+        proxy_read_timeout 2s;
+        proxy_send_timeout 2s;
+    }
+
+    location = /_delivery-consumer-not-ready {
+        internal;
+        default_type application/json;
+        return 503 '{"status":"not_ready","checks":{"delivery_consumer":{"status":"failed"}}}';
+    }
+
     location = /readyz {
+        auth_request /_delivery-consumer-health;
+        error_page 500 =503 /_delivery-consumer-not-ready;
         proxy_pass http://api:8077/readyz;
         add_header Cache-Control "no-store" always;
         include /etc/nginx/security-headers.conf;
@@ -90,6 +108,16 @@ server {
 
     location = /openapi.json {
         proxy_pass http://api:8077/openapi.json;
+    }
+
+    # Signed propagation receipts are handled only by the bounded delivery
+    # consumer. This exact route stays ahead of the generic API proxy; normal
+    # proxy behavior preserves the delivery, correlation, and ack headers.
+    location = /api/internal/propagation-delivery {
+        client_max_body_size 1m;
+        proxy_pass http://delivery-consumer:8090;
+        add_header Cache-Control "no-store" always;
+        include /etc/nginx/security-headers.conf;
     }
 
     location ^~ /api/ {

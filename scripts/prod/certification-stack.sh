@@ -19,7 +19,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 case "$ACTION" in
-  up|redeploy|restart|recover|quiesce|resume|smoke-exercise|smoke-verify|domain-prepare|domain-verify|oauth-provision|rollback-drill|diagnostics|down|origin|fault-on|fault-off) ;;
+  up|redeploy|restart|recover|quiesce|resume|smoke-exercise|smoke-verify|domain-prepare|domain-verify|oauth-provision|rollback-drill|diagnostics|down|origin|fault-on|fault-off|consumer-stop|consumer-restart) ;;
   *) die "unsupported certification stack action: $ACTION" ;;
 esac
 case "$FAULT_TARGET" in ''|db|queue|tool|provider) ;; *) die "unsupported certification fault target: $FAULT_TARGET" ;; esac
@@ -30,6 +30,14 @@ if [ -z "${CYGNUS_RELEASE_INPUTS_FILE:-}" ] && [ -n "${CYGNUS_PRODUCTION_INPUTS_
 fi
 load_release "$RELEASE"
 validate_identity "$RELEASE"
+CERTIFICATION_DELIVERY_ORIGIN="https://frontend:8443"
+if ! CYGNUS_CERTIFICATION_DELIVERY_TARGETS_JSON=$(
+  DELIVERY_TARGETS_JSON="${DELIVERY_TARGETS_JSON:-}" CERTIFICATION_DELIVERY_ORIGIN="$CERTIFICATION_DELIVERY_ORIGIN" \
+    python3 -c 'import json, os; targets = json.loads(os.environ["DELIVERY_TARGETS_JSON"]); assert isinstance(targets, dict) and targets; print(json.dumps(dict.fromkeys(targets, os.environ["CERTIFICATION_DELIVERY_ORIGIN"]), separators=(",", ":"), sort_keys=True))'
+); then
+  die "DELIVERY_TARGETS_JSON cannot be mapped to the isolated certification ingress"
+fi
+export CYGNUS_CERTIFICATION_DELIVERY_TARGETS_JSON
 
 CERTIFICATION_COMPOSE_FILE="$DEPLOY_DIR/docker-compose.certification.yml"
 [ -r "$CERTIFICATION_COMPOSE_FILE" ] || die "certification Compose overlay is missing"
@@ -48,10 +56,14 @@ CERTIFICATION_ORIGIN="https://127.0.0.1:$CYGNUS_HTTPS_BIND_PORT"
 PKI_DIR="${CYGNUS_CERTIFICATION_PKI_DIR:-${RUNNER_TEMP:-/tmp}/cygnus-certification-pki}"
 mkdir -p "$PKI_DIR"
 chmod 700 "$PKI_DIR"
-if [ ! -s "$PKI_DIR/server.crt" ] || [ ! -s "$PKI_DIR/server.key" ] || ! openssl x509 -in "$PKI_DIR/server.crt" -noout -ext subjectAltName 2>/dev/null | grep -q 'IP Address:127.0.0.1'; then
+certificate_sans=""
+if [ -s "$PKI_DIR/server.crt" ]; then
+  certificate_sans=$(openssl x509 -in "$PKI_DIR/server.crt" -noout -ext subjectAltName 2>/dev/null || true)
+fi
+if [ ! -s "$PKI_DIR/server.crt" ] || [ ! -s "$PKI_DIR/server.key" ] || ! printf '%s' "$certificate_sans" | grep -q 'IP Address:127.0.0.1' || ! printf '%s' "$certificate_sans" | grep -q 'DNS:frontend'; then
   openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
     -subj "/CN=$CYGNUS_DOMAIN" \
-    -addext "subjectAltName=DNS:$CYGNUS_DOMAIN,IP:127.0.0.1" \
+    -addext "subjectAltName=DNS:$CYGNUS_DOMAIN,DNS:frontend,IP:127.0.0.1" \
     -addext "basicConstraints=critical,CA:TRUE" \
     -keyout "$PKI_DIR/server.key" -out "$PKI_DIR/server.crt" >/dev/null 2>&1
 fi
@@ -63,13 +75,40 @@ SMOKE_RECEIPT="${CYGNUS_CERTIFICATION_SMOKE_RECEIPT:-$OPERATOR_WORK_DIR/$RELEASE
 DOMAIN_STATE="${CYGNUS_CERTIFICATION_DOMAIN_STATE:-$OPERATOR_WORK_DIR/$RELEASE/certification/persisted-domain-state.json}"
 DOMAIN_RESULT="${CYGNUS_CERTIFICATION_DOMAIN_RESULT:-$OPERATOR_WORK_DIR/$RELEASE/certification/persisted-domain-result.json}"
 
+verify_certification_delivery_ingress() {
+  local deadline body delivery_response delivery_status delivery_body delivery_signature readiness_status
+  deadline=$(( $(date +%s) + 300 ))
+  while :; do
+    if body=$(curl -fsS --cacert "$CYGNUS_TLS_CERT_FILE" --max-time 10 "$CERTIFICATION_ORIGIN/livez" 2>/dev/null) && printf '%s' "$body" | python3 -c 'import json,sys; assert json.load(sys.stdin)["status"] == "alive"'; then
+      break
+    fi
+    [ "$(date +%s)" -lt "$deadline" ] || die "certification API liveness did not recover: $CERTIFICATION_ORIGIN"
+    sleep 5
+  done
+  if ! delivery_response=$(curl -sS --cacert "$CYGNUS_TLS_CERT_FILE" --max-time 10 -H 'Content-Type: application/json' --data '{}' --write-out $'\n%{http_code}' "$CERTIFICATION_ORIGIN/api/internal/propagation-delivery" 2>/dev/null); then
+    die "certification delivery-consumer ingress request failed"
+  fi
+  delivery_status=${delivery_response##*$'\n'}
+  delivery_body=${delivery_response%$'\n'*}
+  if [ "$delivery_status" != 401 ] || ! printf '%s' "$delivery_body" | python3 -c 'import json,sys; assert json.load(sys.stdin) == {"detail": "delivery signature is invalid"}'; then
+    die "certification ingress did not reach the signed receipt adapter"
+  fi
+  delivery_signature=$(DELIVERY_HMAC_SECRET="$DELIVERY_HMAC_SECRET" python3 -c 'import hashlib,hmac,os; print(hmac.new(os.environ["DELIVERY_HMAC_SECRET"].encode(), b"", hashlib.sha256).hexdigest())')
+  if ! readiness_status=$(curl -sS --head --cacert "$CYGNUS_TLS_CERT_FILE" --max-time 10 -H "X-Cygnus-Signature: sha256=$delivery_signature" --output /dev/null --write-out '%{http_code}' "$CERTIFICATION_ORIGIN/api/internal/propagation-delivery" 2>/dev/null); then
+    die "certification delivery-consumer readiness probe failed"
+  fi
+  [ "$readiness_status" = 204 ] || die "certification delivery-consumer receipt store is not ready"
+  log "certification delivery-consumer ingress ready"
+}
+
 verify_certification_ingress() {
   local deadline body
+  verify_certification_delivery_ingress
   deadline=$(( $(date +%s) + 300 ))
   while :; do
     if body=$(curl -fsS --cacert "$CYGNUS_TLS_CERT_FILE" --max-time 10 "$CERTIFICATION_ORIGIN/readyz" 2>/dev/null) && printf '%s' "$body" | python3 -c 'import json,sys; assert json.load(sys.stdin)["status"] == "ready"'; then
       log "certification ingress ready: $CERTIFICATION_ORIGIN/readyz"
-      return 0
+      break
     fi
     [ "$(date +%s)" -lt "$deadline" ] || die "certification ingress did not become ready: $CERTIFICATION_ORIGIN"
     sleep 5
@@ -84,19 +123,28 @@ case "$ACTION" in
     "${COMPOSE[@]}" down -v --remove-orphans
     ;;
   quiesce)
-    "${COMPOSE[@]}" stop api worker worker-skills
+    "${COMPOSE[@]}" stop api worker worker-skills delivery-consumer
     ;;
   resume)
-    "${COMPOSE[@]}" start api worker worker-skills
+    "${COMPOSE[@]}" start "${PRODUCTION_INGRESS_BACKEND_SERVICES[@]}"
+    compose_wait_for_delivery_consumer
+    verify_certification_delivery_ingress
+    "${COMPOSE[@]}" start "${PRODUCTION_WORKER_SERVICES[@]}"
     verify_certification_ingress
     ;;
   restart)
-    "${COMPOSE[@]}" restart api worker worker-skills frontend
+    "${COMPOSE[@]}" restart "${PRODUCTION_INGRESS_BACKEND_SERVICES[@]}"
+    compose_wait_for_delivery_consumer
+    "${COMPOSE[@]}" restart frontend
+    verify_certification_delivery_ingress
+    "${COMPOSE[@]}" restart "${PRODUCTION_WORKER_SERVICES[@]}"
     verify_certification_ingress
     ;;
   recover)
-    compose_up_backend
+    compose_up_ingress_backend
     compose_up_frontend
+    verify_certification_delivery_ingress
+    compose_up_workers
     verify_certification_ingress
     ;;
   smoke-exercise)
@@ -144,6 +192,14 @@ case "$ACTION" in
       "${COMPOSE[@]}" start "$service"
     fi
     ;;
+  consumer-stop)
+    "${COMPOSE[@]}" stop -t 5 delivery-consumer
+    ;;
+  consumer-restart)
+    "${COMPOSE[@]}" start delivery-consumer
+    compose_wait_for_delivery_consumer
+    verify_certification_ingress
+    ;;
   rollback-drill)
     bad_overlay=$(mktemp "${TMPDIR:-/tmp}/cygnus-bad-candidate.XXXXXX.yml")
     printf 'services:\n  frontend:\n    image: %s\n' "$CYGNUS_API_IMAGE" > "$bad_overlay"
@@ -181,8 +237,10 @@ case "$ACTION" in
     compose_pull
     compose_up_stateful
     run_migrations
-    compose_up_backend
+    compose_up_ingress_backend
     compose_up_frontend
+    verify_certification_delivery_ingress
+    compose_up_workers
     verify_certification_ingress
     ;;
 esac

@@ -135,11 +135,21 @@ class DockerStackRecoveryTests(unittest.TestCase):
             '"${COMPOSE[@]}" stop "${QUIESCED_BACKEND_SERVICES[@]}"',
             quiesce_body,
         )
-        self.assertIn(
-            '"${COMPOSE[@]}" start "${QUIESCED_BACKEND_SERVICES[@]}"',
-            resume_body,
+        quiesced_resume_order = (
+            '"${COMPOSE[@]}" start "${ingress_services[@]}"',
+            "compose_wait_for_delivery_consumer",
+            'verify_delivery_ingress "$CYGNUS_DOMAIN"',
+            '"${COMPOSE[@]}" start "${worker_services[@]}"',
+            'verify_ingress "$CYGNUS_DOMAIN"',
         )
-        self.assertIn("PRODUCTION_BACKEND_SERVICES=(api worker worker-skills)", helper)
+        resume_positions = [
+            resume_body.index(fragment) for fragment in quiesced_resume_order
+        ]
+        self.assertEqual(resume_positions, sorted(resume_positions))
+        self.assertIn(
+            "PRODUCTION_BACKEND_SERVICES=(api worker worker-skills delivery-consumer)",
+            helper,
+        )
         for stateful_service in ("postgres", "redis", "minio", "frontend"):
             self.assertNotIn(stateful_service, quiesce_body)
             self.assertNotIn(stateful_service, resume_body)
@@ -152,9 +162,47 @@ class DockerStackRecoveryTests(unittest.TestCase):
         )
         self.assertIn("trap - EXIT", function_body("clear_backend_recovery_trap"))
         self.assertIn(
-            'compose_up_backend() { "${COMPOSE[@]}" up -d --no-deps '
-            "--force-recreate api worker worker-skills; }",
+            "PRODUCTION_INGRESS_BACKEND_SERVICES=(api delivery-consumer)",
             helper,
+        )
+        self.assertIn(
+            "PRODUCTION_WORKER_SERVICES=(worker worker-skills)",
+            helper,
+        )
+        self.assertIn(
+            'compose_up_ingress_backend() { "${COMPOSE[@]}" up -d --no-deps '
+            '--force-recreate "${PRODUCTION_INGRESS_BACKEND_SERVICES[@]}"; }',
+            helper,
+        )
+        self.assertIn(
+            'compose_up_workers() { "${COMPOSE[@]}" up -d --no-deps '
+            '--force-recreate --wait "${PRODUCTION_WORKER_SERVICES[@]}"; }',
+            helper,
+        )
+        ordered_resume_body = function_body("compose_resume_backend")
+        ordered_resume = (
+            '"${COMPOSE[@]}" start "${PRODUCTION_INGRESS_BACKEND_SERVICES[@]}"',
+            "compose_wait_for_delivery_consumer",
+            'verify_delivery_ingress "$CYGNUS_DOMAIN"',
+            '"${COMPOSE[@]}" start "${PRODUCTION_WORKER_SERVICES[@]}"',
+            'verify_ingress "$CYGNUS_DOMAIN"',
+        )
+        ordered_positions = [
+            ordered_resume_body.index(fragment) for fragment in ordered_resume
+        ]
+        self.assertEqual(ordered_positions, sorted(ordered_positions))
+
+        wait_body = function_body("compose_wait_for_delivery_consumer")
+        self.assertEqual(
+            wait_body.strip(),
+            '"${COMPOSE[@]}" up -d --no-deps --wait delivery-consumer',
+        )
+        frontend_body = function_body("compose_up_frontend")
+        self.assertLess(
+            frontend_body.index("compose_wait_for_delivery_consumer"),
+            frontend_body.index(
+                '"${COMPOSE[@]}" up -d --no-deps --force-recreate frontend'
+            ),
         )
 
         entrypoints = {
@@ -173,6 +221,219 @@ class DockerStackRecoveryTests(unittest.TestCase):
             compose_control.index("\nvalidate_compose\n"),
             compose_control.index('\nexec "${COMPOSE[@]}" "$@"'),
         )
+
+    def test_production_delivery_consumer_uses_shared_private_runtime(self) -> None:
+        compose = Path("deploy/docker-compose.prod.yml").read_text(encoding="utf-8")
+        backend_runtime = compose.partition("x-backend-app: &backend-app\n")[
+            2
+        ].partition("\nservices:\n")[0]
+        consumer_match = re.search(
+            r"(?ms)^  delivery-consumer:\n(.*?)(?=^  [a-z][a-z0-9-]*:\n|^secrets:|\Z)",
+            compose,
+        )
+        self.assertIsNotNone(consumer_match)
+        consumer = consumer_match.group(1) if consumer_match else ""
+        frontend = compose.partition("\n  frontend:\n")[2].partition("\nsecrets:\n")[0]
+
+        for fragment in (
+            "image: ${CYGNUS_API_IMAGE:",
+            "env_file:",
+            "${CYGNUS_PRODUCTION_ENV_FILE:-.env.prod}",
+            "read_only: true",
+            'user: "65534:65534"',
+            "cap_drop: [ALL]",
+            "no-new-privileges:true",
+            "tmpfs:",
+            "resources:",
+        ):
+            self.assertIn(fragment, backend_runtime)
+        for fragment in (
+            "<<: *backend-app",
+            'command: ["uvicorn", "cygnus.integrations.delivery_consumer:app", '
+            '"--host", "0.0.0.0", "--port", "8090"]',
+            "migrator:\n        condition: service_completed_successfully",
+            "http://localhost:8090/health",
+        ):
+            self.assertIn(fragment, consumer)
+        self.assertNotIn("image:", consumer)
+        self.assertNotIn("ports:", consumer)
+        self.assertNotIn("volumes:", consumer)
+        self.assertIn(
+            "delivery-consumer:\n        condition: service_healthy",
+            frontend,
+        )
+
+    def test_production_delivery_targets_are_base_origins(self) -> None:
+        env_template = Path("deploy/.env.prod.example").read_text(encoding="utf-8")
+        inputs_template = Path("deploy/production-inputs.example.json").read_text(
+            encoding="utf-8"
+        )
+        delivery_config_gate = Path(
+            "scripts/production_delivery_config_gate.py"
+        ).read_text(encoding="utf-8")
+        production_inputs_gate = Path("scripts/production_inputs_gate.py").read_text(
+            encoding="utf-8"
+        )
+        delivery_sender = Path("cygnus/publish/delivery.py").read_text(encoding="utf-8")
+        delivery_target_origin = "https://REPLACE_WITH_INTERNAL_DELIVERY_HOST"
+
+        expected_env_target = (
+            'DELIVERY_TARGETS_JSON={"REPLACE_WITH_CHANNEL_ID":"'
+            f'{delivery_target_origin}"}}'
+        )
+        self.assertIn(expected_env_target, env_template)
+        self.assertIn(
+            f'"endpoint": "{delivery_target_origin}"',
+            inputs_template,
+        )
+        self.assertNotIn("/v1/delivery", env_template)
+        self.assertNotIn("/v1/delivery", inputs_template)
+        self.assertIn('parsed.path not in ("", "/")', delivery_config_gate)
+        self.assertGreaterEqual(
+            production_inputs_gate.count('parsed.path not in ("", "/")'),
+            2,
+        )
+        self.assertIn(
+            '_DELIVERY_PATH = "api/internal/propagation-delivery"',
+            delivery_sender,
+        )
+        self.assertIn(
+            'return urljoin(normalized + "/", _DELIVERY_PATH)',
+            delivery_sender,
+        )
+
+    def test_delivery_consumer_nginx_route_is_exact_and_certification_reuses_it(
+        self,
+    ) -> None:
+        nginx = Path("deploy/nginx/nginx.prod.conf.template").read_text(
+            encoding="utf-8"
+        )
+        route_marker = "location = /api/internal/propagation-delivery"
+        route_start = nginx.index(route_marker)
+        route_end = nginx.index("\n    }", route_start)
+        route = nginx[route_start:route_end]
+
+        self.assertLess(route_start, nginx.index("location ^~ /api/"))
+        self.assertIn("proxy_pass http://delivery-consumer:8090;", route)
+        self.assertIn("client_max_body_size 1m;", route)
+        self.assertIn('add_header Cache-Control "no-store" always;', route)
+        self.assertIn("include /etc/nginx/security-headers.conf;", route)
+        self.assertNotIn("proxy_pass_request_headers off;", nginx)
+        self.assertNotIn("proxy_hide_header X-Cygnus-Ack-Signature;", nginx)
+        readiness_marker = "location = /readyz"
+        readiness_start = nginx.index(readiness_marker)
+        readiness_end = nginx.index("\n    }", readiness_start)
+        readiness_route = nginx[readiness_start:readiness_end]
+        self.assertIn("auth_request /_delivery-consumer-health;", readiness_route)
+        self.assertIn(
+            "error_page 500 =503 /_delivery-consumer-not-ready;", readiness_route
+        )
+        self.assertIn("proxy_pass http://api:8077/readyz;", readiness_route)
+        self.assertIn("proxy_pass http://delivery-consumer:8090/health;", nginx)
+        self.assertIn("proxy_connect_timeout 1s;", nginx)
+        self.assertIn("proxy_read_timeout 2s;", nginx)
+        self.assertIn("proxy_send_timeout 2s;", nginx)
+        self.assertIn(
+            'return 503 \'{"status":"not_ready","checks":{"delivery_consumer":{"status":"failed"}}}\';',
+            nginx,
+        )
+
+        certification = Path("deploy/docker-compose.certification.yml").read_text(
+            encoding="utf-8"
+        )
+        certification_stack = Path("scripts/prod/certification-stack.sh").read_text(
+            encoding="utf-8"
+        )
+        resume_section = certification_stack.partition("  resume)\n")[2].partition(
+            "  restart)\n"
+        )[0]
+        restart_section = certification_stack.partition("  restart)\n")[2].partition(
+            "  recover)\n"
+        )[0]
+        recover_section = certification_stack.partition("  recover)\n")[2].partition(
+            "  smoke-exercise)\n"
+        )[0]
+        rollout_section = certification_stack.partition("  up|redeploy)\n")[
+            2
+        ].partition("esac")[0]
+        self.assertNotIn("\n  delivery-consumer:", certification)
+        self.assertNotIn("\n  frontend:", certification)
+        self.assertEqual(
+            certification.count("CYGNUS_CERTIFICATION_DELIVERY_TARGETS_JSON"),
+            2,
+        )
+        self.assertEqual(
+            certification.count('CYGNUS_DELIVERY_ALLOWED_HOSTS: "frontend"'),
+            2,
+        )
+        self.assertEqual(
+            certification.count("SSL_CERT_FILE: /run/secrets/cygnus_tls_cert"),
+            2,
+        )
+        self.assertIn(
+            'CERTIFICATION_DELIVERY_ORIGIN="https://frontend:8443"',
+            certification_stack,
+        )
+        self.assertIn("DNS:frontend", certification_stack)
+        self.assertIn(
+            '-f "$COMPOSE_FILE" -f "$CERTIFICATION_COMPOSE_FILE"',
+            certification_stack,
+        )
+        self.assertIn(
+            'CERTIFICATION_ORIGIN="https://127.0.0.1:$CYGNUS_HTTPS_BIND_PORT"',
+            certification_stack,
+        )
+        self.assertIn(
+            'curl -fsS --cacert "$CYGNUS_TLS_CERT_FILE"',
+            certification_stack,
+        )
+        self.assertIn(
+            '{"detail": "delivery signature is invalid"}',
+            certification_stack,
+        )
+        self.assertIn(
+            "X-Cygnus-Signature: sha256=$delivery_signature",
+            certification_stack,
+        )
+        self.assertIn(
+            'readiness_status" = 204',
+            certification_stack,
+        )
+        self.assertIn(
+            '"${COMPOSE[@]}" stop api worker worker-skills delivery-consumer',
+            certification_stack,
+        )
+        resume_order = (
+            '"${COMPOSE[@]}" start "${PRODUCTION_INGRESS_BACKEND_SERVICES[@]}"',
+            "compose_wait_for_delivery_consumer",
+            "verify_certification_delivery_ingress",
+            '"${COMPOSE[@]}" start "${PRODUCTION_WORKER_SERVICES[@]}"',
+            "verify_certification_ingress",
+        )
+        resume_positions = [resume_section.index(fragment) for fragment in resume_order]
+        self.assertEqual(resume_positions, sorted(resume_positions))
+        restart_order = (
+            '"${COMPOSE[@]}" restart "${PRODUCTION_INGRESS_BACKEND_SERVICES[@]}"',
+            "compose_wait_for_delivery_consumer",
+            '"${COMPOSE[@]}" restart frontend',
+            "verify_certification_delivery_ingress",
+            '"${COMPOSE[@]}" restart "${PRODUCTION_WORKER_SERVICES[@]}"',
+            "verify_certification_ingress",
+        )
+        restart_positions = [
+            restart_section.index(fragment) for fragment in restart_order
+        ]
+        self.assertEqual(restart_positions, sorted(restart_positions))
+        gated_order = (
+            "compose_up_ingress_backend",
+            "compose_up_frontend",
+            "verify_certification_delivery_ingress",
+            "compose_up_workers",
+            "verify_certification_ingress",
+        )
+        for section in (recover_section, rollout_section):
+            positions = [section.index(fragment) for fragment in gated_order]
+            self.assertEqual(positions, sorted(positions))
 
     def test_production_network_gate_accepts_bound_nonstandard_tls_origin(
         self,
@@ -258,7 +519,24 @@ class DockerStackRecoveryTests(unittest.TestCase):
             helper,
         )
         self.assertIn('validate_operator_state_paths "$RELEASE"', deploy)
-        self.assertIn('exec "$TARGET_CHECKOUT/scripts/prod/rollback.sh"', rollback)
+        self.assertIn(
+            '"$TARGET_CHECKOUT/scripts/prod/rollback.sh" --release "$RELEASE" --yes',
+            rollback,
+        )
+        self.assertNotIn('exec "$TARGET_CHECKOUT/scripts/prod/rollback.sh"', rollback)
+        self.assertIn(
+            '"$SCRIPT_DIR/rollback.sh" --release "$PREVIOUS" --downgrade target --yes',
+            deploy,
+        )
+        self.assertNotIn(
+            '"$CHECKOUTS_DIR/$PREVIOUS/scripts/prod/rollback.sh" --release', deploy
+        )
+        self.assertIn(
+            'CYGNUS_ROLLBACK_SOURCE_METADATA_FILE="$LOADED_RELEASE_FILE"', deploy
+        )
+        self.assertIn(
+            'CYGNUS_ROLLBACK_SOURCE_INPUTS_FILE="$LOADED_RELEASE_INPUTS_FILE"', deploy
+        )
         deploy_state_steps = (
             'persist_release_metadata "$RELEASE"',
             'activate_release_checkout "$RELEASE"',
@@ -317,33 +595,67 @@ class DockerStackRecoveryTests(unittest.TestCase):
             "\ncompose_quiesce_backend\n",
             "\nrun_migrations\n",
             "\nclear_backend_recovery_trap\n",
-            "\ncompose_up_backend\n",
+            "\ncompose_up_ingress_backend\n",
             "\ncompose_up_frontend\n",
+            '\nverify_delivery_ingress "$CYGNUS_DOMAIN"\n',
+            "\ncompose_up_workers\n",
+            '\nverify_ingress "$CYGNUS_DOMAIN"\n',
         )
         positions = [deploy.index(fragment) for fragment in ordered_fragments]
         self.assertEqual(positions, sorted(positions))
 
-    def test_rollback_quiesces_with_recovery_on_both_paths(self) -> None:
+    def test_rollback_uses_source_image_before_target_checkout_handoff(self) -> None:
         rollback = Path("scripts/prod/rollback.sh").read_text(encoding="utf-8")
-        ordered_fragments = (
-            "load_prod_env\n",
-            "load_state\n",
-            'load_release "$RELEASE"\n',
-            'validate_identity "$RELEASE"\n',
-            "validate_secrets\n",
-            "validate_resources\n",
-            'validate_production_inputs "$RELEASE"\n',
-            "validate_compose\n",
-            "\narm_backend_recovery_trap\n",
-            "\ncompose_quiesce_backend\n",
-            'if [ -n "$DOWNGRADE_REV" ]; then',
+        source_first = (
+            "target_contract=$(preflight_target_checkout)",
+            'load_release "$SOURCE_RELEASE"',
+            "SOURCE_EXPECTED_ALEMBIC_HEAD=$EXPECTED_ALEMBIC_HEAD",
+            'if [ "$SOURCE_EXPECTED_ALEMBIC_HEAD" != "$TARGET_EXPECTED_ALEMBIC_HEAD" ]',
+            "arm_backend_recovery_trap",
+            "compose_quiesce_backend",
             '"${COMPOSE[@]}" run --rm --no-deps api alembic downgrade "$DOWNGRADE_REV"',
-            "\ncompose_up_backend\n",
-            "\nclear_backend_recovery_trap\n",
-            "\ncompose_up_frontend\n",
+            "clear_backend_recovery_trap",
+            '"${COMPOSE[@]}" rm --stop --force delivery-consumer',
+            '"$TARGET_CHECKOUT/scripts/prod/rollback.sh" --release "$RELEASE" --yes',
         )
-        positions = [rollback.index(fragment) for fragment in ordered_fragments]
+        positions = [rollback.index(fragment) for fragment in source_first]
         self.assertEqual(positions, sorted(positions))
+        self.assertIn(
+            "preflight_target_checkout() (\n  exec 3>&1\n  exec 1>&2", rollback
+        )
+        self.assertIn(
+            'printf \'%s|%s\' "$EXPECTED_ALEMBIC_HEAD" "$target_has_consumer" >&3',
+            rollback,
+        )
+        certification_stack = Path("scripts/prod/certification-stack.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "fault-off|consumer-stop|consumer-restart) ;;", certification_stack
+        )
+        self.assertIn(
+            'if [ -n "$DOWNGRADE_REV" ] && [ "$DOWNGRADE_REV" != "$TARGET_EXPECTED_ALEMBIC_HEAD" ]',
+            rollback,
+        )
+        handoff = rollback.partition(
+            '"$TARGET_CHECKOUT/scripts/prod/rollback.sh" --release "$RELEASE" --yes'
+        )[0].rsplit("\n", 1)[-1]
+        self.assertNotIn("--downgrade", handoff)
+
+        target_reload = rollback.rindex('load_release "$RELEASE"')
+        target_rollout = (
+            "arm_backend_recovery_trap",
+            "compose_up_ingress_backend",
+            "compose_up_frontend",
+            'verify_delivery_ingress "$CYGNUS_DOMAIN"',
+            "compose_up_workers",
+            'verify_ingress "$CYGNUS_DOMAIN"',
+            "clear_backend_recovery_trap",
+        )
+        target_positions = [
+            rollback.index(fragment, target_reload) for fragment in target_rollout
+        ]
+        self.assertEqual(target_positions, sorted(target_positions))
 
     def test_bootstrap_module_creates_vector_extension_and_tables(self) -> None:
         script = Path("cygnus/runtime/bootstrap/init_local_stack.py")

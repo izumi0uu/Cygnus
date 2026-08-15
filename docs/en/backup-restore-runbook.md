@@ -88,8 +88,8 @@ uv run python -m cygnus.runtime.backup_restore backup \
   --output-dir "/var/backups/cygnus/$(date -u +%Y%m%dT%H%M%SZ)" \
   --environment staging \
   --source-id "staging-01" \
-  --quiesce-command "docker compose stop api worker worker-skills" \
-  --resume-command  "docker compose start api worker worker-skills" \
+  --quiesce-command "docker compose stop api worker worker-skills delivery-consumer" \
+  --resume-command  "docker compose start api worker worker-skills delivery-consumer" \
   --retention-label daily \
   --report-file /var/backups/cygnus/backup-report.json
 ```
@@ -129,8 +129,8 @@ uv run python -m cygnus.runtime.backup_restore backup \
   --backend-image-ref "$CYGNUS_RELEASE_BACKEND_IMAGE_REF" \
   --frontend-image-ref "$CYGNUS_RELEASE_FRONTEND_IMAGE_REF" \
   --alembic-head "$CYGNUS_RELEASE_ALEMBIC_HEAD" \
-  --quiesce-command "docker compose --project-directory ${CYGNUS_REPO} --project-name cygnus-prod -f ${CYGNUS_REPO}/deploy/docker-compose.prod.yml --env-file ${CYGNUS_REPO}/deploy/.env.prod --env-file ${CYGNUS_REPO}/deploy/releases/${CYGNUS_RELEASE}.env stop api worker worker-skills" \
-  --resume-command  "docker compose --project-directory ${CYGNUS_REPO} --project-name cygnus-prod -f ${CYGNUS_REPO}/deploy/docker-compose.prod.yml --env-file ${CYGNUS_REPO}/deploy/.env.prod --env-file ${CYGNUS_REPO}/deploy/releases/${CYGNUS_RELEASE}.env start api worker worker-skills" \
+  --quiesce-command "${CYGNUS_REPO}/scripts/prod/compose-control.sh --release ${CYGNUS_RELEASE} -- quiesce-backend" \
+  --resume-command  "${CYGNUS_REPO}/scripts/prod/compose-control.sh --release ${CYGNUS_RELEASE} -- resume-backend" \
   --retention-label daily \
   --artifact-encrypt-command  "age --encrypt -r age1xxxxxxxx -o {output} {input}" \
   --artifact-decrypt-command  "age --decrypt -i /run/secrets/cygnus-backup-age.txt -o {output} {input}" \
@@ -142,10 +142,18 @@ uv run python -m cygnus.runtime.backup_restore backup \
 ```
 
 The outer shell expands `CYGNUS_REPO` and `CYGNUS_RELEASE` before the CLI receives
-the argv template. `backup_restore` deliberately does **not** invoke a shell for
-the template, so retain the absolute compose file, project directory, production
-project name, and both environment files; a bare `docker compose` would target
-the caller's local compose stack instead of production.
+the argv template. `backup_restore` deliberately does **not** invoke a shell.
+The absolute `compose-control.sh` wrapper loads and validates the protected
+production environment and immutable release, targets the production Compose
+project, then resumes API + delivery consumer and proves the exact TLS receipt
+route before starting either worker. A bare `docker compose` command can target
+the caller's local stack or race worker delivery against an unavailable route.
+
+After either worker starts, the wrapper also requires public `/readyz` to return
+`{"status":"ready"}`. Production Nginx gates that response continuously on the
+consumer's `/health` check (signing secret + durable receipt table); consumer
+loss returns a bounded `503` and makes the frontend container unhealthy.
+`/livez` remains API-process liveness only.
 
 Placeholders: `{input}`/`{output}` for encryption/decryption,
 `{input}`/`{signature}` for signing/verification. Each command runs without a

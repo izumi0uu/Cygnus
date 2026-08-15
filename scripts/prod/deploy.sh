@@ -42,9 +42,9 @@ recover_failed_rollout() {
   local status="${1:-1}"
   trap - EXIT
   if [ "$status" -ne 0 ] && [ -n "$PREVIOUS" ]; then
-    log "candidate rollout failed; restoring active release $PREVIOUS without schema downgrade..."
-    if ! CYGNUS_FAILED_RELEASE="$RELEASE" "$CHECKOUTS_DIR/$PREVIOUS/scripts/prod/rollback.sh" --release "$PREVIOUS" --yes; then
-      printf '[cygnus-prod] ERROR: automatic application rollback failed; manual intervention is required\n' >&2
+    log "candidate rollout failed; restoring active release $PREVIOUS with its exact schema head..."
+    if ! CYGNUS_FAILED_RELEASE="$RELEASE" CYGNUS_ROLLBACK_SOURCE_METADATA_FILE="$LOADED_RELEASE_FILE" CYGNUS_ROLLBACK_SOURCE_INPUTS_FILE="$LOADED_RELEASE_INPUTS_FILE" "$SCRIPT_DIR/rollback.sh" --release "$PREVIOUS" --downgrade target --yes; then
+      printf '[cygnus-prod] ERROR: automatic application/schema rollback failed; manual intervention is required\n' >&2
     fi
   fi
   exit "$status"
@@ -60,13 +60,16 @@ if [ "$DRY_RUN" = 1 ]; then
   log "dry run validated required external inputs and would execute:"
   log "  docker compose pull"
   log "  docker compose up -d --wait postgres redis minio"
-  log "  docker compose stop <currently running api/worker/worker-skills>"
+  log "  docker compose stop <currently running api/worker/worker-skills/delivery-consumer>"
   log "  docker compose run --rm --no-deps migrator  # current digest: Alembic head + storage"
-  log "  docker compose up -d --no-deps --force-recreate api worker worker-skills"
+  log "  docker compose up -d --no-deps --force-recreate api delivery-consumer"
+  log "  docker compose up -d --no-deps --wait delivery-consumer"
   log "  docker compose up -d --no-deps --force-recreate frontend"
+  log "  TLS livez plus exact signed-delivery route gate"
+  log "  docker compose up -d --no-deps --force-recreate --wait worker worker-skills"
+  log "  aggregate API + worker + delivery-consumer readiness gate"
   log "  migration failure resumes the previously running backend containers"
   log "  rollout/ingress failure recreates the previous immutable application release"
-  log "  TLS JSON /livez then /readyz ingress gate"
   log "  persist immutable release metadata, active checkout, and active/previous state externally"
   exit 0
 fi
@@ -84,10 +87,13 @@ clear_backend_recovery_trap
 if [ -n "$PREVIOUS" ]; then
   trap 'recover_failed_rollout "$?"' EXIT
 fi
-log "starting backend workers from the migrated release..."
-compose_up_backend
+log "starting ingress backend from the migrated release..."
+compose_up_ingress_backend
 log "starting TLS reverse proxy..."
 compose_up_frontend
+verify_delivery_ingress "$CYGNUS_DOMAIN"
+log "starting workers after the signed-delivery route is active..."
+compose_up_workers
 verify_ingress "$CYGNUS_DOMAIN"
 persist_release_metadata "$RELEASE"
 activate_release_checkout "$RELEASE"

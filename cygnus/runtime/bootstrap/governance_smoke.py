@@ -436,10 +436,9 @@ def _exercise_api(
             summary.get("pending") == len(_TARGET_CHANNELS),
             "initial propagation is not pending on both target channels",
         )
-        # CYG-138 verification-only delivery receipt truth: publish must stage
-        # one pending delivery per surface with a canonical desired digest.
-        # Real Production V1 acceptance still requires an external
-        # internal-copilot endpoint; this smoke only proves persisted receipts.
+        # The initial smoke stages one pending delivery per surface with a
+        # canonical desired digest. Persisted domain certification drives these
+        # rows through the real production delivery consumer.
         records = _items(ledger.get("records"), "propagation records")
         _require(len(records) == len(_TARGET_CHANNELS), "propagation record count")
         delivery_ids: list[object] = []
@@ -658,8 +657,8 @@ def _verify_after_restart(
             propagation.get("publication_record_id") == publication_id,
             "restart propagation selected another publication",
         )
-        # CYG-138 verification-only: restart/retry preserves one delivery
-        # identity per surface with the same canonical desired digest.
+        # Restart/retry preserves one delivery identity per surface with the
+        # same canonical desired digest before real consumer dispatch.
         restart_ledger = _mapping(
             propagation.get("propagation_ledger"), "restart propagation ledger"
         )

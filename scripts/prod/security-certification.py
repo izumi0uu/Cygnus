@@ -340,6 +340,29 @@ def main(argv: list[str] | None = None) -> int:
         scan_summary(repo_root / "production/scans/frontend-trivy.json"),
     ]
     stack = repo_root / "scripts/prod/certification-stack.sh"
+    _ = command(str(stack), "consumer-stop", "--release", release)
+    try:
+        consumer_not_ready = httpx.get(f"{base_url}/readyz", timeout=timeout)
+        not_ready_body = response_json(consumer_not_ready)
+        consumer_check = not_ready_body.get("checks")
+        if (
+            consumer_not_ready.status_code != 503
+            or not_ready_body.get("status") != "not_ready"
+            or not isinstance(consumer_check, dict)
+            or consumer_check.get("delivery_consumer") != {"status": "failed"}
+        ):
+            raise RuntimeError(
+                "public readiness stayed healthy after delivery-consumer failure"
+            )
+    finally:
+        _ = command(str(stack), "consumer-restart", "--release", release)
+    consumer_recovered = httpx.get(f"{base_url}/readyz", timeout=timeout)
+    if (
+        consumer_recovered.status_code != 200
+        or response_json(consumer_recovered).get("status") != "ready"
+    ):
+        raise RuntimeError("public readiness did not recover with delivery-consumer")
+
     _ = command(str(stack), "restart", "--release", release)
     ready = httpx.get(f"{base_url}/readyz", timeout=timeout)
     if ready.status_code != 200 or response_json(ready).get("status") != "ready":
@@ -430,6 +453,14 @@ def main(argv: list[str] | None = None) -> int:
             "name": "static-security-gate",
             "passed": True,
             "details": {"gate": "scripts/release_contract_gate.py", "status": "passed"},
+        },
+        {
+            "name": "delivery-consumer-readiness",
+            "passed": True,
+            "details": {
+                "failed_status": consumer_not_ready.status_code,
+                "recovered_status": consumer_recovered.status_code,
+            },
         },
         {
             "name": "actionable-failure-recovery",

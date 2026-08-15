@@ -65,8 +65,8 @@ if [ -n "${CYGNUS_CERTIFICATION_TARGET_ORIGIN:-}" ]; then
   quiesce="$REPO_ROOT/scripts/prod/certification-stack.sh quiesce --release $CYGNUS_RELEASE"
   resume="$REPO_ROOT/scripts/prod/certification-stack.sh resume --release $CYGNUS_RELEASE"
 else
-  quiesce="docker compose --project-directory ${REPO_ROOT} --project-name cygnus-prod -f ${REPO_ROOT}/deploy/docker-compose.prod.yml --env-file ${CYGNUS_PRODUCTION_ENV_FILE} --env-file ${CYGNUS_RELEASE_METADATA_FILE} stop api worker worker-skills"
-  resume="docker compose --project-directory ${REPO_ROOT} --project-name cygnus-prod -f ${REPO_ROOT}/deploy/docker-compose.prod.yml --env-file ${CYGNUS_PRODUCTION_ENV_FILE} --env-file ${CYGNUS_RELEASE_METADATA_FILE} start api worker worker-skills"
+  quiesce="$REPO_ROOT/scripts/prod/compose-control.sh --release $CYGNUS_RELEASE -- quiesce-backend"
+  resume="$REPO_ROOT/scripts/prod/compose-control.sh --release $CYGNUS_RELEASE -- resume-backend"
 fi
 
 printf '%s' "$CYGNUS_BACKUP_AGE_RECIPIENT" | grep -Eq '^age1[0-9a-z]+$' || die "CYGNUS_BACKUP_AGE_RECIPIENT must be an age recipient"

@@ -15,7 +15,9 @@ OPERATOR_WORK_DIR="$DEPLOY_DIR"
 export CYGNUS_PRODUCTION_ENV_FILE="$PROD_ENV_FILE"
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-cygnus-prod}"
 COMPOSE=(docker compose --project-name "$COMPOSE_PROJECT_NAME" --project-directory "$DEPLOY_DIR" -f "$COMPOSE_FILE" --env-file "$PROD_ENV_FILE")
-PRODUCTION_BACKEND_SERVICES=(api worker worker-skills)
+PRODUCTION_BACKEND_SERVICES=(api worker worker-skills delivery-consumer)
+PRODUCTION_INGRESS_BACKEND_SERVICES=(api delivery-consumer)
+PRODUCTION_WORKER_SERVICES=(worker worker-skills)
 QUIESCED_BACKEND_SERVICES=()
 BACKEND_RECOVERY_TRAP_ARMED=0
 PROXY_CIDR='172.30.0.0/24'
@@ -264,9 +266,31 @@ compose_quiesce_backend() {
 }
 
 compose_resume_quiesced_backend() {
+  local service consumer_resumed=0
+  local ingress_services=() worker_services=()
   [ "${#QUIESCED_BACKEND_SERVICES[@]}" -gt 0 ] || return 0
   log "resuming previously running backend services: ${QUIESCED_BACKEND_SERVICES[*]}"
-  "${COMPOSE[@]}" start "${QUIESCED_BACKEND_SERVICES[@]}"
+  for service in "${QUIESCED_BACKEND_SERVICES[@]}"; do
+    case "$service" in
+      api) ingress_services+=("$service") ;;
+      delivery-consumer) ingress_services+=("$service"); consumer_resumed=1 ;;
+      worker|worker-skills) worker_services+=("$service") ;;
+      *) die "unknown quiesced backend service: $service" ;;
+    esac
+  done
+  if [ "${#ingress_services[@]}" -gt 0 ]; then
+    "${COMPOSE[@]}" start "${ingress_services[@]}"
+  fi
+  if [ "$consumer_resumed" = 1 ]; then
+    compose_wait_for_delivery_consumer
+    verify_delivery_ingress "$CYGNUS_DOMAIN"
+  fi
+  if [ "${#worker_services[@]}" -gt 0 ]; then
+    "${COMPOSE[@]}" start "${worker_services[@]}"
+  fi
+  if [ "$consumer_resumed" = 1 ] && [ "${#worker_services[@]}" -eq "${#PRODUCTION_WORKER_SERVICES[@]}" ]; then
+    verify_ingress "$CYGNUS_DOMAIN"
+  fi
 }
 
 resume_backend_on_failure() {
@@ -293,16 +317,33 @@ clear_backend_recovery_trap() {
 
 compose_up_stateful() { "${COMPOSE[@]}" up -d --wait postgres redis minio; }
 run_migrations() { "${COMPOSE[@]}" run --rm --no-deps migrator; }
-compose_up_backend() { "${COMPOSE[@]}" up -d --no-deps --force-recreate api worker worker-skills; }
-compose_up_frontend() { "${COMPOSE[@]}" up -d --no-deps --force-recreate frontend; }
+compose_up_ingress_backend() { "${COMPOSE[@]}" up -d --no-deps --force-recreate "${PRODUCTION_INGRESS_BACKEND_SERVICES[@]}"; }
+compose_up_workers() { "${COMPOSE[@]}" up -d --no-deps --force-recreate --wait "${PRODUCTION_WORKER_SERVICES[@]}"; }
 
-# Verify TLS termination plus API JSON semantics. No -k: a production deploy
-# must present a certificate valid for CYGNUS_DOMAIN even when we pin traffic to
-# local ingress with --resolve.
-verify_ingress() {
+compose_resume_backend() {
+  "${COMPOSE[@]}" start "${PRODUCTION_INGRESS_BACKEND_SERVICES[@]}"
+  compose_wait_for_delivery_consumer
+  verify_delivery_ingress "$CYGNUS_DOMAIN"
+  "${COMPOSE[@]}" start "${PRODUCTION_WORKER_SERVICES[@]}"
+  verify_ingress "$CYGNUS_DOMAIN"
+}
+
+compose_wait_for_delivery_consumer() {
+  "${COMPOSE[@]}" up -d --no-deps --wait delivery-consumer
+}
+
+compose_up_frontend() {
+  compose_wait_for_delivery_consumer
+  "${COMPOSE[@]}" up -d --no-deps --force-recreate frontend
+}
+
+# Verify TLS termination plus the exact signed-delivery route without requiring
+# worker heartbeats. No -k: production must present a certificate valid for
+# CYGNUS_DOMAIN even when traffic is pinned to local ingress with --resolve.
+verify_delivery_ingress() {
   local domain="$1" timeout_seconds="${2:-300}" interval="${3:-5}" deadline body
-  local http_port="${CYGNUS_HTTP_BIND_PORT:-80}" https_port="${CYGNUS_HTTPS_BIND_PORT:-443}" ingress_origin
-  [ -n "$domain" ] || die "verify_ingress: no domain"
+  local http_port="${CYGNUS_HTTP_BIND_PORT:-80}" https_port="${CYGNUS_HTTPS_BIND_PORT:-443}" ingress_origin delivery_response delivery_status delivery_body
+  [ -n "$domain" ] || die "verify_delivery_ingress: no domain"
   ingress_origin="https://$domain"
   [ "$https_port" = 443 ] || ingress_origin="$ingress_origin:$https_port"
   deadline=$(( $(date +%s) + timeout_seconds ))
@@ -314,10 +355,30 @@ verify_ingress() {
     [ "$(date +%s)" -lt "$deadline" ] || die "TLS/API livez did not become healthy at $ingress_origin/livez"
     sleep "$interval"
   done
+  if ! delivery_response=$(curl -sS --resolve "$domain:$https_port:127.0.0.1" --max-time 10 -H 'Content-Type: application/json' --data '{}' --write-out $'\n%{http_code}' "$ingress_origin/api/internal/propagation-delivery" 2>/dev/null); then
+    die "delivery-consumer TLS ingress request failed at $ingress_origin"
+  fi
+  delivery_status=${delivery_response##*$'\n'}
+  delivery_body=${delivery_response%$'\n'*}
+  if [ "$delivery_status" != 401 ] || ! printf '%s' "$delivery_body" | python3 -c 'import json,sys; assert json.load(sys.stdin) == {"detail": "delivery signature is invalid"}'; then
+    die "delivery-consumer TLS ingress did not reach the signed receipt adapter"
+  fi
+  log "delivery-consumer ingress ready: $ingress_origin/api/internal/propagation-delivery"
+}
+
+# Full public readiness is checked only after workers start. Nginx also gates
+# this API report continuously on delivery-consumer health.
+verify_ingress() {
+  local domain="$1" timeout_seconds="${2:-300}" interval="${3:-5}" deadline body
+  local https_port="${CYGNUS_HTTPS_BIND_PORT:-443}" ingress_origin
+  verify_delivery_ingress "$domain" "$timeout_seconds" "$interval"
+  ingress_origin="https://$domain"
+  [ "$https_port" = 443 ] || ingress_origin="$ingress_origin:$https_port"
+  deadline=$(( $(date +%s) + timeout_seconds ))
   while :; do
     if body=$(curl -fsS --resolve "$domain:$https_port:127.0.0.1" --max-time 10 "$ingress_origin/readyz" 2>/dev/null) && printf '%s' "$body" | python3 -c 'import json,sys; assert json.load(sys.stdin)["status"] == "ready"'; then
       log "ingress ready: $ingress_origin/readyz"
-      return 0
+      break
     fi
     [ "$(date +%s)" -lt "$deadline" ] || die "TLS/API readyz did not become ready at $ingress_origin/readyz"
     sleep "$interval"

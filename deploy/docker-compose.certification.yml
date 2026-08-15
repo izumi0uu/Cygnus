@@ -4,6 +4,18 @@ services:
   api:
     environment:
       CYGNUS_CERTIFICATION_MODE: "1"
+      DELIVERY_TARGETS_JSON: "${CYGNUS_CERTIFICATION_DELIVERY_TARGETS_JSON:?certification delivery targets required}"
+      CYGNUS_DELIVERY_ALLOWED_HOSTS: "frontend"
+      SSL_CERT_FILE: /run/secrets/cygnus_tls_cert
+    secrets:
+      - cygnus_tls_cert
+  worker:
+    environment:
+      DELIVERY_TARGETS_JSON: "${CYGNUS_CERTIFICATION_DELIVERY_TARGETS_JSON:?certification delivery targets required}"
+      CYGNUS_DELIVERY_ALLOWED_HOSTS: "frontend"
+      SSL_CERT_FILE: /run/secrets/cygnus_tls_cert
+    secrets:
+      - cygnus_tls_cert
   postgres:
     ports:
       - "127.0.0.1:${CYGNUS_CERTIFICATION_POSTGRES_PORT:-15432}:5432"

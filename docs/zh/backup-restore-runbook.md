@@ -77,8 +77,8 @@ uv run python -m cygnus.runtime.backup_restore backup \
   --output-dir "/var/backups/cygnus/$(date -u +%Y%m%dT%H%M%SZ)" \
   --environment staging \
   --source-id "staging-01" \
-  --quiesce-command "docker compose stop api worker worker-skills" \
-  --resume-command  "docker compose start api worker worker-skills" \
+  --quiesce-command "docker compose stop api worker worker-skills delivery-consumer" \
+  --resume-command  "docker compose start api worker worker-skills delivery-consumer" \
   --retention-label daily \
   --report-file /var/backups/cygnus/backup-report.json
 ```
@@ -114,8 +114,8 @@ uv run python -m cygnus.runtime.backup_restore backup \
   --backend-image-ref "$CYGNUS_RELEASE_BACKEND_IMAGE_REF" \
   --frontend-image-ref "$CYGNUS_RELEASE_FRONTEND_IMAGE_REF" \
   --alembic-head "$CYGNUS_RELEASE_ALEMBIC_HEAD" \
-  --quiesce-command "docker compose --project-directory ${CYGNUS_REPO} --project-name cygnus-prod -f ${CYGNUS_REPO}/deploy/docker-compose.prod.yml --env-file ${CYGNUS_REPO}/deploy/.env.prod --env-file ${CYGNUS_REPO}/deploy/releases/${CYGNUS_RELEASE}.env stop api worker worker-skills" \
-  --resume-command  "docker compose --project-directory ${CYGNUS_REPO} --project-name cygnus-prod -f ${CYGNUS_REPO}/deploy/docker-compose.prod.yml --env-file ${CYGNUS_REPO}/deploy/.env.prod --env-file ${CYGNUS_REPO}/deploy/releases/${CYGNUS_RELEASE}.env start api worker worker-skills" \
+  --quiesce-command "${CYGNUS_REPO}/scripts/prod/compose-control.sh --release ${CYGNUS_RELEASE} -- quiesce-backend" \
+  --resume-command  "${CYGNUS_REPO}/scripts/prod/compose-control.sh --release ${CYGNUS_RELEASE} -- resume-backend" \
   --retention-label daily \
   --artifact-encrypt-command  "age --encrypt -r age1xxxxxxxx -o {output} {input}" \
   --artifact-decrypt-command  "age --decrypt -i /run/secrets/cygnus-backup-age.txt -o {output} {input}" \
@@ -127,10 +127,16 @@ uv run python -m cygnus.runtime.backup_restore backup \
 ```
 
 外层 shell 会在 CLI 接收 argv 模板前展开 `CYGNUS_REPO`、`CYGNUS_RELEASE` 与
-release identity 变量。`backup_restore` 刻意不经 shell 执行模板；因此必须保留绝对
-compose 文件、project directory、生产 project 名称及两个环境文件。上面的
-`--project-directory`、`--project-name`、`-f` 和两个 `--env-file` 都是生产命令的
-必要部分；裸 `docker compose` 会指向调用者的本地 compose 栈，而不是生产栈。
+release identity 变量。`backup_restore` 刻意不经 shell 执行模板。绝对路径的
+`compose-control.sh` 会加载并校验受保护生产环境与不可变 release，锁定生产 Compose
+project；恢复时先启动 API + delivery consumer 并证明精确 TLS receipt 路由，再启动两个
+worker。裸 `docker compose` 既可能误指向调用者本地栈，也可能让 worker 在路由可用前
+发起 delivery。
+
+两个 worker 启动后，wrapper 还要求公开 `/readyz` 返回
+`{"status":"ready"}`。生产 Nginx 会持续用 consumer 的 `/health`（签名 secret +
+durable receipt table）门控该响应；consumer 丢失时返回有界 `503`，同时 frontend
+container 变为 unhealthy。`/livez` 仍只表示 API 进程存活。
 
 占位符：加解密用 `{input}`/`{output}`，签名/验签用 `{input}`/`{signature}`。
 命令不经 shell；选用 `age` 与 `openssl dgst` 是因为它们无需重定向。

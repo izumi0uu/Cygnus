@@ -11,8 +11,8 @@ deliveries with one identity and a desired digest, exact signed ack syncs once,
 drift/forged/stale acks are denied, manual mutation cannot set synced, bounded
 retries dead-letter, and the worker sweep dispatches through the fake consumer.
 
-The fake consumer harness is verification-only: real Production V1 acceptance
-still requires an external internal-copilot endpoint.
+The fake consumer remains a deterministic unit-test harness. Production uses
+the Cygnus-owned durable ASGI delivery consumer covered separately.
 """
 
 from __future__ import annotations
@@ -61,6 +61,7 @@ from cygnus.publish.delivery import (
     canonical_delivery_digest,
     canonical_json,
     delivery_endpoint_url,
+    delivery_targets_ready,
     delivery_request_headers,
     delivery_to_dict,
     drain_propagation_deliveries,
@@ -445,6 +446,63 @@ class CircuitBreakerTests(unittest.TestCase):
         self.assertFalse(circuit.allow("consumer.test"))
         circuit.reset()
         self.assertTrue(circuit.allow("consumer.test"))
+
+
+class DeliveryStartupReadinessTests(unittest.IsolatedAsyncioTestCase):
+    async def test_signed_probe_proves_exact_route_without_delivery(self) -> None:
+        consumer = FakeConsumer(_TEST_SECRET)
+        settings = Settings(
+            environment="test",
+            delivery_targets_json=json.dumps({"agent-copilot": _CONSUMER_ORIGIN}),
+            delivery_hmac_secret=_TEST_SECRET,
+            delivery_timeout_seconds=2.0,
+            health_probe_timeout_seconds=1.0,
+        )
+
+        ready = await delivery_targets_ready(
+            settings=settings,
+            client_factory=lambda: httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=cast(Any, consumer)),
+                timeout=1.0,
+            ),
+        )
+
+        self.assertTrue(ready)
+        self.assertEqual(consumer.received_methods, ["HEAD"])
+        self.assertEqual(consumer.received_bodies, [b""])
+        self.assertEqual(
+            consumer.received_headers[0]["x-cygnus-signature"],
+            f"sha256={sign_body(b'', _TEST_SECRET)}",
+        )
+
+    async def test_server_failure_is_not_ready(self) -> None:
+        consumer = FakeConsumer(_TEST_SECRET, fail_with=503)
+        settings = Settings(
+            environment="test",
+            delivery_targets_json=json.dumps({"agent-copilot": _CONSUMER_ORIGIN}),
+            delivery_hmac_secret=_TEST_SECRET,
+            delivery_timeout_seconds=2.0,
+            health_probe_timeout_seconds=1.0,
+        )
+
+        ready = await delivery_targets_ready(
+            settings=settings,
+            client_factory=lambda: httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=cast(Any, consumer)),
+                timeout=1.0,
+            ),
+        )
+
+        self.assertFalse(ready)
+
+    async def test_missing_secret_is_not_ready(self) -> None:
+        settings = Settings(
+            environment="test",
+            delivery_targets_json=json.dumps({"agent-copilot": _CONSUMER_ORIGIN}),
+            delivery_hmac_secret="",
+        )
+
+        self.assertFalse(await delivery_targets_ready(settings=settings))
 
 
 class FakeConsumerTransportTests(unittest.TestCase):

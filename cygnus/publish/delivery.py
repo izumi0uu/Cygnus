@@ -947,6 +947,68 @@ async def list_propagation_deliveries(
     return tuple(records)
 
 
+async def delivery_targets_ready(
+    *,
+    settings: Settings | None = None,
+    client_factory: Callable[[], httpx.AsyncClient] | None = None,
+) -> bool:
+    """Prove exact-route authentication and receipt storage for every target.
+
+    Worker startup uses this non-mutating signed probe before claiming durable
+    rows. An unavailable route or receipt store therefore delays recovery until
+    the cron sweep instead of consuming an attempt during unordered restart.
+    """
+    resolved_settings = settings or get_settings()
+    try:
+        targets = resolved_settings.delivery_targets
+        if not targets:
+            return True
+        secret = resolved_settings.delivery_hmac_secret
+        if not secret:
+            return False
+        allowed_origins = delivery_target_origins(targets)
+        allow_insecure_http = (
+            resolved_settings.environment in resolved_settings.LOCAL_TEST_ENVIRONMENTS
+        )
+    except (DeliveryPolicyError, ValueError):
+        return False
+
+    timeout_seconds = min(
+        resolved_settings.delivery_timeout_seconds,
+        resolved_settings.health_probe_timeout_seconds,
+    )
+    client = (
+        client_factory()
+        if client_factory is not None
+        else httpx.AsyncClient(timeout=timeout_seconds)
+    )
+    try:
+        for base_url in sorted(set(targets.values())):
+            request_url = validate_delivery_destination(
+                delivery_endpoint_url(base_url),
+                allowed_origins,
+                allow_insecure_http=allow_insecure_http,
+            )
+            probe_body = b""
+            response = await client.request(
+                "HEAD",
+                request_url,
+                content=probe_body,
+                headers={
+                    "X-Cygnus-Signature": (f"sha256={sign_body(probe_body, secret)}")
+                },
+                timeout=timeout_seconds,
+                follow_redirects=False,
+            )
+            if response.status_code != 204:
+                return False
+    except (DeliveryPolicyError, httpx.HTTPError, ValueError):
+        return False
+    finally:
+        await client.aclose()
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Worker sweep: claim, dispatch, and record durable outcomes
 # ---------------------------------------------------------------------------

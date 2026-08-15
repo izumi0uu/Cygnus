@@ -926,34 +926,44 @@ class RedisEnvironmentTests(unittest.TestCase):
 class ProductionRunbookTests(unittest.TestCase):
     def test_production_quiesce_and_resume_target_the_production_stack(self) -> None:
         expected_prefix = (
-            "docker compose --project-directory ${CYGNUS_REPO} "
-            "--project-name cygnus-prod "
-            "-f ${CYGNUS_REPO}/deploy/docker-compose.prod.yml "
-            "--env-file ${CYGNUS_REPO}/deploy/.env.prod "
-            "--env-file ${CYGNUS_REPO}/deploy/releases/${CYGNUS_RELEASE}.env"
+            "${CYGNUS_REPO}/scripts/prod/compose-control.sh "
+            "--release ${CYGNUS_RELEASE} --"
         )
+        backup_restore_script = (
+            _REPO_ROOT / "scripts/prod/backup_restore_drill.sh"
+        ).read_text(encoding="utf-8")
         for relative_path in (
             "docs/en/backup-restore-runbook.md",
             "docs/zh/backup-restore-runbook.md",
         ):
             text = (_REPO_ROOT / relative_path).read_text(encoding="utf-8")
+            staging_section = text[text.index("### 4.1") : text.index("### 4.2")]
+            self.assertIn(
+                '--quiesce-command "docker compose stop api worker worker-skills delivery-consumer"',
+                staging_section,
+            )
+            self.assertIn(
+                '--resume-command  "docker compose start api worker worker-skills delivery-consumer"',
+                staging_section,
+            )
             production_section = text[text.index("### 4.2") : text.index("## 5.")]
             self.assertIn(
-                f'--quiesce-command "{expected_prefix} stop api worker worker-skills"',
+                f'--quiesce-command "{expected_prefix} quiesce-backend"',
                 production_section,
             )
             self.assertIn(
-                f'--resume-command  "{expected_prefix} start api worker worker-skills"',
+                f'--resume-command  "{expected_prefix} resume-backend"',
                 production_section,
             )
-            self.assertNotIn(
-                '--quiesce-command "docker compose stop api worker worker-skills"',
-                production_section,
-            )
-            self.assertNotIn(
-                '--resume-command  "docker compose start api worker worker-skills"',
-                production_section,
-            )
+            self.assertNotIn("docker compose --project-directory", production_section)
+        self.assertIn(
+            "compose-control.sh --release $CYGNUS_RELEASE -- quiesce-backend",
+            backup_restore_script,
+        )
+        self.assertIn(
+            "compose-control.sh --release $CYGNUS_RELEASE -- resume-backend",
+            backup_restore_script,
+        )
 
     def test_restore_examples_use_a_dedicated_nonzero_redis_database(self) -> None:
         for relative_path in (

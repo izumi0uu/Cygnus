@@ -820,6 +820,22 @@ def validate_repository(root: Path = REPO_ROOT) -> GateResult:
         f"certification stack does not preserve materialized policy path: {name}"
         for name in missing_certification_policy_overrides
     )
+    production_policy_validation = 'validate_production_inputs "$RELEASE"'
+    certification_network_override = 'export CYGNUS_NETWORK_SUBNET="${CYGNUS_CERTIFICATION_NETWORK_SUBNET:-172.31.0.0/24}"'
+    certification_policy_ordered = (
+        production_policy_validation in certification_stack
+        and certification_network_override in certification_stack
+        and certification_stack.index(production_policy_validation)
+        < certification_stack.index(certification_network_override)
+        and production_policy_validation not in certification_rollout
+    )
+    checks["certification_production_policy_precedes_network_override"] = (
+        certification_policy_ordered
+    )
+    if not certification_policy_ordered:
+        failures.append(
+            "certification must validate production policy before isolated network overrides"
+        )
     live_certification_script = _read(
         root, "scripts/run_live_production_certification.sh"
     )

@@ -358,6 +358,13 @@ class DockerStackRecoveryTests(unittest.TestCase):
         rollout_section = certification_stack.partition("  up|redeploy)\n")[
             2
         ].partition("esac")[0]
+        production_policy_validation = 'validate_production_inputs "$RELEASE"'
+        certification_network_override = "export CYGNUS_NETWORK_SUBNET="
+        self.assertLess(
+            certification_stack.index(production_policy_validation),
+            certification_stack.index(certification_network_override),
+        )
+        self.assertNotIn(production_policy_validation, rollout_section)
         self.assertNotIn("\n  delivery-consumer:", certification)
         self.assertNotIn("\n  frontend:", certification)
         self.assertEqual(

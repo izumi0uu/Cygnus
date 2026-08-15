@@ -42,6 +42,9 @@ if [ -z "${CYGNUS_RELEASE_INPUTS_FILE:-}" ] && [ -n "${CYGNUS_PRODUCTION_INPUTS_
 fi
 load_release "$RELEASE"
 validate_identity "$RELEASE"
+if [ "$ACTION" = up ] || [ "$ACTION" = redeploy ]; then
+  validate_production_inputs "$RELEASE"
+fi
 CERTIFICATION_DELIVERY_ORIGIN="https://frontend:8443"
 if ! CYGNUS_CERTIFICATION_DELIVERY_TARGETS_JSON=$(
   DELIVERY_TARGETS_JSON="${DELIVERY_TARGETS_JSON:-}" CERTIFICATION_DELIVERY_ORIGIN="$CERTIFICATION_DELIVERY_ORIGIN" \
@@ -236,7 +239,6 @@ case "$ACTION" in
   up|redeploy)
     validate_secrets
     validate_resources
-    validate_production_inputs "$RELEASE"
     certification_url="$CERTIFICATION_ORIGIN"
     export CYGNUS_PUBLIC_ORIGIN="$certification_url"
     export PORTAL_BASE_URL="$certification_url"

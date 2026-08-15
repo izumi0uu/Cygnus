@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import base64
 import importlib.util
 import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import TypeAlias, cast
+from typing import cast
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 
@@ -28,15 +27,6 @@ collector = load("collect_image_attestations")
 DIGEST = "sha256:" + "a" * 64
 AMD64_DIGEST = "sha256:" + "b" * 64
 ARM64_DIGEST = "sha256:" + "c" * 64
-
-JSONValue: TypeAlias = (
-    None | bool | int | float | str | list["JSONValue"] | dict[str, "JSONValue"]
-)
-
-
-def dsse(statement: dict[str, JSONValue]) -> dict[str, JSONValue]:
-    payload = base64.b64encode(json.dumps(statement).encode("utf-8")).decode("ascii")
-    return {"payload": payload}
 
 
 class ImageGateTests(unittest.TestCase):
@@ -89,7 +79,7 @@ class ImageGateTests(unittest.TestCase):
             ):
                 path = self.root / str(entry[artifact])
                 path.parent.mkdir(parents=True, exist_ok=True)
-                content: JSONValue
+                content: object
                 if artifact == "sbom":
                     content = {
                         "schema_version": 1,
@@ -97,6 +87,7 @@ class ImageGateTests(unittest.TestCase):
                         "platforms": {
                             "linux/amd64": {
                                 "manifest_digest": AMD64_DIGEST,
+                                "predicate_type": "https://spdx.dev/Document",
                                 "document": {
                                     "SPDXID": "SPDXRef-DOCUMENT",
                                     "spdxVersion": "SPDX-2.3",
@@ -104,6 +95,7 @@ class ImageGateTests(unittest.TestCase):
                             },
                             "linux/arm64": {
                                 "manifest_digest": ARM64_DIGEST,
+                                "predicate_type": "https://spdx.dev/Document",
                                 "document": {
                                     "SPDXID": "SPDXRef-DOCUMENT",
                                     "spdxVersion": "SPDX-2.3",
@@ -112,49 +104,24 @@ class ImageGateTests(unittest.TestCase):
                         },
                     }
                 elif artifact == "provenance":
+                    predicate = {
+                        "buildDefinition": {
+                            "buildType": "https://github.com/moby/buildkit/blob/master/docs/attestations/slsa-definitions.md"
+                        }
+                    }
                     content = {
                         "schema_version": 1,
                         "image_index_digest": DIGEST,
                         "platforms": {
                             "linux/amd64": {
                                 "manifest_digest": AMD64_DIGEST,
-                                "attestations": [
-                                    dsse(
-                                        {
-                                            "_type": "https://in-toto.io/Statement/v1",
-                                            "predicateType": "https://slsa.dev/provenance/v1",
-                                            "subject": [
-                                                {
-                                                    "digest": {
-                                                        "sha256": AMD64_DIGEST.removeprefix(
-                                                            "sha256:"
-                                                        )
-                                                    }
-                                                }
-                                            ],
-                                        }
-                                    )
-                                ],
+                                "predicate_type": "https://slsa.dev/provenance/v1",
+                                "predicate": predicate,
                             },
                             "linux/arm64": {
                                 "manifest_digest": ARM64_DIGEST,
-                                "attestations": [
-                                    dsse(
-                                        {
-                                            "_type": "https://in-toto.io/Statement/v1",
-                                            "predicateType": "https://slsa.dev/provenance/v1",
-                                            "subject": [
-                                                {
-                                                    "digest": {
-                                                        "sha256": ARM64_DIGEST.removeprefix(
-                                                            "sha256:"
-                                                        )
-                                                    }
-                                                }
-                                            ],
-                                        }
-                                    )
-                                ],
+                                "predicate_type": "https://slsa.dev/provenance/v1",
+                                "predicate": predicate,
                             },
                         },
                     }
@@ -181,23 +148,18 @@ class ImageGateTests(unittest.TestCase):
                 frontend_signature="production/signatures/frontend.crt",
             )
 
-    def test_unbound_provenance_blocks(self) -> None:
+    def test_mismatched_platform_manifest_blocks(self) -> None:
         manifest = self.manifest()
         self.materialize(manifest)
         path = self.root / "production/provenance/backend.json"
         provenance = json.loads(path.read_text(encoding="utf-8"))
-        provenance["platforms"]["linux/amd64"]["attestations"] = [
-            {
-                "_type": "https://in-toto.io/Statement/v1",
-                "predicateType": "https://slsa.dev/provenance/v1",
-            }
-        ]
+        provenance["platforms"]["linux/amd64"]["manifest_digest"] = "sha256:" + "d" * 64
         path.write_text(json.dumps(provenance), encoding="utf-8")
         result = gate.validate_manifest(manifest, repo_root=self.root)
         self.assertFalse(result["ok"])
         self.assertTrue(
             any(
-                "provenance.linux/amd64 is not bound" in item
+                "SBOM and provenance platform manifests disagree" in item
                 for item in result["failures"]
             )
         )
@@ -249,62 +211,66 @@ class ImageAttestationCollectorTests(unittest.TestCase):
             commands.append(command)
             if command[-1] == "--raw":
                 return json.dumps(self.index())
-            platform = command[command.index("--platform") + 1]
-            if "sbom" in command:
+            if command[-1] == "{{ json .SBOM }}":
                 return json.dumps(
-                    {"SPDXID": "SPDXRef-DOCUMENT", "spdxVersion": "SPDX-2.3"}
-                )
-            manifest_digest = (
-                AMD64_DIGEST if platform == "linux/amd64" else ARM64_DIGEST
-            )
-            return json.dumps(
-                dsse(
                     {
-                        "_type": "https://in-toto.io/Statement/v1",
-                        "predicateType": "https://slsa.dev/provenance/v1",
-                        "subject": [
-                            {
-                                "digest": {
-                                    "sha256": manifest_digest.removeprefix("sha256:")
-                                }
+                        platform: {
+                            "SPDX": {
+                                "SPDXID": "SPDXRef-DOCUMENT",
+                                "spdxVersion": "SPDX-2.3",
                             }
-                        ],
+                        }
+                        for platform in ("linux/amd64", "linux/arm64")
                     }
                 )
+            return json.dumps(
+                {
+                    platform: {
+                        "SLSA": {
+                            "buildDefinition": {
+                                "buildType": "https://github.com/moby/buildkit/blob/master/docs/attestations/slsa-definitions.md"
+                            }
+                        }
+                    }
+                    for platform in ("linux/amd64", "linux/arm64")
+                }
             )
 
         result = collector.collect_image_attestations(
             f"ghcr.io/example/image@{DIGEST}",
             runner=run,
             docker="docker",
-            cosign="cosign",
         )
         self.assertEqual(
             set(result["sbom_bundle"]["platforms"]),
             {"linux/amd64", "linux/arm64"},
         )
-        platform_commands = [command for command in commands if "--platform" in command]
-        self.assertEqual(len(platform_commands), 4)
+        self.assertEqual(len(commands), 3)
 
-    def test_rejects_provenance_for_another_manifest(self) -> None:
+    def test_rejects_missing_platform_provenance(self) -> None:
         def run(command: list[str]) -> str:
             if command[-1] == "--raw":
                 return json.dumps(self.index())
-            if "sbom" in command:
-                return json.dumps({"SPDXID": "SPDXRef-DOCUMENT"})
+            if command[-1] == "{{ json .SBOM }}":
+                return json.dumps(
+                    {
+                        platform: {"SPDX": {"SPDXID": "SPDXRef-DOCUMENT"}}
+                        for platform in ("linux/amd64", "linux/arm64")
+                    }
+                )
             return json.dumps(
                 {
-                    "predicateType": "https://slsa.dev/provenance/v1",
-                    "subject": [{"digest": {"sha256": "d" * 64}}],
+                    "linux/amd64": {
+                        "SLSA": {"buildDefinition": {"buildType": "buildkit"}}
+                    }
                 }
             )
 
-        with self.assertRaisesRegex(ValueError, "provenance is not bound"):
+        with self.assertRaisesRegex(ValueError, "no linux/arm64 entry"):
             collector.collect_image_attestations(
                 f"ghcr.io/example/image@{DIGEST}",
                 runner=run,
                 docker="docker",
-                cosign="cosign",
             )
 
 

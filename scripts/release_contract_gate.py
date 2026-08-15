@@ -264,10 +264,11 @@ def validate_repository(root: Path = REPO_ROOT) -> GateResult:
     )
     collector = _read(root, "scripts/collect_image_attestations.py")
     required_collector_fragments = (
-        '"download",',
-        '"sbom",',
-        '"attestation",',
-        '"--platform",',
+        '"--raw"',
+        '"{{ json .SBOM }}"',
+        '"{{ json .Provenance }}"',
+        '"https://spdx.dev/Document"',
+        '"https://slsa.dev/provenance/v1"',
         '"linux/amd64"',
         '"linux/arm64"',
         '"image_index_digest"',

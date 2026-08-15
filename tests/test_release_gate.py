@@ -30,6 +30,7 @@ def sbom_bundle() -> dict[str, JSONValue]:
         "platforms": {
             platform: {
                 "manifest_digest": manifest_digest,
+                "predicate_type": "https://spdx.dev/Document",
                 "document": {"SPDXID": "SPDXRef-DOCUMENT"},
             }
             for platform, manifest_digest in PLATFORM_DIGESTS.items()
@@ -44,19 +45,12 @@ def provenance_bundle() -> dict[str, JSONValue]:
         "platforms": {
             platform: {
                 "manifest_digest": manifest_digest,
-                "attestations": [
-                    {
-                        "_type": "https://in-toto.io/Statement/v1",
-                        "predicateType": "https://slsa.dev/provenance/v1",
-                        "subject": [
-                            {
-                                "digest": {
-                                    "sha256": manifest_digest.removeprefix("sha256:")
-                                }
-                            }
-                        ],
+                "predicate_type": "https://slsa.dev/provenance/v1",
+                "predicate": {
+                    "buildDefinition": {
+                        "buildType": "https://github.com/moby/buildkit/blob/master/docs/attestations/slsa-definitions.md"
                     }
-                ],
+                },
             }
             for platform, manifest_digest in PLATFORM_DIGESTS.items()
         },

@@ -89,12 +89,6 @@ def _has_digest(value: Any, digest: str) -> bool:
     return False
 
 
-def _contains_text(value: object, fragment: str) -> bool:
-    return any(
-        isinstance(item, str) and fragment in item for item in _walk_values(value)
-    )
-
-
 def _bundle_platform_digests(
     data: object,
     *,
@@ -150,6 +144,8 @@ def _validate_sbom(
         entry = raw_platforms.get(platform)
         if not isinstance(entry, dict):
             continue
+        if entry.get("predicate_type") != "https://spdx.dev/Document":
+            failures.append(f"{label}.{platform} has no SPDX attestation record")
         document = entry.get("document")
         spdx = document.get("SPDXID") if isinstance(document, dict) else None
         checks[f"{key}_{platform}_sbom_spdx"] = spdx
@@ -177,15 +173,28 @@ def _validate_provenance(
         return manifests
     for platform, manifest_digest in manifests.items():
         entry = raw_platforms.get(platform)
-        attestations = entry.get("attestations") if isinstance(entry, dict) else None
-        has_slsa = _contains_text(attestations, "slsa.dev/provenance")
-        digest_bound = _has_digest(attestations, manifest_digest)
-        checks[f"{key}_{platform}_provenance_digest_bound"] = digest_bound
-        if not isinstance(attestations, list) or not attestations:
-            failures.append(f"{label}.{platform}.attestations must be non-empty")
+        if not isinstance(entry, dict):
             continue
-        if not has_slsa:
+        predicate_type = entry.get("predicate_type")
+        predicate = entry.get("predicate")
+        build_definition = (
+            predicate.get("buildDefinition") if isinstance(predicate, dict) else None
+        )
+        build_type = (
+            build_definition.get("buildType")
+            if isinstance(build_definition, dict)
+            else None
+        )
+        digest_bound = entry.get("manifest_digest") == manifest_digest
+        checks[f"{key}_{platform}_provenance_digest_bound"] = digest_bound
+        checks[f"{key}_{platform}_provenance_build_type"] = build_type
+        if predicate_type != "https://slsa.dev/provenance/v1":
             failures.append(f"{label}.{platform} has no SLSA provenance record")
+        if not isinstance(predicate, dict) or not predicate:
+            failures.append(f"{label}.{platform}.predicate must be non-empty")
+            continue
+        if not isinstance(build_type, str) or not build_type:
+            failures.append(f"{label}.{platform} has no SLSA build type")
         if not digest_bound:
             failures.append(f"{label}.{platform} is not bound to {manifest_digest}")
     return manifests

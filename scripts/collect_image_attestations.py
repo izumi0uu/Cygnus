@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import json
 import re
 import shutil
@@ -66,22 +65,6 @@ def _json_object(text: str, label: str) -> dict[str, object]:
     return cast(dict[str, object], value)
 
 
-def _json_stream(text: str, label: str) -> list[object]:
-    values: list[object] = []
-    for line_number, line in enumerate(text.splitlines(), start=1):
-        if not line.strip():
-            continue
-        try:
-            values.append(cast(object, json.loads(line)))
-        except json.JSONDecodeError as exc:
-            raise ValueError(
-                f"{label} line {line_number} is not valid JSON: {exc}"
-            ) from exc
-    if not values:
-        raise ValueError(f"{label} did not contain any attestations")
-    return values
-
-
 def _platform_digests(index: Mapping[str, object]) -> dict[str, str]:
     raw_manifests = index.get("manifests")
     if not isinstance(raw_manifests, list):
@@ -115,42 +98,17 @@ def _platform_digests(index: Mapping[str, object]) -> dict[str, str]:
     return selected
 
 
-def _walk(value: object) -> list[object]:
-    values = [value]
-    if isinstance(value, dict):
-        mapping = cast(dict[str, object], value)
-        for item in mapping.values():
-            values.extend(_walk(item))
-        payload = mapping.get("payload")
-        if isinstance(payload, str):
-            try:
-                decoded = base64.b64decode(payload + "===")
-                values.extend(_walk(cast(object, json.loads(decoded.decode("utf-8")))))
-            except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
-                pass
-    elif isinstance(value, list):
-        for item in cast(list[object], value):
-            values.extend(_walk(item))
-    return values
-
-
-def _has_digest(value: object, digest: str) -> bool:
-    plain = digest.removeprefix("sha256:")
-    return any(
-        isinstance(item, str) and item in {digest, plain} for item in _walk(value)
-    )
-
-
-def _contains_text(value: object, fragment: str) -> bool:
-    return any(isinstance(item, str) and fragment in item for item in _walk(value))
-
-
-def _has_slsa_provenance(attestations: list[object], manifest_digest: str) -> bool:
-    return any(
-        _contains_text(attestation, "slsa.dev/provenance")
-        and _has_digest(attestation, manifest_digest)
-        for attestation in attestations
-    )
+def _platform_document(
+    evidence: Mapping[str, object], platform: str, key: str, label: str
+) -> dict[str, object]:
+    raw_entry = evidence.get(platform)
+    if not isinstance(raw_entry, dict):
+        raise ValueError(f"{label} has no {platform} entry")
+    entry = cast(dict[str, object], raw_entry)
+    raw_document = entry.get(key)
+    if not isinstance(raw_document, dict) or not raw_document:
+        raise ValueError(f"{label} has no {platform} {key} document")
+    return cast(dict[str, object], raw_document)
 
 
 def collect_image_attestations(
@@ -158,56 +116,49 @@ def collect_image_attestations(
     *,
     runner: CommandRunner = _run,
     docker: str = "docker",
-    cosign: str = "cosign",
 ) -> CollectionResult:
     index_digest = _index_digest(image_ref)
-    index = _json_object(
-        runner([docker, "buildx", "imagetools", "inspect", image_ref, "--raw"]),
-        "OCI index",
-    )
+    inspect_command = [docker, "buildx", "imagetools", "inspect", image_ref]
+    index = _json_object(runner([*inspect_command, "--raw"]), "OCI index")
     manifests = _platform_digests(index)
+    sbom_evidence = _json_object(
+        runner([*inspect_command, "--format", "{{ json .SBOM }}"]),
+        "BuildKit SBOM evidence",
+    )
+    provenance_evidence = _json_object(
+        runner([*inspect_command, "--format", "{{ json .Provenance }}"]),
+        "BuildKit provenance evidence",
+    )
     sbom_platforms: dict[str, object] = {}
     provenance_platforms: dict[str, object] = {}
 
     for platform in REQUIRED_PLATFORMS:
         manifest_digest = manifests[platform]
-        sbom = _json_object(
-            runner(
-                [
-                    cosign,
-                    "download",
-                    "sbom",
-                    "--platform",
-                    platform,
-                    image_ref,
-                ]
-            ),
-            f"{platform} SBOM",
+        sbom = _platform_document(
+            sbom_evidence, platform, "SPDX", "BuildKit SBOM evidence"
         )
         if not isinstance(sbom.get("SPDXID"), str):
-            raise ValueError(f"{platform} SBOM is not an SPDX document")
-        attestations = _json_stream(
-            runner(
-                [
-                    cosign,
-                    "download",
-                    "attestation",
-                    "--platform",
-                    platform,
-                    image_ref,
-                ]
-            ),
-            f"{platform} provenance",
+            raise ValueError(f"{platform} BuildKit SBOM is not an SPDX document")
+        provenance = _platform_document(
+            provenance_evidence, platform, "SLSA", "BuildKit provenance evidence"
         )
-        if not _has_slsa_provenance(attestations, manifest_digest):
-            raise ValueError(f"{platform} provenance is not bound to {manifest_digest}")
+        build_definition = provenance.get("buildDefinition")
+        build_type = (
+            cast(dict[str, object], build_definition).get("buildType")
+            if isinstance(build_definition, dict)
+            else None
+        )
+        if not isinstance(build_type, str) or not build_type:
+            raise ValueError(f"{platform} BuildKit provenance has no SLSA build type")
         sbom_platforms[platform] = {
             "manifest_digest": manifest_digest,
+            "predicate_type": "https://spdx.dev/Document",
             "document": sbom,
         }
         provenance_platforms[platform] = {
             "manifest_digest": manifest_digest,
-            "attestations": attestations,
+            "predicate_type": "https://slsa.dev/provenance/v1",
+            "predicate": provenance,
         }
 
     common = {
@@ -238,12 +189,7 @@ def main(argv: list[str] | None = None) -> int:
     sbom_out = cast(Path, args.sbom_out)
     provenance_out = cast(Path, args.provenance_out)
     docker = _require_tool("docker")
-    cosign = _require_tool("cosign")
-    result = collect_image_attestations(
-        image_ref,
-        docker=docker,
-        cosign=cosign,
-    )
+    result = collect_image_attestations(image_ref, docker=docker)
     _write_json(sbom_out, result["sbom_bundle"])
     _write_json(provenance_out, result["provenance_bundle"])
     print(

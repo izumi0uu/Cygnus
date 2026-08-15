@@ -26,6 +26,12 @@ INDEX_DIGEST_RE = re.compile(r"^Digest:\s+(sha256:[0-9a-f]{64})\s*$", re.MULTILI
 REQUIRED_PLATFORMS = frozenset({"linux/amd64", "linux/arm64"})
 
 
+def _base_platform(platform: str) -> str:
+    """Return the OCI OS/architecture pair without an optional variant."""
+    parts = platform.split("/")
+    return "/".join(parts[:2]) if len(parts) >= 2 else platform
+
+
 class GateResult(TypedDict):
     ok: bool
     failures: list[str]
@@ -166,7 +172,9 @@ def verify_lock(
                 failures.append(
                     f"{name}: registry digest {actual!r} does not match pinned {expected!r}"
                 )
-            missing = sorted(REQUIRED_PLATFORMS - platforms)
+            missing = sorted(
+                REQUIRED_PLATFORMS - {_base_platform(item) for item in platforms}
+            )
             if missing:
                 failures.append(
                     f"{name}: registry manifest is missing platforms: {', '.join(missing)}"

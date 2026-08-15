@@ -22,6 +22,7 @@ def load(name: str):
 
 writer = load("write_image_manifest")
 gate = load("image_gate")
+reference_gate = load("image_reference_gate")
 DIGEST = "sha256:" + "a" * 64
 
 JSONValue: TypeAlias = (
@@ -153,6 +154,50 @@ class ImageGateTests(unittest.TestCase):
         result = gate.validate_manifest(manifest, repo_root=self.root)
         self.assertFalse(result["ok"])
         self.assertTrue(any("HIGH/CRITICAL" in item for item in result["failures"]))
+
+
+class ImageReferenceGateTests(unittest.TestCase):
+    @staticmethod
+    def lock() -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "required_platforms": ["linux/amd64", "linux/arm64"],
+            "images": [
+                {
+                    "name": "python",
+                    "reference": f"python:test@{DIGEST}",
+                    "manifest_digest": DIGEST,
+                    "status": "verified",
+                    "platforms": ["linux/amd64", "linux/arm64"],
+                }
+            ],
+        }
+
+    def test_arm64_variant_satisfies_required_architecture(self) -> None:
+        result = reference_gate.verify_lock(
+            self.lock(),
+            inspector=lambda _reference: (
+                DIGEST,
+                {"linux/amd64", "linux/arm64/v8"},
+                None,
+            ),
+        )
+        self.assertTrue(result["ok"], result["failures"])
+
+    def test_different_arm_architecture_does_not_satisfy_arm64(self) -> None:
+        result = reference_gate.verify_lock(
+            self.lock(),
+            inspector=lambda _reference: (
+                DIGEST,
+                {"linux/amd64", "linux/arm/v7"},
+                None,
+            ),
+        )
+        self.assertFalse(result["ok"])
+        self.assertIn(
+            "python: registry manifest is missing platforms: linux/arm64",
+            result["failures"],
+        )
 
 
 if __name__ == "__main__":

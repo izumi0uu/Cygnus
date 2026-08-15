@@ -54,6 +54,15 @@ from cygnus.capacity.thresholds import (
 )
 
 RELEASED_AT = "2026-08-12T00:00:00+00:00"
+UNSET_RUNTIME_IDENTITY_ENV = {
+    "APP_COMMIT_SHA": "",
+    "CYGNUS_COMMIT_SHA": "",
+    "GIT_SHA": "",
+    "APP_IMAGE_REF": "",
+    "CYGNUS_IMAGE_REF": "",
+    "IMAGE_REF": "",
+    "EXPECTED_ALEMBIC_HEAD": "",
+}
 
 
 def _thresholds_dict(**overrides):
@@ -818,7 +827,10 @@ class CliTests(unittest.TestCase):
                 encoding="utf-8",
             )
             report_path = os.path.join(tmp, "report.json")
-            with patch.dict(os.environ, {"CYGNUS_CAPACITY_GATE_INJECTION": "1"}):
+            with patch.dict(
+                os.environ,
+                {**UNSET_RUNTIME_IDENTITY_ENV, "CYGNUS_CAPACITY_GATE_INJECTION": "1"},
+            ):
                 status = self.load_gate.main(
                     [
                         "--thresholds",
@@ -871,28 +883,29 @@ class CliTests(unittest.TestCase):
                 encoding="utf-8",
             )
             report_path = os.path.join(tmp, "report.json")
-            status = self.load_gate.main(
-                [
-                    "--thresholds",
-                    thresholds_path,
-                    "--replay-samples",
-                    samples_path,
-                    "--commit-sha",
-                    "a" * 40,
-                    "--image-tag",
-                    "cygnus:test",
-                    "--alembic-revision",
-                    "rev1",
-                    "--capacity-approval-ref",
-                    "cyg-144:capacity-approval:test",
-                    "--capacity-thresholds-ref",
-                    "cyg-144:capacity-thresholds:test",
-                    "--capacity-targets-ref",
-                    "cyg-144:capacity-targets:test",
-                    "--report-out",
-                    report_path,
-                ]
-            )
+            with patch.dict(os.environ, UNSET_RUNTIME_IDENTITY_ENV):
+                status = self.load_gate.main(
+                    [
+                        "--thresholds",
+                        thresholds_path,
+                        "--replay-samples",
+                        samples_path,
+                        "--commit-sha",
+                        "a" * 40,
+                        "--image-tag",
+                        "cygnus:test",
+                        "--alembic-revision",
+                        "rev1",
+                        "--capacity-approval-ref",
+                        "cyg-144:capacity-approval:test",
+                        "--capacity-thresholds-ref",
+                        "cyg-144:capacity-thresholds:test",
+                        "--capacity-targets-ref",
+                        "cyg-144:capacity-targets:test",
+                        "--report-out",
+                        report_path,
+                    ]
+                )
             self.assertEqual(status, self.load_gate.EXIT_NOT_CERTIFIED)
             report = json.loads(Path(report_path).read_text(encoding="utf-8"))
             self.assertEqual(report["status"], GATE_NOT_CERTIFIED)

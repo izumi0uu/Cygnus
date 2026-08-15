@@ -174,6 +174,62 @@ class DockerStackRecoveryTests(unittest.TestCase):
             compose_control.index('\nexec "${COMPOSE[@]}" "$@"'),
         )
 
+    def test_production_network_gate_accepts_bound_nonstandard_tls_origin(
+        self,
+    ) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "scripts/production_network_config_gate.py",
+                "--domain",
+                "vm-0-7-ubuntu.tailc9ec74.ts.net",
+                "--public-origin",
+                "https://vm-0-7-ubuntu.tailc9ec74.ts.net:8443",
+                "--metrics-cidr",
+                "172.30.0.1/32",
+                "--expected-proxy-cidr",
+                "172.30.0.0/24",
+                "--quiet",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_production_network_gate_rejects_reserved_or_mismatched_origins(
+        self,
+    ) -> None:
+        base = [
+            sys.executable,
+            "scripts/production_network_config_gate.py",
+            "--metrics-cidr",
+            "172.30.0.1/32",
+            "--expected-proxy-cidr",
+            "172.30.0.0/24",
+            "--quiet",
+        ]
+        cases = (
+            (
+                "cygnus-certification.local",
+                "https://cygnus-certification.local",
+            ),
+            (
+                "vm-0-7-ubuntu.tailc9ec74.ts.net",
+                "https://other.tailc9ec74.ts.net:8443",
+            ),
+        )
+        for domain, origin in cases:
+            with self.subTest(domain=domain, origin=origin):
+                result = subprocess.run(
+                    [*base, "--domain", domain, "--public-origin", origin],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertNotEqual(result.returncode, 0)
+
     def test_production_operator_state_survives_transient_runner_checkouts(
         self,
     ) -> None:
@@ -436,6 +492,11 @@ class DockerStackRecoveryTests(unittest.TestCase):
         self.assertIn(
             "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;", text
         )
+        self.assertIn("return 301 ${CYGNUS_PUBLIC_ORIGIN}$request_uri;", text)
+        self.assertIn(
+            "CYGNUS_PUBLIC_ORIGIN=https://REPLACE_WITH_PUBLIC_FQDN",
+            Path("deploy/.env.prod.example").read_text(encoding="utf-8"),
+        )
         helper = Path("scripts/prod/lib.sh").read_text(encoding="utf-8")
         self.assertIn(
             "TRUSTED_PROXY_IPS must be the deterministic narrow prodnet CIDR", helper
@@ -491,6 +552,7 @@ class DockerStackRecoveryTests(unittest.TestCase):
         self.assertNotIn('"443:443"', production_frontend)
         self.assertIn("cap_drop: [ALL]", production_frontend)
         self.assertIn("no-new-privileges:true", production_frontend)
+        self.assertIn("CYGNUS_PUBLIC_ORIGIN:", production_frontend)
         self.assertNotIn("cap_add", production_frontend)
         self.assertIn("https://127.0.0.1:8443/readyz", production_frontend)
 

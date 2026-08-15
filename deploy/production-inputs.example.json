@@ -35,6 +35,7 @@
   },
   "public_endpoint": {
     "domain": "REPLACE_WITH_PUBLIC_FQDN",
+    "origin": "https://REPLACE_WITH_PUBLIC_FQDN",
     "dns_change_ref": "change://REPLACE_WITH_DNS_APPROVAL",
     "tls_validation_ref": "change://REPLACE_WITH_TLS_VALIDATION"
   },

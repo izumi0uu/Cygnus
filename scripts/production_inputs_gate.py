@@ -30,6 +30,7 @@ FQDN_RE = re.compile(
 )
 CHANNEL_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 PLACEHOLDERS = ("change_me", "replace", "example", "todo", "pending", "unknown", "<")
+RESERVED_TLDS = frozenset({"example", "invalid", "local", "localhost", "test"})
 REQUIRED_APPROVALS = ("security", "operations", "release")
 REQUIRED_SECRET_REFS = (
     "store_ref",
@@ -108,9 +109,39 @@ def _positive(
 
 def _domain(value: str, path: str, failures: list[str]) -> str:
     normalized = value.lower()
-    if value != normalized or not FQDN_RE.fullmatch(value):
+    if (
+        value != normalized
+        or not FQDN_RE.fullmatch(value)
+        or value.rsplit(".", 1)[-1] in RESERVED_TLDS
+    ):
         failures.append(f"{path} must be a lowercase bare public FQDN")
     return normalized
+
+
+def _origin(value: str, *, domain: str, path: str, failures: list[str]) -> str:
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        failures.append(f"{path} must be a canonical HTTPS origin")
+        return value
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != domain
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path
+        or parsed.query
+        or parsed.fragment
+        or port == 0
+    ):
+        failures.append(f"{path} must be a canonical HTTPS origin for {domain}")
+        return value
+    authority = domain if port is None else f"{domain}:{port}"
+    canonical = f"https://{authority}"
+    if value != canonical:
+        failures.append(f"{path} must use canonical origin syntax")
+    return canonical
 
 
 def _parse_delivery_env(
@@ -280,6 +311,7 @@ def validate_inputs(
     alembic_head: str,
     expected_proxy_cidr: str,
     domain: str,
+    public_origin: str,
     delivery_targets_json: str,
     delivery_allowed_hosts: str,
     delivery_hmac_secret_ref: str,
@@ -399,6 +431,23 @@ def validate_inputs(
     if approved_domain != env_domain:
         failures.append("public_endpoint.domain must exactly match CYGNUS_DOMAIN")
     checks["public_domain_binding"] = approved_domain == env_domain
+    approved_origin = _origin(
+        _ref(endpoint, "origin", "public_endpoint", failures),
+        domain=approved_domain,
+        path="public_endpoint.origin",
+        failures=failures,
+    )
+    env_origin = _origin(
+        public_origin,
+        domain=env_domain,
+        path="CYGNUS_PUBLIC_ORIGIN",
+        failures=failures,
+    )
+    if approved_origin != env_origin:
+        failures.append(
+            "public_endpoint.origin must exactly match CYGNUS_PUBLIC_ORIGIN"
+        )
+    checks["public_origin_binding"] = approved_origin == env_origin
     _ref(endpoint, "dns_change_ref", "public_endpoint", failures)
     _ref(endpoint, "tls_validation_ref", "public_endpoint", failures)
 
@@ -522,6 +571,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--frontend-image", required=True)
     parser.add_argument("--alembic-head", required=True)
     parser.add_argument("--domain", required=True)
+    parser.add_argument("--public-origin", required=True)
     parser.add_argument("--delivery-targets-json", required=True)
     parser.add_argument("--alert-approval-ref", required=True)
     parser.add_argument("--alert-thresholds-ref", required=True)
@@ -552,6 +602,7 @@ def main(argv: list[str] | None = None) -> int:
             alembic_head=args.alembic_head,
             expected_proxy_cidr=args.expected_proxy_cidr,
             domain=args.domain,
+            public_origin=args.public_origin,
             delivery_targets_json=args.delivery_targets_json,
             delivery_allowed_hosts=args.delivery_allowed_hosts,
             delivery_hmac_secret_ref=args.delivery_hmac_secret_ref,

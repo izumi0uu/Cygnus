@@ -170,6 +170,7 @@ case "$ACTION" in
     validate_resources
     validate_production_inputs "$RELEASE"
     certification_url="$CERTIFICATION_ORIGIN"
+    export CYGNUS_PUBLIC_ORIGIN="$certification_url"
     export PORTAL_BASE_URL="$certification_url"
     export CORS_ORIGINS="$certification_url"
     export MINIO_PUBLIC_ENDPOINT="$CYGNUS_DOMAIN:$CYGNUS_HTTPS_BIND_PORT"

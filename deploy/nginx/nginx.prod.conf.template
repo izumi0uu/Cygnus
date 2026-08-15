@@ -3,8 +3,8 @@
 # This file is mounted at /etc/nginx/templates/default.conf.template and
 # rendered to /etc/nginx/conf.d/default.conf by the official nginx image
 # entrypoint (envsubst). Only environment variables set on the container
-# (CYGNUS_DOMAIN, MINIO_BUCKET, from deploy/.env.prod) are substituted;
-# nginx runtime variables ($host, $uri, ...) are preserved as-is.
+# (CYGNUS_DOMAIN, CYGNUS_PUBLIC_ORIGIN, MINIO_BUCKET) are substituted; nginx
+# runtime variables ($host, $uri, ...) are preserved as-is.
 #
 # TLS material is provided as Docker secrets mounted at /run/secrets/.
 
@@ -19,7 +19,7 @@ server {
     server_name ${CYGNUS_DOMAIN};
 
     location / {
-        return 301 https://$host$request_uri;
+        return 301 ${CYGNUS_PUBLIC_ORIGIN}$request_uri;
     }
 }
 

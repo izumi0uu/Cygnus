@@ -125,7 +125,7 @@ validate_identity() {
 is_placeholder() { printf '%s' "$1" | grep -Eiq "$PLACEHOLDER_VALUES"; }
 
 validate_secrets() {
-  local v f val
+  local v f val expected_origin expected_authority
   for v in CYGNUS_TLS_CERT_FILE CYGNUS_TLS_KEY_FILE; do
     f="${!v:-}"
     [ -n "$f" ] || die "$v is required in deploy/.env.prod"
@@ -137,13 +137,16 @@ validate_secrets() {
     is_placeholder "$val" && die "$v still holds a placeholder/default value"
   done
   [ -n "${CYGNUS_DOMAIN:-}" ] && ! is_placeholder "$CYGNUS_DOMAIN" || die "CYGNUS_DOMAIN must be a real public FQDN"
-  [ "${MINIO_PUBLIC_ENDPOINT:-}" = "$CYGNUS_DOMAIN" ] || die "MINIO_PUBLIC_ENDPOINT must exactly equal CYGNUS_DOMAIN for same-origin URLs"
-  [ "${PORTAL_BASE_URL:-}" = "https://$CYGNUS_DOMAIN" ] || die "PORTAL_BASE_URL must be https://CYGNUS_DOMAIN"
-  [ "${CORS_ORIGINS:-}" = "https://$CYGNUS_DOMAIN" ] || die "CORS_ORIGINS must be exactly https://CYGNUS_DOMAIN"
+  [ -n "${CYGNUS_PUBLIC_ORIGIN:-}" ] || die "CYGNUS_PUBLIC_ORIGIN is required in deploy/.env.prod"
+  expected_origin="$CYGNUS_PUBLIC_ORIGIN"
+  expected_authority="${expected_origin#https://}"
+  [ "${MINIO_PUBLIC_ENDPOINT:-}" = "$expected_authority" ] || die "MINIO_PUBLIC_ENDPOINT must exactly equal the CYGNUS_PUBLIC_ORIGIN authority for same-origin URLs"
+  [ "${PORTAL_BASE_URL:-}" = "$expected_origin" ] || die "PORTAL_BASE_URL must exactly equal CYGNUS_PUBLIC_ORIGIN"
+  [ "${CORS_ORIGINS:-}" = "$expected_origin" ] || die "CORS_ORIGINS must exactly equal CYGNUS_PUBLIC_ORIGIN"
   [ "${TRUSTED_PROXY_IPS:-}" = "$PROXY_CIDR" ] || die "TRUSTED_PROXY_IPS must be the deterministic narrow prodnet CIDR $PROXY_CIDR"
   [ -n "${CYGNUS_METRICS_ALLOWED_CIDR:-}" ] || die "CYGNUS_METRICS_ALLOWED_CIDR is required"
   is_placeholder "$CYGNUS_METRICS_ALLOWED_CIDR" && die "CYGNUS_METRICS_ALLOWED_CIDR is a placeholder"
-  python3 "$REPO_ROOT/scripts/production_network_config_gate.py" --domain "$CYGNUS_DOMAIN" --metrics-cidr "$CYGNUS_METRICS_ALLOWED_CIDR" --expected-proxy-cidr "$PROXY_CIDR" --quiet || die "public domain or nginx network inputs are invalid"
+  python3 "$REPO_ROOT/scripts/production_network_config_gate.py" --domain "$CYGNUS_DOMAIN" --public-origin "$expected_origin" --metrics-cidr "$CYGNUS_METRICS_ALLOWED_CIDR" --expected-proxy-cidr "$PROXY_CIDR" --quiet || die "public domain, origin, or nginx network inputs are invalid"
   [ -n "${CYGNUS_DELIVERY_ALLOWED_HOSTS:-}" ] && ! is_placeholder "$CYGNUS_DELIVERY_ALLOWED_HOSTS" || die "CYGNUS_DELIVERY_ALLOWED_HOSTS must explicitly name internal delivery hosts"
   [ -n "${CYGNUS_DELIVERY_HMAC_SECRET_REF:-}" ] && ! is_placeholder "$CYGNUS_DELIVERY_HMAC_SECRET_REF" || die "CYGNUS_DELIVERY_HMAC_SECRET_REF must identify the externally injected HMAC secret"
   python3 "$REPO_ROOT/scripts/production_delivery_config_gate.py" --targets-json "${DELIVERY_TARGETS_JSON:-}" --allowed-hosts "$CYGNUS_DELIVERY_ALLOWED_HOSTS" --quiet || die "DELIVERY_TARGETS_JSON must configure approved internal HTTPS delivery endpoints"
@@ -186,7 +189,8 @@ validate_resources() {
 
 validate_production_inputs() {
   local release="$1" inputs="${CYGNUS_PRODUCTION_INPUTS_FILE:-$DEPLOY_DIR/production-inputs.json}"
-  local release_work_dir="$OPERATOR_WORK_DIR/$release"
+  local release_work_dir="$OPERATOR_WORK_DIR/$release" public_origin
+  public_origin="$CYGNUS_PUBLIC_ORIGIN"
   [ -f "$inputs" ] || die "production input manifest is required: $inputs (copy deploy/production-inputs.example.json and obtain approvals)"
   command -v python3 >/dev/null || die "python3 is required to validate production inputs"
   [ -d "$OPERATOR_WORK_DIR" ] && [ -w "$OPERATOR_WORK_DIR" ] || die "CYGNUS_OPERATOR_WORK_DIR must be an existing writable protected directory"
@@ -202,6 +206,7 @@ validate_production_inputs() {
     --frontend-image "$CYGNUS_FRONTEND_IMAGE" \
     --alembic-head "$EXPECTED_ALEMBIC_HEAD" \
     --domain "$CYGNUS_DOMAIN" \
+    --public-origin "$public_origin" \
     --delivery-targets-json "$DELIVERY_TARGETS_JSON" \
     --delivery-allowed-hosts "$CYGNUS_DELIVERY_ALLOWED_HOSTS" \
     --delivery-hmac-secret-ref "$CYGNUS_DELIVERY_HMAC_SECRET_REF" \
@@ -296,22 +301,25 @@ compose_up_frontend() { "${COMPOSE[@]}" up -d --no-deps --force-recreate fronten
 # local ingress with --resolve.
 verify_ingress() {
   local domain="$1" timeout_seconds="${2:-300}" interval="${3:-5}" deadline body
+  local http_port="${CYGNUS_HTTP_BIND_PORT:-80}" https_port="${CYGNUS_HTTPS_BIND_PORT:-443}" ingress_origin
   [ -n "$domain" ] || die "verify_ingress: no domain"
+  ingress_origin="https://$domain"
+  [ "$https_port" = 443 ] || ingress_origin="$ingress_origin:$https_port"
   deadline=$(( $(date +%s) + timeout_seconds ))
-  [ "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1/livez || true)" = "301" ] || die "HTTP ingress must redirect /livez to HTTPS"
+  [ "$(curl -sS -o /dev/null -w '%{http_code}' --resolve "$domain:$http_port:127.0.0.1" --max-time 5 "http://$domain:$http_port/livez" || true)" = "301" ] || die "HTTP ingress must redirect /livez to HTTPS"
   while :; do
-    if body=$(curl -fsS --resolve "$domain:443:127.0.0.1" --max-time 10 "https://$domain/livez" 2>/dev/null) && printf '%s' "$body" | python3 -c 'import json,sys; assert json.load(sys.stdin)["status"] == "alive"'; then
+    if body=$(curl -fsS --resolve "$domain:$https_port:127.0.0.1" --max-time 10 "$ingress_origin/livez" 2>/dev/null) && printf '%s' "$body" | python3 -c 'import json,sys; assert json.load(sys.stdin)["status"] == "alive"'; then
       break
     fi
-    [ "$(date +%s)" -lt "$deadline" ] || die "TLS/API livez did not become healthy at https://$domain/livez"
+    [ "$(date +%s)" -lt "$deadline" ] || die "TLS/API livez did not become healthy at $ingress_origin/livez"
     sleep "$interval"
   done
   while :; do
-    if body=$(curl -fsS --resolve "$domain:443:127.0.0.1" --max-time 10 "https://$domain/readyz" 2>/dev/null) && printf '%s' "$body" | python3 -c 'import json,sys; assert json.load(sys.stdin)["status"] == "ready"'; then
-      log "ingress ready: https://$domain/readyz"
+    if body=$(curl -fsS --resolve "$domain:$https_port:127.0.0.1" --max-time 10 "$ingress_origin/readyz" 2>/dev/null) && printf '%s' "$body" | python3 -c 'import json,sys; assert json.load(sys.stdin)["status"] == "ready"'; then
+      log "ingress ready: $ingress_origin/readyz"
       return 0
     fi
-    [ "$(date +%s)" -lt "$deadline" ] || die "TLS/API readyz did not become ready at https://$domain/readyz"
+    [ "$(date +%s)" -lt "$deadline" ] || die "TLS/API readyz did not become ready at $ingress_origin/readyz"
     sleep "$interval"
   done
 }

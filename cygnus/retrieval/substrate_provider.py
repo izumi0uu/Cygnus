@@ -56,7 +56,11 @@ from cygnus.retrieval.contracts import (
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from cygnus.runtime.database.models import GovernanceAudienceBinding, Source, WikiPage
+    from cygnus.runtime.database.models import (
+        GovernanceAudienceBinding,
+        Source,
+        WikiPage,
+    )
 
 RESERVED_WIKI_SLUGS = ("_index", "_log", "_hot")
 

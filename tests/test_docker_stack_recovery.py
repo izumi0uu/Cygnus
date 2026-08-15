@@ -346,6 +346,11 @@ class DockerStackRecoveryTests(unittest.TestCase):
         certification_stack = Path("scripts/prod/certification-stack.sh").read_text(
             encoding="utf-8"
         )
+        self.assertIn('chmod 700 "$PKI_DIR"', certification_stack)
+        self.assertIn(
+            'chmod 644 "$PKI_DIR/server.key" "$PKI_DIR/server.crt"',
+            certification_stack,
+        )
         resume_section = certification_stack.partition("  resume)\n")[2].partition(
             "  restart)\n"
         )[0]

@@ -82,7 +82,10 @@ if [ ! -s "$PKI_DIR/server.crt" ] || [ ! -s "$PKI_DIR/server.key" ] || ! printf 
     -addext "basicConstraints=critical,CA:TRUE" \
     -keyout "$PKI_DIR/server.key" -out "$PKI_DIR/server.crt" >/dev/null 2>&1
 fi
-chmod 600 "$PKI_DIR/server.key" "$PKI_DIR/server.crt"
+# Compose file-backed secrets preserve host inode permissions. The parent PKI
+# directory is 0700; files need read-for-other so the image's nginx UID can
+# read the bind-mounted certificate and key without running the gateway as root.
+chmod 644 "$PKI_DIR/server.key" "$PKI_DIR/server.crt"
 export CYGNUS_TLS_CERT_FILE="$PKI_DIR/server.crt"
 export CYGNUS_TLS_KEY_FILE="$PKI_DIR/server.key"
 COMPOSE=(docker compose --project-name "$COMPOSE_PROJECT_NAME" --project-directory "$DEPLOY_DIR" -f "$COMPOSE_FILE" -f "$CERTIFICATION_COMPOSE_FILE" --env-file "$PROD_ENV_FILE")

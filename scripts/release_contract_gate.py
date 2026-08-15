@@ -615,6 +615,11 @@ def validate_repository(root: Path = REPO_ROOT) -> GateResult:
             == 2
             and certification_compose.count("- cygnus_tls_cert") == 2
         ),
+        "nonroot_tls_secret_permissions": (
+            'chmod 700 "$PKI_DIR"' in certification_stack
+            and 'chmod 644 "$PKI_DIR/server.key" "$PKI_DIR/server.crt"'
+            in certification_stack
+        ),
         "validates_tls_ingress": (
             'curl -fsS --cacert "$CYGNUS_TLS_CERT_FILE"' in certification_stack
         ),

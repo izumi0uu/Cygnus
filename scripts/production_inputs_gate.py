@@ -22,7 +22,9 @@ from typing import Any, TypedDict
 from urllib.parse import urlsplit
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DIGEST_RE = re.compile(r"^[a-z0-9][a-z0-9._/-]*@sha256:[0-9a-f]{64}$")
+DIGEST_RE = re.compile(
+    r"^[a-z0-9][a-z0-9._/-]*(?::[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$"
+)
 SHA_RE = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 FQDN_RE = re.compile(
@@ -347,7 +349,7 @@ def validate_inputs(
     for field in ("backend_image", "frontend_image"):
         if not DIGEST_RE.fullmatch(actual_release[field]):
             failures.append(
-                f"release.{field} must be an exact name@sha256 image reference"
+                f"release.{field} must be an exact name[:tag]@sha256 image reference"
             )
     for field, expected in (
         ("git_sha", git_sha),

@@ -441,6 +441,11 @@ class ProductionAlertInputGateTest(unittest.TestCase):
         cls.gate = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cls.gate)
 
+    def test_release_image_reference_accepts_tag_plus_exact_digest(self) -> None:
+        reference = f"ghcr.io/owner/backend:rc-a1b2c3@sha256:{'a' * 64}"
+
+        self.assertIsNotNone(self.gate.DIGEST_RE.fullmatch(reference))
+
     def test_alert_threshold_refs_and_hash_must_match_deploy_inputs(self) -> None:
         failures: list[str] = []
         checks: dict[str, object] = {}

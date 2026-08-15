@@ -101,8 +101,8 @@ validate_digests() {
   local release="$1" var value
   for var in CYGNUS_API_IMAGE CYGNUS_FRONTEND_IMAGE; do
     value="${!var:-}"
-    if ! printf '%s' "$value" | grep -Eq '^[a-z0-9][a-z0-9._/-]*@sha256:[0-9a-f]{64}$'; then
-      die "release $release: $var must be an exact name@sha256:<64 hex> reference"
+    if ! printf '%s' "$value" | grep -Eq '^[a-z0-9][a-z0-9._/-]*(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$'; then
+      die "release $release: $var must be an exact name[:tag]@sha256:<64 hex> reference"
     fi
   done
 }

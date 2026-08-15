@@ -582,8 +582,8 @@ class DockerStackRecoveryTests(unittest.TestCase):
             metadata.write_text(
                 "APP_RELEASE=0.1.0\n"
                 f"APP_COMMIT_SHA={'a' * 40}\n"
-                f"CYGNUS_API_IMAGE=ghcr.io/owner/api@sha256:{'b' * 64}\n"
-                f"CYGNUS_FRONTEND_IMAGE=ghcr.io/owner/frontend@sha256:{'c' * 64}\n"
+                f"CYGNUS_API_IMAGE=ghcr.io/owner/api:rc-a1b2c3@sha256:{'b' * 64}\n"
+                f"CYGNUS_FRONTEND_IMAGE=ghcr.io/owner/frontend:rc-a1b2c3@sha256:{'c' * 64}\n"
                 "EXPECTED_ALEMBIC_HEAD=20260815_02_employee_session_version\n",
                 encoding="utf-8",
             )
@@ -610,8 +610,23 @@ class DockerStackRecoveryTests(unittest.TestCase):
             self.assertEqual(bound["release"]["git_sha"], "a" * 40)
             self.assertEqual(
                 bound["release"]["backend_image"],
-                f"ghcr.io/owner/api@sha256:{'b' * 64}",
+                f"ghcr.io/owner/api:rc-a1b2c3@sha256:{'b' * 64}",
             )
+
+            shell = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    "source scripts/prod/lib.sh; "
+                    f"CYGNUS_API_IMAGE=ghcr.io/owner/api:rc-a1b2c3@sha256:{'b' * 64}; "
+                    f"CYGNUS_FRONTEND_IMAGE=ghcr.io/owner/frontend:rc-a1b2c3@sha256:{'c' * 64}; "
+                    "validate_digests 0.1.0",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(shell.returncode, 0, shell.stderr)
 
     def test_frontend_document_is_compatible_with_production_csp(self) -> None:
         text = Path("frontend/index.html").read_text(encoding="utf-8")

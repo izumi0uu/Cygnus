@@ -1,5 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
-import { authApi, setToken, clearToken, getToken, ApiError } from '@/lib/authApi'
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { authApi, setToken, clearToken, getToken, ApiError, logoutPortalSession } from '@/lib/authApi'
 
 export type WorkspaceMembership = { workspace_id: string; workspace_name: string; role: string }
 
@@ -18,7 +18,7 @@ type AuthState = {
   user: User | null
   loading: boolean
   login: (email: string, password: string) => Promise<void>
-  logout: () => void
+  logout: () => Promise<void>
   refresh: () => Promise<void>
   hasPermission: (perm: string) => boolean
   canAccess: (resource: string, action: string) => boolean
@@ -29,45 +29,61 @@ const AuthContext = createContext<AuthState | null>(null)
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(() => getToken() !== null)
+  const authEpoch = useRef(0)
 
   const refresh = useCallback(async () => {
+    const requestEpoch = authEpoch.current
     try {
       const data = await authApi<User>('/api/auth/me')
-      setUser(data)
+      if (requestEpoch === authEpoch.current) setUser(data)
     } catch (err) {
-      setUser(null)
-      if (err instanceof ApiError && (err.status === 401 || err.status === 403)) clearToken()
+      if (requestEpoch === authEpoch.current) {
+        setUser(null)
+        if (err instanceof ApiError && (err.status === 401 || err.status === 403)) clearToken()
+      }
     } finally {
-      setLoading(false)
+      if (requestEpoch === authEpoch.current) setLoading(false)
     }
   }, [])
 
   useEffect(() => {
     if (!getToken()) return
+    const requestEpoch = authEpoch.current
     void authApi<User>('/api/auth/me')
       .then((data) => {
-        setUser(data)
+        if (requestEpoch === authEpoch.current) setUser(data)
       })
       .catch((err) => {
-        setUser(null)
-        if (err instanceof ApiError && (err.status === 401 || err.status === 403)) clearToken()
+        if (requestEpoch === authEpoch.current) {
+          setUser(null)
+          if (err instanceof ApiError && (err.status === 401 || err.status === 403)) clearToken()
+        }
       })
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (requestEpoch === authEpoch.current) setLoading(false)
+      })
   }, [])
 
   const login = async (email: string, password: string) => {
+    const requestEpoch = authEpoch.current
     const data = await authApi<{ access_token: string; user: User }>('/api/auth/login', {
       method: 'POST',
       body: { email, password },
     })
+    if (requestEpoch !== authEpoch.current) return
     setToken(data.access_token)
     setUser(data.user)
   }
 
-  const logout = () => {
-    clearToken()
-    setUser(null)
-  }
+  const logout = useCallback(
+    () =>
+      logoutPortalSession(() => {
+        authEpoch.current += 1
+        setUser(null)
+        setLoading(false)
+      }),
+    [],
+  )
 
   const hasPermission = useCallback(
     (perm: string) => {

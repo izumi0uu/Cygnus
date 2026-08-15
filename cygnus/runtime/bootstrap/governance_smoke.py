@@ -509,6 +509,47 @@ def _exercise_api(
             projection.get("publication_record_id") == publication_id,
             "traceability projection points at a different publication",
         )
+        client.headers["X-Cygnus-Session-Contract-Version"] = "1.0"
+        retrieval = _mapping(
+            _request_json(
+                client,
+                "POST",
+                "/api/session-bridge/query",
+                json_body={
+                    "request_ref": f"smoke-query:{receipt['run_id']}",
+                    "session_ref": f"smoke-session:{receipt['run_id']}",
+                    "query": "durable billing support policy",
+                    "channel": "agent-copilot",
+                    "audience_context": {
+                        "visibility": "internal",
+                        "product_line": "billing",
+                        "region": "global",
+                        "language": "en",
+                    },
+                },
+            ),
+            "governed retrieval",
+        )
+        retrieval_data = _mapping(retrieval.get("data"), "governed retrieval data")
+        retrieval_governance = _mapping(
+            retrieval_data.get("governance"), "governed retrieval decision"
+        )
+        retrieval_answer = _mapping(
+            retrieval_data.get("answer"), "governed retrieval answer"
+        )
+        _require(
+            retrieval_governance.get("state") == "restricted",
+            "pending downstream delivery did not restrict governed retrieval",
+        )
+        _require(
+            retrieval_answer.get("content") is None,
+            "restricted governed retrieval exposed answer content",
+        )
+        retrieval_evidence = {
+            "governance_state": retrieval_governance.get("state"),
+            "governance_codes": retrieval_governance.get("codes"),
+            "answer_content_exposed": False,
+        }
 
         notifications = _items(
             _request_json(client, "GET", "/api/notifications"),
@@ -544,6 +585,7 @@ def _exercise_api(
         "command_id": command_id,
         "marked_notification_id": marked_notification_id,
         "delivery_ids": delivery_ids,
+        "retrieval": retrieval_evidence,
     }
 
 
@@ -747,11 +789,13 @@ def _parser() -> argparse.ArgumentParser:
     )
     _ = parser.add_argument(
         "--admin-email",
-        default=os.getenv("CYGNUS_SMOKE_ADMIN_EMAIL", "admin@cygnus.local"),
+        default=os.getenv("CYGNUS_SMOKE_ADMIN_EMAIL")
+        or os.getenv("DEFAULT_ADMIN_EMAIL", "admin@cygnus.local"),
     )
     _ = parser.add_argument(
         "--admin-password",
-        default=os.getenv("CYGNUS_SMOKE_ADMIN_PASSWORD", "admin123"),
+        default=os.getenv("CYGNUS_SMOKE_ADMIN_PASSWORD")
+        or os.getenv("DEFAULT_ADMIN_PASSWORD", "admin123"),
     )
     _ = parser.add_argument(
         "--receipt-path",

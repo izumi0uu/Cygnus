@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Check, KeyRound, ShieldCheck } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { useNavigate } from 'react-router-dom'
 import AdminDialog from '@/components/AdminDialog'
 import { RequestErrorState } from '@/components/RequestState'
 import { PageSkeleton } from '@/components/Skeleton'
@@ -15,6 +16,7 @@ import {
   type ModelCatalog,
   type ModelSpec,
 } from '@/lib/adminApi'
+import { useAuth } from '@/lib/auth'
 
 type ModelCapability = 'embedding' | 'llm' | 'vision'
 type Catalogs = Record<ModelCapability, ModelCatalog>
@@ -315,6 +317,8 @@ function ModelActionDialog({
 
 function PasswordSettings() {
   const { t } = useTranslation()
+  const { logout } = useAuth()
+  const navigate = useNavigate()
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -335,6 +339,8 @@ function PasswordSettings() {
       setCurrentPassword('')
       setNewPassword('')
       setConfirmPassword('')
+      void logout()
+      navigate('/login', { replace: true })
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : String(nextError))
     } finally {

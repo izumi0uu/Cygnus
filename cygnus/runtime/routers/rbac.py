@@ -17,6 +17,7 @@ from cygnus.runtime.database.models import Department, Employee, EmployeeDepartm
 from cygnus.integrations.mcp_auth import MCPAuthService
 from cygnus.runtime.services.audit_service import log_audit
 from cygnus.runtime.services.auth_service import (
+    advance_employee_session_version,
     enforce_employee_management_boundary,
     get_current_user,
     hash_password,
@@ -357,7 +358,13 @@ async def update_employee(
     emp.role = body.role
     emp.global_role = body.global_role
     if body.password:
-        emp.password_hash = hash_password(body.password)
+        session_version = await advance_employee_session_version(
+            db,
+            emp.id,
+            password_hash=hash_password(body.password),
+        )
+        if session_version is None:
+            raise HTTPException(404, "Employee not found")
 
     # Reconcile department memberships against the incoming set.
     new_dept_uuids = {uuid.UUID(d) for d in body.department_ids}

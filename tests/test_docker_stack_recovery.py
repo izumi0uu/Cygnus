@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+import re
 import tempfile
+import subprocess
+import sys
 import unittest
 from unittest import mock
 
@@ -87,6 +91,203 @@ class DockerStackRecoveryTests(unittest.TestCase):
             self.assertIn(f"image: {reference}", local)
             self.assertIn(reference, lock)
         self.assertNotIn(":latest", production)
+
+    def test_production_operator_compose_helpers_are_fail_closed(self) -> None:
+        helper = Path("scripts/prod/lib.sh").read_text(encoding="utf-8")
+
+        def function_body(name: str) -> str:
+            match = re.search(rf"(?ms)^{re.escape(name)}\(\) \{{\n(.*?)^\}}$", helper)
+            if match is None:
+                raise AssertionError(f"missing production shell helper: {name}")
+            return match.group(1)
+
+        validate_body = function_body("validate_compose")
+        self.assertEqual(
+            [line.strip() for line in validate_body.strip().splitlines()],
+            [
+                'command -v docker >/dev/null 2>&1 || die "docker is required for production operations"',
+                '"${COMPOSE[@]}" version >/dev/null 2>&1 || die "Docker Compose v2 is required for production operations"',
+                '"${COMPOSE[@]}" config --quiet || die "production Compose manifest failed to resolve: $COMPOSE_FILE"',
+            ],
+        )
+
+        pull_body = function_body("compose_pull")
+        self.assertEqual(pull_body.strip(), '"${COMPOSE[@]}" pull')
+        self.assertIn(
+            'COMPOSE=(docker compose --project-name "$COMPOSE_PROJECT_NAME" '
+            '--project-directory "$DEPLOY_DIR" -f "$COMPOSE_FILE" '
+            '--env-file "$PROD_ENV_FILE")',
+            helper,
+        )
+        self.assertIn(
+            'PROD_ENV_FILE="${CYGNUS_PRODUCTION_ENV_FILE:-$DEPLOY_DIR/.env.prod}"',
+            helper,
+        )
+
+        quiesce_body = function_body("compose_quiesce_backend")
+        resume_body = function_body("compose_resume_quiesced_backend")
+        self.assertIn(
+            '"${COMPOSE[@]}" ps --services --filter status=running '
+            '"${PRODUCTION_BACKEND_SERVICES[@]}"',
+            quiesce_body,
+        )
+        self.assertIn(
+            '"${COMPOSE[@]}" stop "${QUIESCED_BACKEND_SERVICES[@]}"',
+            quiesce_body,
+        )
+        self.assertIn(
+            '"${COMPOSE[@]}" start "${QUIESCED_BACKEND_SERVICES[@]}"',
+            resume_body,
+        )
+        self.assertIn("PRODUCTION_BACKEND_SERVICES=(api worker worker-skills)", helper)
+        for stateful_service in ("postgres", "redis", "minio", "frontend"):
+            self.assertNotIn(stateful_service, quiesce_body)
+            self.assertNotIn(stateful_service, resume_body)
+
+        recovery_body = function_body("resume_backend_on_failure")
+        self.assertIn("compose_resume_quiesced_backend", recovery_body)
+        self.assertIn(
+            "trap 'resume_backend_on_failure \"$?\"' EXIT",
+            function_body("arm_backend_recovery_trap"),
+        )
+        self.assertIn("trap - EXIT", function_body("clear_backend_recovery_trap"))
+        self.assertIn(
+            'compose_up_backend() { "${COMPOSE[@]}" up -d --no-deps '
+            "--force-recreate api worker worker-skills; }",
+            helper,
+        )
+
+        entrypoints = {
+            path: Path(path).read_text(encoding="utf-8")
+            for path in (
+                "scripts/prod/deploy.sh",
+                "scripts/prod/rollback.sh",
+                "scripts/prod/compose-control.sh",
+            )
+        }
+        for path, script in entrypoints.items():
+            self.assertIn("\nvalidate_compose\n", script, path)
+        self.assertIn("\ncompose_pull\n", entrypoints["scripts/prod/deploy.sh"])
+        compose_control = entrypoints["scripts/prod/compose-control.sh"]
+        self.assertLess(
+            compose_control.index("\nvalidate_compose\n"),
+            compose_control.index('\nexec "${COMPOSE[@]}" "$@"'),
+        )
+
+    def test_production_operator_state_survives_transient_runner_checkouts(
+        self,
+    ) -> None:
+        helper = Path("scripts/prod/lib.sh").read_text(encoding="utf-8")
+        deploy = Path("scripts/prod/deploy.sh").read_text(encoding="utf-8")
+        rollback = Path("scripts/prod/rollback.sh").read_text(encoding="utf-8")
+        env_example = Path("deploy/.env.prod.example").read_text(encoding="utf-8")
+
+        self.assertIn(
+            'RELEASES_DIR="${releases_override:-${CYGNUS_RELEASES_DIR:-$DEPLOY_DIR/releases}}"',
+            helper,
+        )
+        self.assertIn(
+            'STATE_FILE="${state_override:-${CYGNUS_DEPLOY_STATE_FILE:-$DEPLOY_DIR/.state}}"',
+            helper,
+        )
+        self.assertIn('release_file="$RELEASES_DIR/$release.env"', helper)
+        self.assertIn('cmp -s "$LOADED_RELEASE_FILE" "$target"', helper)
+        self.assertIn('load_state() { load_env_file "$STATE_FILE"; }', helper)
+        self.assertIn('if [ -f "$STATE_FILE" ]; then', deploy)
+        self.assertIn(
+            'CHECKOUTS_DIR="${checkouts_override:-${CYGNUS_CHECKOUTS_DIR:-}}"', helper
+        )
+        self.assertIn(
+            'ACTIVE_CHECKOUT_LINK="${active_link_override:-${CYGNUS_ACTIVE_CHECKOUT_LINK:-}}"',
+            helper,
+        )
+        self.assertIn('validate_operator_state_paths "$RELEASE"', deploy)
+        self.assertIn('exec "$TARGET_CHECKOUT/scripts/prod/rollback.sh"', rollback)
+        deploy_state_steps = (
+            'persist_release_metadata "$RELEASE"',
+            'activate_release_checkout "$RELEASE"',
+            'save_state "$PREVIOUS" "$RELEASE"',
+        )
+        self.assertEqual(
+            [deploy.index(fragment) for fragment in deploy_state_steps],
+            sorted(deploy.index(fragment) for fragment in deploy_state_steps),
+        )
+        self.assertIn("CYGNUS_RELEASES_DIR=/var/lib/cygnus/releases", env_example)
+        self.assertIn(
+            "CYGNUS_DEPLOY_STATE_FILE=/var/lib/cygnus/deploy-state.env", env_example
+        )
+        self.assertIn("CYGNUS_CHECKOUTS_DIR=/var/lib/cygnus/checkouts", env_example)
+        self.assertIn("CYGNUS_ACTIVE_CHECKOUT_LINK=/srv/cygnus/current", env_example)
+
+    def test_production_proxy_and_datastores_do_not_receive_unneeded_app_secrets(
+        self,
+    ) -> None:
+        compose = Path("deploy/docker-compose.prod.yml").read_text(encoding="utf-8")
+        frontend = compose.partition("\n  frontend:\n")[2].partition("\nsecrets:\n")[0]
+        postgres = compose.partition("\n  postgres:\n")[2].partition("\n  redis:\n")[0]
+        redis = compose.partition("\n  redis:\n")[2].partition("\n  minio:\n")[0]
+        minio = compose.partition("\n  minio:\n")[2].partition("\n  migrator:\n")[0]
+
+        self.assertIn("${CYGNUS_PRODUCTION_ENV_FILE:-.env.prod}", compose)
+        for service in (frontend, postgres, redis, minio):
+            self.assertNotIn("env_file:", service)
+            self.assertNotIn("SECRET_KEY", service)
+            self.assertNotIn("DEFAULT_ADMIN_PASSWORD", service)
+            self.assertNotIn("MCP_TOKEN_PEPPER", service)
+        self.assertIn("POSTGRES_PASSWORD:", postgres)
+        self.assertNotIn("REDIS_PASSWORD:", postgres)
+        self.assertIn("REDIS_PASSWORD:", redis)
+        self.assertNotIn("POSTGRES_PASSWORD:", redis)
+        self.assertIn("MINIO_ROOT_PASSWORD:", minio)
+        self.assertNotIn("POSTGRES_PASSWORD:", minio)
+        self.assertIn("CYGNUS_DOMAIN:", frontend)
+        self.assertIn("CYGNUS_METRICS_ALLOWED_CIDR:", frontend)
+        self.assertIn("MINIO_BUCKET:", frontend)
+
+    def test_deploy_validates_then_quiesces_before_schema_mutation(self) -> None:
+        deploy = Path("scripts/prod/deploy.sh").read_text(encoding="utf-8")
+        ordered_fragments = (
+            "load_prod_env\n",
+            'load_release "$RELEASE"\n',
+            'validate_identity "$RELEASE"\n',
+            "validate_secrets\n",
+            "validate_resources\n",
+            'validate_production_inputs "$RELEASE"\n',
+            "validate_compose\n",
+            'if [ "$DRY_RUN" = 1 ]; then',
+            "\ncompose_pull\n",
+            "\ncompose_up_stateful\n",
+            "\narm_backend_recovery_trap\n",
+            "\ncompose_quiesce_backend\n",
+            "\nrun_migrations\n",
+            "\nclear_backend_recovery_trap\n",
+            "\ncompose_up_backend\n",
+            "\ncompose_up_frontend\n",
+        )
+        positions = [deploy.index(fragment) for fragment in ordered_fragments]
+        self.assertEqual(positions, sorted(positions))
+
+    def test_rollback_quiesces_with_recovery_on_both_paths(self) -> None:
+        rollback = Path("scripts/prod/rollback.sh").read_text(encoding="utf-8")
+        ordered_fragments = (
+            "load_prod_env\n",
+            "load_state\n",
+            'load_release "$RELEASE"\n',
+            'validate_identity "$RELEASE"\n',
+            "validate_secrets\n",
+            "validate_resources\n",
+            'validate_production_inputs "$RELEASE"\n',
+            "validate_compose\n",
+            "\narm_backend_recovery_trap\n",
+            "\ncompose_quiesce_backend\n",
+            'if [ -n "$DOWNGRADE_REV" ]; then',
+            '"${COMPOSE[@]}" run --rm --no-deps api alembic downgrade "$DOWNGRADE_REV"',
+            "\ncompose_up_backend\n",
+            "\nclear_backend_recovery_trap\n",
+            "\ncompose_up_frontend\n",
+        )
+        positions = [rollback.index(fragment) for fragment in ordered_fragments]
+        self.assertEqual(positions, sorted(positions))
 
     def test_bootstrap_module_creates_vector_extension_and_tables(self) -> None:
         script = Path("cygnus/runtime/bootstrap/init_local_stack.py")
@@ -240,6 +441,116 @@ class DockerStackRecoveryTests(unittest.TestCase):
             "TRUSTED_PROXY_IPS must be the deterministic narrow prodnet CIDR", helper
         )
 
+    def test_frontend_container_ports_require_no_linux_capabilities(self) -> None:
+        frontend_dockerfile = Path("frontend/Dockerfile").read_text(encoding="utf-8")
+        local_nginx = Path("frontend/nginx.conf").read_text(encoding="utf-8")
+        production_nginx = Path("deploy/nginx/nginx.prod.conf.template").read_text(
+            encoding="utf-8"
+        )
+        local_compose = Path("docker-compose.yml").read_text(encoding="utf-8")
+        production_compose = Path("deploy/docker-compose.prod.yml").read_text(
+            encoding="utf-8"
+        )
+        release_gate = Path("scripts/release_contract_gate.py").read_text(
+            encoding="utf-8"
+        )
+
+        def listener_ports(text: str) -> list[int]:
+            ports: list[int] = []
+            for directive in re.findall(r"^\s*listen\s+([^;]+);", text, re.MULTILINE):
+                match = re.search(r"(?:^|:)(\d+)(?:\s|$)", directive)
+                if match is None:
+                    self.fail(f"unrecognized nginx listen directive: {directive}")
+                ports.append(int(match.group(1)))
+            return ports
+
+        self.assertEqual(listener_ports(local_nginx), [8080])
+        self.assertEqual(listener_ports(production_nginx), [8080, 8443])
+        self.assertIn("USER nginx", frontend_dockerfile)
+        self.assertIn("EXPOSE 8080 8443", frontend_dockerfile)
+        self.assertIn("http://127.0.0.1:8080/health", frontend_dockerfile)
+        for capability_setup in ("setcap", "libcap", "cap_net_bind_service"):
+            self.assertNotIn(capability_setup, frontend_dockerfile.lower())
+
+        local_frontend = local_compose.partition("\n  frontend:\n")[2].partition(
+            "\nvolumes:\n"
+        )[0]
+        self.assertIn(
+            '"${CYGNUS_DOCKER_FRONTEND_HOST_PORT:-5173}:8080"', local_frontend
+        )
+        self.assertIn("cap_drop: [ALL]", local_frontend)
+        self.assertIn("no-new-privileges:true", local_frontend)
+        self.assertNotIn("cap_add", local_frontend)
+
+        production_frontend = production_compose.partition("\n  frontend:\n")[
+            2
+        ].partition("\nsecrets:\n")[0]
+        self.assertIn('"${CYGNUS_HTTP_BIND_PORT:-80}:8080"', production_frontend)
+        self.assertIn('"${CYGNUS_HTTPS_BIND_PORT:-443}:8443"', production_frontend)
+        self.assertNotIn('"80:80"', production_frontend)
+        self.assertNotIn('"443:443"', production_frontend)
+        self.assertIn("cap_drop: [ALL]", production_frontend)
+        self.assertIn("no-new-privileges:true", production_frontend)
+        self.assertNotIn("cap_add", production_frontend)
+        self.assertIn("https://127.0.0.1:8443/readyz", production_frontend)
+
+        self.assertIn("listen 8443 ssl;", production_nginx)
+        self.assertIn(
+            "ssl_certificate     /run/secrets/cygnus_tls_cert;", production_nginx
+        )
+        self.assertIn("ssl_protocols TLSv1.2 TLSv1.3;", production_nginx)
+        self.assertIn("CYGNUS_HTTP_BIND_PORT:-80", release_gate)
+        self.assertIn("CYGNUS_HTTPS_BIND_PORT:-443", release_gate)
+        self.assertIn("must not use privileged proxy container ports", release_gate)
+
+    def test_production_policy_binder_injects_exact_release_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            template = root / "policy.json"
+            metadata = root / "release.env"
+            output = root / "bound.json"
+            policy = json.loads(
+                Path("deploy/production-inputs.example.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            policy["status"] = "approved"
+            policy["release"] = {}
+            template.write_text(json.dumps(policy), encoding="utf-8")
+            metadata.write_text(
+                "APP_RELEASE=0.1.0\n"
+                f"APP_COMMIT_SHA={'a' * 40}\n"
+                f"CYGNUS_API_IMAGE=ghcr.io/owner/api@sha256:{'b' * 64}\n"
+                f"CYGNUS_FRONTEND_IMAGE=ghcr.io/owner/frontend@sha256:{'c' * 64}\n"
+                "EXPECTED_ALEMBIC_HEAD=20260815_02_employee_session_version\n",
+                encoding="utf-8",
+            )
+            command = [
+                sys.executable,
+                "scripts/prod/bind-production-inputs.py",
+                "--template",
+                str(template),
+                "--release-metadata",
+                str(metadata),
+                "--out",
+                str(output),
+            ]
+
+            first = subprocess.run(command, capture_output=True, text=True, check=False)
+            second = subprocess.run(
+                command, capture_output=True, text=True, check=False
+            )
+
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertNotEqual(second.returncode, 0)
+            bound = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(bound["bound_release"], "0.1.0")
+            self.assertEqual(bound["release"]["git_sha"], "a" * 40)
+            self.assertEqual(
+                bound["release"]["backend_image"],
+                f"ghcr.io/owner/api@sha256:{'b' * 64}",
+            )
+
     def test_frontend_document_is_compatible_with_production_csp(self) -> None:
         text = Path("frontend/index.html").read_text(encoding="utf-8")
         self.assertNotIn("fonts.googleapis.com", text)
@@ -265,7 +576,7 @@ class DockerStackRecoveryTests(unittest.TestCase):
         self.assertIn("npm ci --no-audit --no-fund", frontend_text)
         self.assertIn("AS prod", frontend_text)
         self.assertIn("USER nginx", frontend_text)
-        self.assertIn("setcap cap_net_bind_service=+ep /usr/sbin/nginx", frontend_text)
+        self.assertIn("EXPOSE 8080 8443", frontend_text)
         self.assertIn("pid        /tmp/nginx.pid;", frontend_text)
         self.assertIn('CMD ["nginx", "-g", "daemon off;"]', frontend_text)
         self.assertNotIn("daemon off; pid /tmp/nginx.pid;", frontend_text)

@@ -144,12 +144,13 @@ def _recovery(
     recovered: bool = True,
     recovery_seconds: float | None = 0.5,
     post_error: float = 0.0,
+    failures: int = 2,
 ) -> RecoveryEvidence:
     return RecoveryEvidence(
         target=target,
         injected=True,
         window_seconds=5.0,
-        failures_during_window=2,
+        failures_during_window=failures,
         recovery_seconds=recovery_seconds,
         post_recovery_error_rate=post_error,
         recovered=recovered,
@@ -647,6 +648,16 @@ class ReportShapeTests(unittest.TestCase):
         phases["ticket_import"] = _phase(
             "ticket_import",
             recovery=_recovery("db", recovered=False, recovery_seconds=None),
+        )
+        report = _run(_injection_thresholds(), phases)
+        self.assertEqual(report.status, GATE_FAIL)
+        self.assertIn(f"{RECOVERY_NOT_OBSERVED}:db", report.reasons)
+
+    def test_injection_without_observed_impact_fails(self) -> None:
+        phases = _pass_phases()
+        phases["ticket_import"] = _phase(
+            "ticket_import",
+            recovery=_recovery("db", failures=0),
         )
         report = _run(_injection_thresholds(), phases)
         self.assertEqual(report.status, GATE_FAIL)

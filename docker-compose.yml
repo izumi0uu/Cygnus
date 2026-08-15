@@ -152,7 +152,10 @@ services:
       api:
         condition: service_healthy
     ports:
-      - "${CYGNUS_DOCKER_FRONTEND_HOST_PORT:-5173}:80"
+      - "${CYGNUS_DOCKER_FRONTEND_HOST_PORT:-5173}:8080"
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   postgres_data:

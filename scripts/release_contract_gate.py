@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -62,6 +63,7 @@ def validate_repository(root: Path = REPO_ROOT) -> GateResult:
         "Dockerfile",
         "frontend/Dockerfile",
         "frontend/package-lock.json",
+        "frontend/scripts/run-browser-certification.mjs",
         "docker-compose.yml",
         "deploy/docker-compose.prod.yml",
         "deploy/image-lock.json",
@@ -70,11 +72,13 @@ def validate_repository(root: Path = REPO_ROOT) -> GateResult:
         "cygnus/observability/alert_rules.py",
         "deploy/production-inputs.example.json",
         ".github/workflows/release.yml",
+        ".github/workflows/repo-guard.yml",
         ".github/workflows/backup-restore-drill.yml",
         "scripts/prod/deploy.sh",
         "scripts/prod/rollback.sh",
         "scripts/prod/backup_restore_drill.sh",
         "scripts/run_live_production_certification.sh",
+        "scripts/prod/write-release-env.py",
         "scripts/prod/rotate-secrets.sh",
         "scripts/prod/incident.sh",
         "scripts/production_inputs_gate.py",
@@ -86,6 +90,11 @@ def validate_repository(root: Path = REPO_ROOT) -> GateResult:
     failures.extend(f"required file missing: {path}" for path in missing)
     if missing:
         return {"ok": False, "failures": failures, "checks": checks}
+    browser_runner = root / "frontend/scripts/run-browser-certification.mjs"
+    browser_runner_executable = os.access(browser_runner, os.X_OK)
+    checks["browser_certification_runner_executable"] = browser_runner_executable
+    if not browser_runner_executable:
+        failures.append("browser certification runner must be executable")
 
     try:
         lock = json.loads(_read(root, "deploy/image-lock.json"))
@@ -113,6 +122,7 @@ def validate_repository(root: Path = REPO_ROOT) -> GateResult:
     local_compose = _read(root, "docker-compose.yml")
     production_compose = _read(root, "deploy/docker-compose.prod.yml")
     workflow = _read(root, ".github/workflows/release.yml")
+    repo_guard_workflow = _read(root, ".github/workflows/repo-guard.yml")
     checks["local_profile_marked_development"] = "DEVELOPMENT ONLY" in local_compose
     if "DEVELOPMENT ONLY" not in local_compose:
         failures.append(
@@ -135,17 +145,56 @@ def validate_repository(root: Path = REPO_ROOT) -> GateResult:
                 f"production compose missing required hardening/config fragment: {fragment}"
             )
     checks["production_hardening_fragments"] = True
-    if (
-        "ports:" not in production_compose
-        or '"80:80"' not in production_compose
-        or '"443:443"' not in production_compose
+    required_proxy_port_mappings = (
+        '"${CYGNUS_HTTP_BIND_PORT:-80}:8080"',
+        '"${CYGNUS_HTTPS_BIND_PORT:-443}:8443"',
+    )
+    if "ports:" not in production_compose or any(
+        mapping not in production_compose for mapping in required_proxy_port_mappings
     ):
-        failures.append("production compose must publish the TLS reverse-proxy ports")
+        failures.append(
+            "production compose must map public :80/:443 to unprivileged "
+            "proxy :8080/:8443"
+        )
+    if any(mapping in production_compose for mapping in ('"80:80"', '"443:443"')):
+        failures.append(
+            "production compose must not use privileged proxy container ports"
+        )
     if any(
         token in production_compose
         for token in ("8077:", "5432:", "6379:", "9000:", "9001:")
     ):
         failures.append("production compose exposes a non-proxy service port")
+    service_sections = {
+        "postgres": production_compose.partition("\n  postgres:\n")[2].partition(
+            "\n  redis:\n"
+        )[0],
+        "redis": production_compose.partition("\n  redis:\n")[2].partition(
+            "\n  minio:\n"
+        )[0],
+        "minio": production_compose.partition("\n  minio:\n")[2].partition(
+            "\n  migrator:\n"
+        )[0],
+        "frontend": production_compose.partition("\n  frontend:\n")[2].partition(
+            "\nsecrets:\n"
+        )[0],
+    }
+    for service, section in service_sections.items():
+        if not section:
+            failures.append(f"production compose service section is missing: {service}")
+            continue
+        if "env_file:" in section:
+            failures.append(
+                f"production {service} service must not receive the shared app env file"
+            )
+        for secret_name in ("SECRET_KEY", "DEFAULT_ADMIN_PASSWORD", "MCP_TOKEN_PEPPER"):
+            if secret_name in section:
+                failures.append(
+                    f"production {service} service receives unrelated app secret {secret_name}"
+                )
+    checks["production_service_secret_scoping"] = not any(
+        "env_file:" in section for section in service_sections.values()
+    )
     if "npm ci --no-audit --no-fund" not in _read(root, "frontend/Dockerfile"):
         failures.append("frontend Dockerfile must install through npm ci")
     if "uv sync --frozen" not in _read(root, "Dockerfile"):
@@ -156,7 +205,13 @@ def validate_repository(root: Path = REPO_ROOT) -> GateResult:
         "uv run ruff check",
         "uv run mypy",
         "uv run pytest",
+        "CYGNUS_GOVERNANCE_TEST_DATABASE_URL",
+        "CYGNUS_MIGRATION_TEST_DATABASE_URL",
+        "CYGNUS_WIKI_IDENTITY_TEST_DATABASE_URL",
+        "Prepare isolated Postgres test databases",
+        "createdb -U cygnus cygnus_governance_test",
         "npm ci --no-audit --no-fund",
+        "npm --prefix frontend exec -- playwright install chromium",
         "npm audit --omit=dev --audit-level=high",
         "npm run lint",
         "npm test",
@@ -170,14 +225,32 @@ def validate_repository(root: Path = REPO_ROOT) -> GateResult:
         "--sbom=true",
         "cosign sign",
         "cosign verify",
+        "--signature-backend production/signatures/backend.sig",
+        "--certificate-backend production/signatures/backend.crt",
+        "--signature-frontend production/signatures/frontend.sig",
+        "--certificate-frontend production/signatures/frontend.crt",
         "cosign download sbom",
         "cosign download attestation",
         "image_reference_gate.py",
         "image_gate.py",
         "release_gate.py",
         "scripts/run_live_production_certification.sh",
+        "CYGNUS_RELEASE: ${{ inputs.version || github.ref_name }}",
+        "Bind approved production policy to candidate release",
+        'scripts/prod/write-release-env.py "$CYGNUS_RELEASE"',
+        "scripts/prod/bind-production-inputs.py",
+        "CYGNUS_PRODUCTION_INPUTS_TEMPLATE_FILE",
         "scripts/prod/backup_restore_drill.sh",
         "--severity HIGH,CRITICAL",
+        "deploy-production:",
+        "needs: [build-staging-images, live-production-certification, promote-release]",
+        "runs-on: [self-hosted, cygnus-production-deploy]",
+        "CYGNUS_DEPLOY_IDENTITY",
+        "CYGNUS_DEPLOY_HOSTNAME",
+        "CYGNUS_DEPLOY_CHECKOUTS_DIR",
+        "CYGNUS_OPERATOR_WORK_DIR",
+        "name: promoted-release",
+        'scripts/prod/deploy.sh --release "$RELEASE_VERSION"',
     )
     missing_workflow = [
         fragment for fragment in required_workflow_fragments if fragment not in workflow
@@ -186,6 +259,25 @@ def validate_repository(root: Path = REPO_ROOT) -> GateResult:
     failures.extend(
         f"release workflow missing required step/fragment: {fragment}"
         for fragment in missing_workflow
+    )
+    required_repo_guard_fragments = (
+        "pgvector/pgvector:0.8.6-pg16-trixie@sha256:",
+        "CYGNUS_GOVERNANCE_TEST_DATABASE_URL",
+        "CYGNUS_MIGRATION_TEST_DATABASE_URL",
+        "CYGNUS_WIKI_IDENTITY_TEST_DATABASE_URL",
+        "Prepare isolated Postgres test databases",
+        "createdb -U cygnus cygnus_governance_test",
+        "bash scripts/repo_check.sh",
+    )
+    missing_repo_guard = [
+        fragment
+        for fragment in required_repo_guard_fragments
+        if fragment not in repo_guard_workflow
+    ]
+    checks["repo_guard_required_fragments"] = {"missing": missing_repo_guard}
+    failures.extend(
+        f"repo guard workflow missing required step/fragment: {fragment}"
+        for fragment in missing_repo_guard
     )
     live_certification_script = _read(
         root, "scripts/run_live_production_certification.sh"
@@ -196,6 +288,14 @@ def validate_repository(root: Path = REPO_ROOT) -> GateResult:
     checks["live_certification_runtime_identity"] = requires_runtime_identity
     if not requires_runtime_identity:
         failures.append("live certification script must require exact runtime identity")
+    canonical_browser_runner = (
+        "frontend/scripts/run-browser-certification.mjs" in live_certification_script
+    )
+    checks["canonical_browser_certification_runner"] = canonical_browser_runner
+    if not canonical_browser_runner:
+        failures.append(
+            "live certification must default to the repository-owned browser runner"
+        )
     workflow_texts = {
         path.name: path.read_text(encoding="utf-8")
         for path in (root / ".github/workflows").glob("*.yml")

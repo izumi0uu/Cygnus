@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import cast
 
@@ -38,12 +39,70 @@ DEFAULT_REQUIRED_EVIDENCE = (
     "image-supply-chain",
 )
 STRUCTURED_REPORTS = {
+    "production-inputs": "cygnus.production-inputs.json",
     "capacity-gate": "cygnus.capacity.report.json",
     "backup-restore-drill": "cygnus.drill.report.json",
     "production-e2e": "cygnus.production-e2e.json",
     "browser-e2e": "cygnus.browser-e2e.json",
     "security-failure-injection": "cygnus.security-failure-injection.json",
     "persisted-domain-eval": "cygnus.persisted-domain-eval.json",
+}
+REQUIRED_LIVE_REPORT_CHECKS: dict[str, frozenset[str]] = {
+    "production-e2e": frozenset(
+        {
+            "fresh-deploy",
+            "upgrade",
+            "health",
+            "login",
+            "ingestion",
+            "governance",
+            "review",
+            "publish",
+            "retrieval",
+            "restart-durability",
+            "rollback",
+            "teardown-diagnostics",
+        }
+    ),
+    "browser-e2e": frozenset(
+        {
+            "unauthenticated-deep-link-redirect",
+            "admin-login-deep-link-resume",
+            "admin-static-route-smoke",
+            "command-palette-keyboard",
+            "mobile-navigation-and-overflow",
+            "browser-runtime-health",
+            "screenshot-evidence",
+        }
+    ),
+    "security-failure-injection": frozenset(
+        {
+            "production-config-rejection",
+            "authentication-boundary",
+            "authorization-boundary",
+            "oauth-output-safety",
+            "oauth-state-validation",
+            "oauth-pkce-validation",
+            "login-abuse-protection",
+            "forwarded-header-trust",
+            "browser-security-headers",
+            "dependency-security-gate",
+            "static-security-gate",
+            "actionable-failure-recovery",
+        }
+    ),
+    "persisted-domain-eval": frozenset(
+        {
+            "persisted-approval-lineage",
+            "persisted-publication-lineage",
+            "allowed-audience-no-leakage",
+            "denied-audience-no-leakage",
+            "freshness-invalidation",
+            "propagation-acknowledgement",
+            "two-turn-truth-re-query",
+            "restart-persistence",
+        }
+    ),
 }
 
 
@@ -101,6 +160,74 @@ def _all_checks_pass(report: dict[str, object]) -> bool:
     return all(
         isinstance(check, dict) and check.get("passed") is True for check in checks
     )
+
+
+def _has_evidence_content(value: object) -> bool:
+    if isinstance(value, dict):
+        return bool(value) and any(
+            _has_evidence_content(item) for item in value.values()
+        )
+    if isinstance(value, list):
+        return bool(value) and any(_has_evidence_content(item) for item in value)
+    if isinstance(value, str):
+        return bool(value.strip())
+    return value is not None
+
+
+def validate_live_report_checks(name: str, report: dict[str, object]) -> list[str]:
+    """Validate the named, semantic checks in a native live report."""
+    required = REQUIRED_LIVE_REPORT_CHECKS.get(name)
+    if required is None:
+        return [f"unsupported live report name {name!r}"]
+
+    raw_checks = report.get("checks")
+    if not isinstance(raw_checks, list) or not raw_checks:
+        return [f"{name} report checks must be a non-empty list"]
+
+    failures: list[str] = []
+    checks_by_name: dict[str, dict[str, object]] = {}
+    for index, raw_check in enumerate(raw_checks):
+        if not isinstance(raw_check, dict):
+            failures.append(f"{name} report check at index {index} must be an object")
+            continue
+        check_name = raw_check.get("name")
+        if (
+            not isinstance(check_name, str)
+            or not check_name.strip()
+            or check_name != check_name.strip()
+        ):
+            failures.append(
+                f"{name} report check at index {index} must have a non-empty, "
+                "trimmed string name"
+            )
+            continue
+        if check_name in checks_by_name:
+            failures.append(f"{name} report has duplicate check name: {check_name}")
+        else:
+            checks_by_name[check_name] = raw_check
+        if raw_check.get("passed") is not True:
+            failures.append(
+                f"{name} report check {check_name!r} must contain JSON boolean "
+                "passed: true"
+            )
+
+    missing = sorted(required - checks_by_name.keys())
+    if missing:
+        failures.append(
+            f"{name} report is missing required checks: " + ", ".join(missing)
+        )
+
+    for check_name in sorted(required & checks_by_name.keys()):
+        check = checks_by_name[check_name]
+        if not any(
+            isinstance(value, (dict, list)) and _has_evidence_content(value)
+            for value in (check.get("evidence"), check.get("details"))
+        ):
+            failures.append(
+                f"{name} report required check {check_name!r} must contain "
+                "non-empty structured evidence or details"
+            )
+    return failures
 
 
 def _validate_capacity(
@@ -311,12 +438,73 @@ def _validate_generic_live_report(
         failures.append(f"{name} report_format must be {expected_format!r}")
     if report.get("status") != "passed":
         failures.append(f"{name} report status must be exactly 'passed'")
-    if report.get("git_sha") != cast(dict[str, object], manifest.get("git") or {}).get(
-        "sha"
-    ):
+    git = cast(dict[str, object], manifest.get("git") or {})
+    if report.get("git_sha") != git.get("sha"):
         failures.append(f"{name} report git_sha does not match release manifest")
-    if not _all_checks_pass(report):
-        failures.append(f"{name} report has missing or failed checks")
+    images = cast(dict[str, object], manifest.get("images") or {})
+    backend = cast(dict[str, object], images.get("backend") or {})
+    frontend = cast(dict[str, object], images.get("frontend") or {})
+    expected_identity = {
+        "git_commit": git.get("sha"),
+        "backend_image_ref": f"{backend.get('image')}@{backend.get('digest')}",
+        "frontend_image_ref": f"{frontend.get('image')}@{frontend.get('digest')}",
+        "alembic_head": manifest.get("alembic_head"),
+    }
+    release_identity = report.get("release_identity")
+    if not isinstance(release_identity, dict) or any(
+        release_identity.get(key) != value for key, value in expected_identity.items()
+    ):
+        failures.append(
+            f"{name} release_identity does not exactly match the candidate manifest"
+        )
+    failures.extend(validate_live_report_checks(name, report))
+
+
+def _validate_production_inputs(
+    report: dict[str, object],
+    manifest: dict[str, object],
+    failures: list[str],
+) -> None:
+    if report.get("gate") != "production_inputs_gate":
+        failures.append("production inputs report has an unexpected gate name")
+    if report.get("ok") is not True or report.get("failures") != []:
+        failures.append("production inputs report is not an explicit clean pass")
+    git = cast(dict[str, object], manifest.get("git") or {})
+    if report.get("git_sha") != git.get("sha"):
+        failures.append(
+            "production inputs report git_sha does not match release manifest"
+        )
+    checks = report.get("checks")
+    if not isinstance(checks, dict):
+        failures.append("production inputs report is missing checks")
+        return
+    for field in (
+        "git_sha",
+        "backend_image",
+        "frontend_image",
+        "alembic_head",
+    ):
+        binding = checks.get(f"release_{field}")
+        if not isinstance(binding, dict) or binding.get("matches") is not True:
+            failures.append(
+                f"production inputs report release_{field} binding did not pass"
+            )
+    for key in (
+        "metrics_allowlist_binding",
+        "public_domain_binding",
+        "capacity_threshold_binding",
+        "alert_threshold_binding",
+        "backup_objective_binding",
+        "delivery_target_binding",
+        "delivery_hmac_ref_binding",
+    ):
+        if checks.get(key) is not True:
+            failures.append(f"production inputs report {key} did not pass")
+    fingerprint = checks.get("input_fingerprint_sha256")
+    if not isinstance(fingerprint, str) or not re.fullmatch(
+        r"[0-9a-f]{64}", fingerprint
+    ):
+        failures.append("production inputs report has no valid decision fingerprint")
 
 
 def _validate_structured(
@@ -329,7 +517,9 @@ def _validate_structured(
     report = _raw_report(evidence, name, evidence_dir, failures)
     if report is None:
         return
-    if name == "capacity-gate":
+    if name == "production-inputs":
+        _validate_production_inputs(report, manifest, failures)
+    elif name == "capacity-gate":
         _validate_capacity(report, manifest, failures)
     elif name == "backup-restore-drill":
         _validate_drill(report, evidence, manifest, failures)

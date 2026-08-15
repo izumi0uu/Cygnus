@@ -156,16 +156,18 @@ def _active_delivery_mismatches(
     or silently reinterpreted under the other ref.
     """
     expected = (
-        "'ko-page-' || p.id::text" if target == "canonical" else "'ko-' || p.slug"
+        "'ko-page-' || page.id::text" if target == "canonical" else "'ko-' || page.slug"
     )
     rows = connection.execute(
         sa.text(
-            "SELECT d.id AS delivery_id, d.status, p.id AS publication_id, "
-            "p.object_ref AS publication_object_ref, "
+            "SELECT d.id AS delivery_id, d.status, publication.id AS publication_id, "
+            "publication.object_ref AS publication_object_ref, "
             f"{expected} AS expected_object_ref, "
             "d.canonical_payload ->> 'object_ref' AS payload_object_ref "
             "FROM governance_propagation_deliveries AS d "
-            "JOIN governance_publications AS p ON p.id = d.publication_id "
+            "JOIN governance_publications AS publication "
+            "ON publication.id = d.publication_id "
+            "JOIN wiki_pages AS page ON page.id = publication.page_id "
             "WHERE d.status IN ('pending', 'in_flight', 'synced') "
             "AND (d.canonical_payload ->> 'object_ref') IS DISTINCT FROM "
             f"{expected} "

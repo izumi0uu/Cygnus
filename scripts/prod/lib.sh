@@ -6,8 +6,18 @@ set -euo pipefail
 REPO_ROOT=$(CDPATH= cd -- "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 DEPLOY_DIR="$REPO_ROOT/deploy"
 COMPOSE_FILE="$DEPLOY_DIR/docker-compose.prod.yml"
+PROD_ENV_FILE="${CYGNUS_PRODUCTION_ENV_FILE:-$DEPLOY_DIR/.env.prod}"
+RELEASES_DIR="$DEPLOY_DIR/releases"
+STATE_FILE="$DEPLOY_DIR/.state"
+CHECKOUTS_DIR=""
+ACTIVE_CHECKOUT_LINK=""
+OPERATOR_WORK_DIR="$DEPLOY_DIR"
+export CYGNUS_PRODUCTION_ENV_FILE="$PROD_ENV_FILE"
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-cygnus-prod}"
-COMPOSE=(docker compose --project-name "$COMPOSE_PROJECT_NAME" --project-directory "$DEPLOY_DIR" -f "$COMPOSE_FILE")
+COMPOSE=(docker compose --project-name "$COMPOSE_PROJECT_NAME" --project-directory "$DEPLOY_DIR" -f "$COMPOSE_FILE" --env-file "$PROD_ENV_FILE")
+PRODUCTION_BACKEND_SERVICES=(api worker worker-skills)
+QUIESCED_BACKEND_SERVICES=()
+BACKEND_RECOVERY_TRAP_ARMED=0
 PROXY_CIDR='172.30.0.0/24'
 PLACEHOLDER_VALUES='change[_-]?me|replace[_-]?with|example\.com|<[^>]+>|cygnus-local-dev|todo|pending|unknown'
 
@@ -33,18 +43,56 @@ load_env_file() {
   done < "$file"
 }
 
-load_prod_env() { load_env_file "$DEPLOY_DIR/.env.prod"; }
+load_prod_env() {
+  local releases_override="${CYGNUS_RELEASES_DIR:-}"
+  local state_override="${CYGNUS_DEPLOY_STATE_FILE:-}"
+  local checkouts_override="${CYGNUS_CHECKOUTS_DIR:-}"
+  local active_link_override="${CYGNUS_ACTIVE_CHECKOUT_LINK:-}"
+  local operator_work_override="${CYGNUS_OPERATOR_WORK_DIR:-}"
+  load_env_file "$PROD_ENV_FILE"
+  RELEASES_DIR="${releases_override:-${CYGNUS_RELEASES_DIR:-$DEPLOY_DIR/releases}}"
+  STATE_FILE="${state_override:-${CYGNUS_DEPLOY_STATE_FILE:-$DEPLOY_DIR/.state}}"
+  CHECKOUTS_DIR="${checkouts_override:-${CYGNUS_CHECKOUTS_DIR:-}}"
+  ACTIVE_CHECKOUT_LINK="${active_link_override:-${CYGNUS_ACTIVE_CHECKOUT_LINK:-}}"
+  OPERATOR_WORK_DIR="${operator_work_override:-${CYGNUS_OPERATOR_WORK_DIR:-$DEPLOY_DIR}}"
+  export CYGNUS_RELEASES_DIR="$RELEASES_DIR"
+  export CYGNUS_DEPLOY_STATE_FILE="$STATE_FILE"
+  export CYGNUS_CHECKOUTS_DIR="$CHECKOUTS_DIR"
+  export CYGNUS_ACTIVE_CHECKOUT_LINK="$ACTIVE_CHECKOUT_LINK"
+  export CYGNUS_OPERATOR_WORK_DIR="$OPERATOR_WORK_DIR"
+}
 
 validate_release_identifier() {
   printf '%s' "$1" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$' || die "release identifier must contain only letters, numbers, dot, underscore, or hyphen"
 }
 
 load_release() {
-  local release="${1:-}"
+  local release="${1:-}" release_file release_inputs fallback_file fallback_inputs
   [ -n "$release" ] || die "no release specified; set CYGNUS_RELEASE or pass --release <version>"
   validate_release_identifier "$release"
-  local release_file="$DEPLOY_DIR/releases/$release.env"
+  fallback_file="$DEPLOY_DIR/releases/$release.env"
+  fallback_inputs="$DEPLOY_DIR/releases/$release.production-inputs.json"
+  if [ -n "${CYGNUS_RELEASE_METADATA_FILE:-}" ]; then
+    release_file="$CYGNUS_RELEASE_METADATA_FILE"
+  else
+    release_file="$RELEASES_DIR/$release.env"
+    if [ ! -f "$release_file" ] && [ "$release_file" != "$fallback_file" ]; then
+      release_file="$fallback_file"
+    fi
+  fi
+  if [ -n "${CYGNUS_RELEASE_INPUTS_FILE:-}" ]; then
+    release_inputs="$CYGNUS_RELEASE_INPUTS_FILE"
+  else
+    release_inputs="$RELEASES_DIR/$release.production-inputs.json"
+    if [ ! -f "$release_inputs" ] && [ "$release_inputs" != "$fallback_inputs" ]; then
+      release_inputs="$fallback_inputs"
+    fi
+  fi
   [ -f "$release_file" ] || die "release metadata missing: $release_file"
+  [ -f "$release_inputs" ] || die "release-bound production inputs missing: $release_inputs"
+  LOADED_RELEASE_FILE="$release_file"
+  LOADED_RELEASE_INPUTS_FILE="$release_inputs"
+  export CYGNUS_PRODUCTION_INPUTS_FILE="$release_inputs"
   load_env_file "$release_file"
   validate_digests "$release"
 }
@@ -64,8 +112,9 @@ validate_identity() {
   APP_RELEASE="${APP_RELEASE:-$release}"
   APP_DEPLOYMENT_ID="${APP_DEPLOYMENT_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
   export APP_RELEASE APP_DEPLOYMENT_ID
+  [ "$APP_RELEASE" = "$release" ] || die "release metadata APP_RELEASE does not match requested release $release"
   for var in APP_COMMIT_SHA EXPECTED_ALEMBIC_HEAD; do
-    [ -n "${!var:-}" ] || die "$var is required in deploy/releases/$release.env"
+    [ -n "${!var:-}" ] || die "$var is required in the release metadata file"
   done
   printf '%s' "$APP_COMMIT_SHA" | grep -Eq '^[0-9a-f]{40}([0-9a-f]{24})?$' || die "APP_COMMIT_SHA must be a full 40- or 64-hex commit SHA"
   for var in APP_RELEASE APP_DEPLOYMENT_ID EXPECTED_ALEMBIC_HEAD; do
@@ -137,8 +186,14 @@ validate_resources() {
 
 validate_production_inputs() {
   local release="$1" inputs="${CYGNUS_PRODUCTION_INPUTS_FILE:-$DEPLOY_DIR/production-inputs.json}"
+  local release_work_dir="$OPERATOR_WORK_DIR/$release"
   [ -f "$inputs" ] || die "production input manifest is required: $inputs (copy deploy/production-inputs.example.json and obtain approvals)"
   command -v python3 >/dev/null || die "python3 is required to validate production inputs"
+  [ -d "$OPERATOR_WORK_DIR" ] && [ -w "$OPERATOR_WORK_DIR" ] || die "CYGNUS_OPERATOR_WORK_DIR must be an existing writable protected directory"
+  mkdir -p "$release_work_dir/evidence" "$release_work_dir/rendered"
+  PRODUCTION_INPUTS_REPORT_FILE="$release_work_dir/evidence/production-inputs-$release.json"
+  RENDERED_ALERT_RULES_FILE="$release_work_dir/rendered/alert_rules.yml"
+  export PRODUCTION_INPUTS_REPORT_FILE RENDERED_ALERT_RULES_FILE
   validate_capacity_inputs
   python3 "$REPO_ROOT/scripts/production_inputs_gate.py" \
     --inputs "$inputs" \
@@ -163,15 +218,72 @@ validate_production_inputs() {
     --rto-objective-ref "$CYGNUS_RTO_OBJECTIVE_REF" \
     --capacity-thresholds-sha256 "$CYGNUS_CAPACITY_THRESHOLDS_SHA256" \
     --expected-proxy-cidr "$PROXY_CIDR" \
-    --report "$DEPLOY_DIR/evidence/production-inputs-$release.json"
+    --report "$PRODUCTION_INPUTS_REPORT_FILE"
   python3 "$REPO_ROOT/scripts/render_alert_rules.py" \
     --thresholds "$CYGNUS_ALERT_THRESHOLDS_FILE" \
     --approval-ref "$CYGNUS_ALERT_APPROVAL_REF" \
     --thresholds-ref "$CYGNUS_ALERT_THRESHOLDS_REF" \
     --thresholds-sha256 "$CYGNUS_ALERT_THRESHOLDS_SHA256" \
-    --output "$DEPLOY_DIR/rendered/alert_rules.yml" \
+    --output "$RENDERED_ALERT_RULES_FILE" \
     --quiet || die "approved alert rule rendering failed"
-  [ -s "$DEPLOY_DIR/rendered/alert_rules.yml" ] || die "rendered alert rule file is empty"
+  [ -s "$RENDERED_ALERT_RULES_FILE" ] || die "rendered alert rule file is empty"
+}
+
+validate_compose() {
+  command -v docker >/dev/null 2>&1 || die "docker is required for production operations"
+  "${COMPOSE[@]}" version >/dev/null 2>&1 || die "Docker Compose v2 is required for production operations"
+  "${COMPOSE[@]}" config --quiet || die "production Compose manifest failed to resolve: $COMPOSE_FILE"
+}
+
+compose_pull() {
+  "${COMPOSE[@]}" pull
+}
+
+compose_quiesce_backend() {
+  local running service
+  QUIESCED_BACKEND_SERVICES=()
+  if ! running=$("${COMPOSE[@]}" ps --services --filter status=running "${PRODUCTION_BACKEND_SERVICES[@]}"); then
+    die "could not determine the running backend container set"
+  fi
+  for service in "${PRODUCTION_BACKEND_SERVICES[@]}"; do
+    if printf '%s\n' "$running" | grep -Fxq "$service"; then
+      QUIESCED_BACKEND_SERVICES+=("$service")
+    fi
+  done
+  if [ "${#QUIESCED_BACKEND_SERVICES[@]}" -eq 0 ]; then
+    log "no running backend services require quiescence"
+    return 0
+  fi
+  log "quiescing backend services: ${QUIESCED_BACKEND_SERVICES[*]}"
+  "${COMPOSE[@]}" stop "${QUIESCED_BACKEND_SERVICES[@]}"
+}
+
+compose_resume_quiesced_backend() {
+  [ "${#QUIESCED_BACKEND_SERVICES[@]}" -gt 0 ] || return 0
+  log "resuming previously running backend services: ${QUIESCED_BACKEND_SERVICES[*]}"
+  "${COMPOSE[@]}" start "${QUIESCED_BACKEND_SERVICES[@]}"
+}
+
+resume_backend_on_failure() {
+  local status="${1:-1}"
+  trap - EXIT
+  if [ "$status" -ne 0 ] && [ "$BACKEND_RECOVERY_TRAP_ARMED" = 1 ]; then
+    log "backend mutation failed; attempting to resume the previous container set..."
+    if ! compose_resume_quiesced_backend; then
+      printf '[cygnus-prod] ERROR: automatic backend resume failed; manual intervention is required\n' >&2
+    fi
+  fi
+  exit "$status"
+}
+
+arm_backend_recovery_trap() {
+  BACKEND_RECOVERY_TRAP_ARMED=1
+  trap 'resume_backend_on_failure "$?"' EXIT
+}
+
+clear_backend_recovery_trap() {
+  BACKEND_RECOVERY_TRAP_ARMED=0
+  trap - EXIT
 }
 
 compose_up_stateful() { "${COMPOSE[@]}" up -d --wait postgres redis minio; }
@@ -204,11 +316,75 @@ verify_ingress() {
   done
 }
 
+validate_operator_state_paths() {
+  local release="$1" state_parent link_parent expected_root current_root target inputs_target
+  [ -d "$RELEASES_DIR" ] && [ -w "$RELEASES_DIR" ] || die "CYGNUS_RELEASES_DIR must be an existing writable protected directory: $RELEASES_DIR"
+  state_parent=$(dirname "$STATE_FILE")
+  [ -d "$state_parent" ] && [ -w "$state_parent" ] || die "CYGNUS_DEPLOY_STATE_FILE parent must be an existing writable protected directory"
+  [ -n "$CHECKOUTS_DIR" ] && [ -d "$CHECKOUTS_DIR" ] || die "CYGNUS_CHECKOUTS_DIR must be an existing protected directory"
+  [ -n "$ACTIVE_CHECKOUT_LINK" ] || die "CYGNUS_ACTIVE_CHECKOUT_LINK is required"
+  link_parent=$(dirname "$ACTIVE_CHECKOUT_LINK")
+  [ -d "$link_parent" ] && [ -w "$link_parent" ] || die "CYGNUS_ACTIVE_CHECKOUT_LINK parent must be an existing writable protected directory"
+  if [ -e "$ACTIVE_CHECKOUT_LINK" ] && [ ! -L "$ACTIVE_CHECKOUT_LINK" ]; then
+    die "CYGNUS_ACTIVE_CHECKOUT_LINK must be absent or a symbolic link"
+  fi
+  target="$RELEASES_DIR/$release.env"
+  inputs_target="$RELEASES_DIR/$release.production-inputs.json"
+  if [ -f "$target" ] && ! cmp -s "$LOADED_RELEASE_FILE" "$target"; then
+    die "immutable release metadata conflict: $target"
+  fi
+  if [ -f "$inputs_target" ] && ! cmp -s "$LOADED_RELEASE_INPUTS_FILE" "$inputs_target"; then
+    die "immutable release production-input conflict: $inputs_target"
+  fi
+  [ -d "$CHECKOUTS_DIR/$release" ] || die "release checkout is missing: $CHECKOUTS_DIR/$release"
+  expected_root=$(CDPATH= cd -- "$CHECKOUTS_DIR/$release" && pwd -P)
+  current_root=$(CDPATH= cd -- "$REPO_ROOT" && pwd -P)
+  [ "$current_root" = "$expected_root" ] || die "release operations must run from $CHECKOUTS_DIR/$release"
+}
+
+activate_release_checkout() {
+  local release="$1" target temporary
+  target=$(CDPATH= cd -- "$CHECKOUTS_DIR/$release" && pwd -P)
+  temporary="${ACTIVE_CHECKOUT_LINK}.tmp.$$"
+  rm -f "$temporary"
+  ln -s "$target" "$temporary"
+  python3 -c 'import os,sys; os.replace(sys.argv[1], sys.argv[2])' "$temporary" "$ACTIVE_CHECKOUT_LINK"
+  log "active checkout: $ACTIVE_CHECKOUT_LINK -> $target"
+}
+
+persist_immutable_file() {
+  local source="$1" target="$2" temporary
+  if [ -f "$target" ]; then
+    cmp -s "$source" "$target" || die "immutable release contract conflict: $target"
+    return 0
+  fi
+  umask 027
+  temporary=$(mktemp "$RELEASES_DIR/.$(basename "$target").XXXXXX")
+  if ! cat "$source" > "$temporary"; then
+    rm -f "$temporary"
+    die "could not stage immutable release contract: $target"
+  fi
+  chmod 0640 "$temporary"
+  mv "$temporary" "$target"
+}
+
+persist_release_metadata() {
+  local release="$1"
+  [ -n "${LOADED_RELEASE_FILE:-}" ] || die "no loaded release metadata is available to persist"
+  [ -n "${LOADED_RELEASE_INPUTS_FILE:-}" ] || die "no release-bound production inputs are available to persist"
+  [ -d "$RELEASES_DIR" ] && [ -w "$RELEASES_DIR" ] || die "CYGNUS_RELEASES_DIR must be an existing writable protected directory: $RELEASES_DIR"
+  persist_immutable_file "$LOADED_RELEASE_FILE" "$RELEASES_DIR/$release.env"
+  persist_immutable_file "$LOADED_RELEASE_INPUTS_FILE" "$RELEASES_DIR/$release.production-inputs.json"
+}
+
 save_state() {
-  local previous="$1" active="$2"
+  local previous="$1" active="$2" temporary
+  [ -d "$(dirname "$STATE_FILE")" ] && [ -w "$(dirname "$STATE_FILE")" ] || die "CYGNUS_DEPLOY_STATE_FILE parent must be an existing writable protected directory"
   umask 077
-  printf 'CYGNUS_PREVIOUS_RELEASE=%s\nCYGNUS_ACTIVE_RELEASE=%s\n' "$previous" "$active" > "$DEPLOY_DIR/.state"
+  temporary="${STATE_FILE}.tmp.$$"
+  printf 'CYGNUS_PREVIOUS_RELEASE=%s\nCYGNUS_ACTIVE_RELEASE=%s\n' "$previous" "$active" > "$temporary"
+  mv "$temporary" "$STATE_FILE"
   log "state: previous=$previous active=$active"
 }
 
-load_state() { load_env_file "$DEPLOY_DIR/.state"; }
+load_state() { load_env_file "$STATE_FILE"; }

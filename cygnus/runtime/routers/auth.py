@@ -17,6 +17,7 @@ from cygnus.runtime.database.models import Employee
 from cygnus.runtime.services.auth_service import (
     LoginRateLimitExceeded,
     LoginRateLimitUnavailable,
+    advance_employee_session_version,
     authenticate_employee_with_rate_limit,
     create_access_token,
     get_client_ip,
@@ -133,6 +134,7 @@ async def login(
         employee_id=str(employee.id),
         role=employee.role,
         name=employee.name,
+        session_version=employee.session_version,
     )
 
     permissions = get_effective_permissions(employee)
@@ -172,6 +174,21 @@ async def get_profile(
     )
 
 
+@router.post("/auth/logout")
+async def logout(
+    current_user: Employee = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Revoke every outstanding portal JWT for the authenticated employee."""
+    session_version = await advance_employee_session_version(db, current_user.id)
+    if session_version is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Account not found or deactivated",
+        )
+    return {"message": "Logged out successfully"}
+
+
 @router.post("/auth/change-password")
 async def change_password(
     req: ChangePasswordRequest,
@@ -188,8 +205,14 @@ async def change_password(
     if len(req.new_password) < 6:
         raise HTTPException(400, "New password must be at least 6 characters")
 
-    current_user.password_hash = hash_password(req.new_password)
-    await db.flush()
+    session_version = await advance_employee_session_version(
+        db,
+        current_user.id,
+        password_hash=hash_password(req.new_password),
+        expected_password_hash=current_user.password_hash,
+    )
+    if session_version is None:
+        raise HTTPException(401, "Current password is incorrect")
     return {"message": "Password changed successfully"}
 
 

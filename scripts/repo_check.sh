@@ -37,6 +37,9 @@ echo "[repo-check] Dependency gate (offline lock integrity)"
 echo "[repo-check] Migration gate (static reversibility)"
 "$PYTHON_BIN" scripts/migration_gate.py --quiet
 
+echo "[repo-check] Static release contract gate"
+"$PYTHON_BIN" scripts/release_contract_gate.py --quiet
+
 echo "[repo-check] Unit tests"
 "$PYTHON_BIN" -m unittest discover -s tests -p 'test_*.py' -v
 

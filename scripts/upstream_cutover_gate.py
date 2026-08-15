@@ -20,6 +20,7 @@ FORBIDDEN_CODE_PATTERNS = (
     re.compile(r"\bfrom\s+arkon\b"),
     re.compile(r"\bimport\s+arkon\b"),
     re.compile(r'"mcpServers"\s*:\s*\{\s*"arkon"'),
+    re.compile(r"Enterprise AI Control Center"),
 )
 FORBIDDEN_EXTERNAL_CHECKOUT_PATTERNS = (
     re.compile(r"nduckmink/arkon"),

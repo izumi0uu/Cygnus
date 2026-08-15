@@ -9,6 +9,7 @@ route guards. These tests must not require a live database or Redis.
 from __future__ import annotations
 
 import uuid
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -26,7 +27,11 @@ from cygnus.integrations.oauth_service import (
 from cygnus.runtime.config import Settings
 from cygnus.runtime.database.oauth_models import OAuthAuthCode
 from cygnus.runtime.services.auth_service import (
+    LoginAttemptLimiter,
+    LoginRateLimitExceeded,
+    LoginRateLimitUnavailable,
     _peer_is_trusted_proxy,
+    authenticate_employee_with_rate_limit,
     get_client_ip,
 )
 
@@ -52,6 +57,10 @@ def _secure_production_kwargs(**overrides: str) -> dict[str, Any]:
         "redis_password": "Redis!Q3v9nL2x7Kp5Wm8Rz4Tq6Yh1Aa",
         "cors_origins": "https://kb.example.com",
         "trusted_proxy_ips": "172.28.0.10",
+        "delivery_targets_json": (
+            '{"internal-copilot":"https://delivery.example.com/v1"}'
+        ),
+        "delivery_hmac_secret": "CygnusDelivery!Q3v9nL2x7Kp5Wm8Rz4Tq6Yh1",
     }
     kwargs.update(overrides)
     return kwargs
@@ -90,6 +99,7 @@ def test_settings_production_refuses_default_minio_credentials() -> None:
         ("default_admin_password", "bootstrap-password-only", "DEFAULT_ADMIN_PASSWORD"),
         ("redis_password", "redis", "REDIS_PASSWORD"),
         ("minio_secret_key", "short", "MINIO_SECRET_KEY"),
+        ("delivery_hmac_secret", "short", "DELIVERY_HMAC_SECRET"),
     ),
 )
 def test_settings_production_refuses_weak_runtime_secrets(
@@ -137,6 +147,25 @@ def test_settings_production_refuses_insecure_cors_origin() -> None:
         **_secure_production_kwargs(cors_origins="http://kb.example.com")
     )
     with pytest.raises(RuntimeError, match="CORS_ORIGINS"):
+        settings.validate_runtime_security()
+
+
+@pytest.mark.parametrize(
+    "delivery_targets_json",
+    (
+        "{}",
+        '{"internal-copilot":"http://delivery.example.com"}',
+        '{"internal-copilot":"https://user:pass@delivery.example.com"}',
+        '{"internal-copilot":"https://delivery.example.com/path?token=secret"}',
+    ),
+)
+def test_settings_production_requires_safe_delivery_targets(
+    delivery_targets_json: str,
+) -> None:
+    settings = Settings(
+        **_secure_production_kwargs(delivery_targets_json=delivery_targets_json)
+    )
+    with pytest.raises(RuntimeError, match="DELIVERY_TARGETS_JSON"):
         settings.validate_runtime_security()
 
 
@@ -192,6 +221,213 @@ def test_login_rate_limit_settings_parse() -> None:
     )
     assert settings.login_rate_limit_attempts == 7
     assert settings.login_rate_limit_window_seconds == 600
+
+
+# ---------------------------------------------------------------------------
+# Shared Redis login abuse protection (fail-closed)
+# ---------------------------------------------------------------------------
+
+
+class _InMemoryLoginRedis:
+    """Redis eval double that tracks login counters and their original TTLs."""
+
+    def __init__(self, *, fail_on_eval_calls: set[int] | None = None) -> None:
+        self.values: dict[str, int] = {}
+        self.ttls: dict[str, int] = {}
+        self.eval_calls: list[tuple[int, tuple[Any, ...]]] = []
+        self._fail_on_eval_calls = set(fail_on_eval_calls or ())
+
+    async def delete(self, *keys: str) -> int:
+        removed = 0
+        for key in keys:
+            if key in self.values:
+                removed += 1
+            self.values.pop(key, None)
+            self.ttls.pop(key, None)
+        return removed
+
+    async def eval(self, _script: str, number_of_keys: int, *args: Any) -> int:
+        self.eval_calls.append((number_of_keys, args))
+        if len(self.eval_calls) in self._fail_on_eval_calls:
+            raise ConnectionError("redis unavailable")
+
+        if number_of_keys == 1:
+            assert len(args) == 3
+            key = str(args[0])
+            count = self.values.get(key, 0) + 1
+            self.values[key] = count
+            if count == 1:
+                self.ttls[key] = int(args[1])
+            return int(count <= int(args[2]))
+
+        if number_of_keys == 2:
+            assert len(args) == 2
+            email_key = str(args[0])
+            ip_key = str(args[1])
+            self.values.pop(email_key, None)
+            self.ttls.pop(email_key, None)
+            ip_count = self.values.get(ip_key)
+            if ip_count is None:
+                return 0
+            if ip_count <= 1:
+                self.values.pop(ip_key, None)
+                self.ttls.pop(ip_key, None)
+                return 0
+            self.values[ip_key] = ip_count - 1
+            return ip_count - 1
+
+        raise AssertionError(f"unexpected Redis eval key count: {number_of_keys}")
+
+
+def test_low_privilege_login_preserves_prior_ip_spray_pressure() -> None:
+    redis = _InMemoryLoginRedis()
+    limiter = LoginAttemptLimiter(redis=redis, max_attempts=3, window_seconds=300)
+    client_ip = "203.0.113.17"
+    successful_email = "viewer@example.test"
+    viewer = SimpleNamespace(role="employee", global_role="viewer", is_admin=False)
+    authenticate = AsyncMock(side_effect=[None, None, viewer, None])
+    db: Any = object()
+
+    with (
+        patch(
+            "cygnus.runtime.services.auth_service.get_login_attempt_limiter",
+            new=AsyncMock(return_value=limiter),
+        ),
+        patch(
+            "cygnus.runtime.services.auth_service.authenticate_employee",
+            new=authenticate,
+        ),
+    ):
+        assert (
+            _run(
+                authenticate_employee_with_rate_limit(
+                    db,
+                    "sprayed-one@example.test",
+                    "wrong-password",
+                    client_ip=client_ip,
+                )
+            )
+            is None
+        )
+        assert (
+            _run(
+                authenticate_employee_with_rate_limit(
+                    db,
+                    "sprayed-two@example.test",
+                    "wrong-password",
+                    client_ip=client_ip,
+                )
+            )
+            is None
+        )
+
+        authenticated = _run(
+            authenticate_employee_with_rate_limit(
+                db,
+                successful_email,
+                "correct-password",
+                client_ip=client_ip,
+            )
+        )
+        assert authenticated is viewer
+        successful_email_key, ip_key = limiter._keys(successful_email, client_ip)
+        assert successful_email_key not in redis.values
+        assert redis.values[ip_key] == 2
+        assert redis.eval_calls[-1][0] == 2
+
+        assert (
+            _run(
+                authenticate_employee_with_rate_limit(
+                    db,
+                    "sprayed-three@example.test",
+                    "wrong-password",
+                    client_ip=client_ip,
+                )
+            )
+            is None
+        )
+        with pytest.raises(LoginRateLimitExceeded):
+            _run(
+                authenticate_employee_with_rate_limit(
+                    db,
+                    "sprayed-four@example.test",
+                    "wrong-password",
+                    client_ip=client_ip,
+                )
+            )
+
+    assert authenticate.await_count == 4
+
+
+def test_success_reconciliation_removes_one_ip_attempt_without_ttl_extension() -> None:
+    redis = _InMemoryLoginRedis()
+    limiter = LoginAttemptLimiter(redis=redis, max_attempts=5, window_seconds=300)
+    client_ip = "198.51.100.42"
+
+    assert _run(limiter.consume(email="failed@example.test", client_ip=client_ip))
+    _, ip_key = limiter._keys("failed@example.test", client_ip)
+    redis.ttls[ip_key] = 91
+
+    successful_email = "success@example.test"
+    assert _run(limiter.consume(email=successful_email, client_ip=client_ip))
+    successful_email_key, _ = limiter._keys(successful_email, client_ip)
+    assert redis.values[ip_key] == 2
+
+    _run(limiter.reconcile_success(email=successful_email, client_ip=client_ip))
+
+    assert successful_email_key not in redis.values
+    assert redis.values[ip_key] == 1
+    assert redis.ttls[ip_key] == 91
+    assert redis.eval_calls[-1][0] == 2
+
+    # A counter that expires during credential verification must not underflow.
+    later_email = "later-success@example.test"
+    later_email_key, _ = limiter._keys(later_email, client_ip)
+    redis.values[later_email_key] = 1
+    redis.ttls[later_email_key] = 91
+    redis.values.pop(ip_key)
+    redis.ttls.pop(ip_key)
+
+    _run(limiter.reconcile_success(email=later_email, client_ip=client_ip))
+
+    assert later_email_key not in redis.values
+    assert ip_key not in redis.values
+
+
+@pytest.mark.parametrize(
+    ("failed_eval_call", "expected_auth_calls"),
+    ((1, 0), (3, 1)),
+)
+def test_login_rate_limit_redis_errors_fail_closed(
+    failed_eval_call: int, expected_auth_calls: int
+) -> None:
+    redis = _InMemoryLoginRedis(fail_on_eval_calls={failed_eval_call})
+    limiter = LoginAttemptLimiter(redis=redis, max_attempts=5, window_seconds=300)
+    viewer = SimpleNamespace(role="employee", global_role="viewer", is_admin=False)
+    authenticate = AsyncMock(return_value=viewer)
+    db: Any = object()
+
+    with (
+        patch(
+            "cygnus.runtime.services.auth_service.get_login_attempt_limiter",
+            new=AsyncMock(return_value=limiter),
+        ),
+        patch(
+            "cygnus.runtime.services.auth_service.authenticate_employee",
+            new=authenticate,
+        ),
+        pytest.raises(LoginRateLimitUnavailable),
+    ):
+        _run(
+            authenticate_employee_with_rate_limit(
+                db,
+                "viewer@example.test",
+                "correct-password",
+                client_ip="192.0.2.24",
+            )
+        )
+
+    assert authenticate.await_count == expected_auth_calls
 
 
 # ---------------------------------------------------------------------------

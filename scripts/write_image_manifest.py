@@ -55,6 +55,10 @@ def _image_entry(
         raise ValueError(
             f"image {name!r} is missing a required supply-chain artifact path"
         )
+    if signature == certificate:
+        raise ValueError(
+            f"image {name!r} signature and certificate must be distinct artifacts"
+        )
     return {
         "image": name,
         "digest": digest,

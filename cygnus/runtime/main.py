@@ -129,7 +129,7 @@ def create_app(*, app_settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="Cygnus API",
-        description="Enterprise AI Control Center — Knowledge Base & Skill Management",
+        description="Support Knowledge Operating System — Governed Knowledge Control Plane",
         version="0.1.0",
         lifespan=lifespan,
     )
@@ -446,7 +446,7 @@ def create_app(*, app_settings: Settings | None = None) -> FastAPI:
         identity = runtime_identity()
         return {
             "name": "Cygnus",
-            "description": "Enterprise AI Control Center",
+            "description": "Support Knowledge Operating System",
             "version": identity["release"],
             "mcp_endpoint": "/mcp",
             "docs": "/docs",

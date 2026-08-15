@@ -66,3 +66,14 @@ export async function authApi<T = unknown>(path: string, options: RequestOptions
   if (!text) return {} as T
   return JSON.parse(text)
 }
+
+export async function logoutPortalSession(clearAuthState: () => void): Promise<void> {
+  const revocation = authApi('/api/auth/logout', { method: 'POST' })
+  clearToken()
+  clearAuthState()
+  try {
+    await revocation
+  } catch {
+    // The local session stays closed when the revocation request is unreachable.
+  }
+}

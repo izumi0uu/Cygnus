@@ -1,4 +1,4 @@
-# HANDOFF — Cygnus Frontend (rebuilt 2026-06-22; trimmed 2026-06-27; synced 2026-07-26; status refreshed 2026-08-09)
+# HANDOFF — Cygnus Frontend (rebuilt 2026-06-22; trimmed 2026-06-27; synced 2026-07-26; status refreshed 2026-08-15)
 
 > **Frontend-only handoff.** Backend governance/architecture is mentioned only where the
 > frontend depends on it as an API contract. Status reflects the working tree as of this
@@ -24,26 +24,31 @@ drawing numbers, `SEC-*` section codes, tolerance chips. i18n is **zh-first, en 
 
 ## 2. Page inventory (all blueprint unless noted)
 
-| Page | Route | Blueprint | bp-refs | Notes |
-|------|-------|-----------|---------|-------|
-| Overview | `/console` (index) | ✅ | 45 | DWG-01, title block, annotation table, SEC-A dimension lines |
-| ReviewQueue | `/console/queue` | ✅ | 31 | Risk inbox + detail drawer; ticket-pressure command dialogs; CmdButton → PublishPreviewModal |
-| KnowledgeObjects | `/console/objects` | ✅ | 40 | Force graph + **traceability drawer** (projection-aware) |
-| AudiencePublish | `/console/audience` | ✅ | 29 | Audience × risk, action presets |
-| Propagation | `/console/propagation` | ✅ | 29 | Propagation ledger + status lanes (SEC-F) |
-| CoverageDrift | `/console/drift` | ✅ | 16 | Drift watch cards |
-| SourcesEvidence | `/console/sources` | ✅ | 14 | Scoped source-failure facts + durable `MAPPED` / `UNMAPPED` impact projections |
-| RecoveryDetail | `/console/recovery/:commandId` | ✅ | 13 | Recovery window + reality check (dimension lines) |
-| Login | `/login` | ✅ | 20 | DWG-000 access-control sheet, PlotterPanel reveal, bp-cmd submit |
-| Audit | `/console/audit` | ✅ | 8 | SEC-G durable governance transition ledger with scoped phase filters and bounded pagination |
-| PlotterDemo | `/demo/plotter` | ✅ | 8 | Standalone PlotterPanel demo, auth-gated |
-| Mastermind | `/demo/mastermind` | ✅ | 30 | Blueprint game page, auth-gated (engine in `@/game/mastermind`) |
-| Landing | `/` | ❌ (by design) | 0 | Independent dark brand page, framer-motion skiper6 roll, intentionally not blueprint |
+| Page | Route | Blueprint | Notes |
+|------|-------|-----------|-------|
+| Overview | `/console` (index) | Yes | DWG-01, title block, annotation table, SEC-A dimension lines |
+| Copilot | `/console/copilot` | Yes | Governed session bridge query, audience context, answer/evidence trace, feedback |
+| ReviewQueue | `/console/queue` | Yes | Risk inbox + detail drawer; ticket-pressure command dialogs; CmdButton → PublishPreviewModal |
+| KnowledgeObjects | `/console/objects` | Yes | Force graph + **traceability drawer** (projection-aware) |
+| AudiencePublish | `/console/audience` | Yes | Audience × risk, action presets |
+| Propagation | `/console/propagation` | Yes | Propagation ledger + status lanes (SEC-F) |
+| CoverageDrift | `/console/drift` | Yes | Drift watch cards |
+| SourcesEvidence | `/console/sources` | Yes | Source operations plus scoped failure facts and durable impact projections |
+| TicketInsights | `/console/tickets` | Yes | Admin-only resolved-ticket import and pilot funnel |
+| RecoveryDetail | `/console/recovery/:commandId` | Yes | Recovery window + reality check (dimension lines) |
+| Audit | `/console/audit` | Yes | Durable governance transition ledger with scoped phase filters and bounded pagination |
+| EmployeeManagement | `/console/employees` | Yes | Admin-only employee lifecycle and department assignment |
+| RoleManagement | `/console/roles` | Yes | Admin-only fixed-role permission matrix |
+| Settings | `/console/settings` | Yes | Admin-only model selection, provider credentials, and password change |
+| Login | `/login` | Yes | DWG-000 access-control sheet, PlotterPanel reveal, bp-cmd submit |
+| PlotterDemo | `/demo/plotter` | Yes | Standalone PlotterPanel demo, auth-gated |
+| Mastermind | `/demo/mastermind` | Yes | Blueprint game page, auth-gated (engine in `@/game/mastermind`) |
+| Landing | `/` | No, by design | Independent dark brand page, framer-motion skiper6 roll |
 
-13 routed pages total: 2 public (`/`, `/login`); both `/demo` pages and all 9 console
-pages sit behind `RequireAuth` (demos gated in `7ee23eb`). The full drawing set is
-visually consistent: every console surface + Login + Audit + both demos is blueprint.
-Only Landing stays dark-brand on purpose.
+18 routed pages total: 2 public (`/`, `/login`), 2 authenticated demos, and 14
+authenticated console pages. Employee, role, and settings routes use `RequireAdmin`;
+TicketInsights hides its navigation entry and blocks all data effects for non-admin users.
+Every authenticated page uses the blueprint system. Landing remains dark-brand by design.
 
 ## 3. Governance write path (the contract that must stay honest)
 
@@ -127,30 +132,33 @@ the command-center `priority_stack` (read-first by severity via `commandCenterSo
 
 ## 7. Component map
 
-- `components/layout/AppShell.tsx` (419 LOC) — desktop directory/coordinate/title-block shell; below 768px, an accessible one-column shell with modal navigation drawer, compact global controls, and no fixed title-block overlap.
-- `PublishPreviewModal.tsx` (367 LOC) — blast-radius modal (portal); APPLY + propagation link; result panel.
-- `CmdButton.tsx` (57 LOC) — opens PublishPreviewModal for publish-family commands (`PUBLISH_COMMANDS`).
-- `RevisionClouds.tsx` (224 LOC) — see §6; also exports `CloudSummaryButton`.
-- `NotificationBell.tsx` (126 LOC) — bell dropdown: notification list, unread count, click-outside/Escape close, cloud toggle.
-- `PlotterPanel.tsx` (285 LOC) — pen-plotter reveal (see §9, Idea 1; **implemented**).
-- `DimensionLines.tsx` (429 LOC) — caliper-cursor dimension annotations (see §9, Idea 2; **implemented**).
-- `CommandPalette.tsx` (197 LOC) — ⌘K palette: sections + risks + coordinate jump.
-- `charts/` — 14 chart files (pie/context/slice, stat-flow, reveal-clip, motion utils).
-- `mastermind/` — 4 files: `GuessRow`, `Palette`, `Peg`, `ResultOverlay` (framer-motion).
-- `ui/button.tsx`, `Segmented`, `Stat`, `Skeleton` (+`PageSkeleton`), `ThemeToggle`,
-  `LangToggle`, `RequireAuth`.
-- `lib/`: `api.ts` (940 LOC, all fetchers via `authApi`), `auth.tsx`/`authApi.ts`,
-  `vocab.ts`, `notifications.ts`, `theme.tsx`, `zoom.tsx`, `toast.tsx`, `useFocusTrap.ts`, `utils.ts` (`cn`).
-- `game/mastermind.ts` (172 LOC) — framework-agnostic game logic (secret code, feedback, types).
+- `components/layout/AppShell.tsx` — desktop directory/coordinate shell; below 768px,
+  an accessible one-column shell with a modal navigation drawer.
+- `PublishPreviewModal.tsx` — blast-radius preview and durable/rehearsal result panel.
+- `CmdButton.tsx` — opens `PublishPreviewModal` for publish-family commands.
+- `RevisionClouds.tsx` and `NotificationBell.tsx` — persisted inbox presentation and
+  deterministic revision-cloud overlay.
+- `PlotterPanel.tsx` and `DimensionLines.tsx` — pen-plotter reveal and caliper annotations.
+- `CommandPalette.tsx` — keyboard palette for sections, risks, and coordinate jumps.
+- `RequestState.tsx` — shared 401/403/404/5xx/network/request-state classification.
+- `AdminDialog.tsx`, `RequireAuth.tsx`, and `RequireAdmin.tsx` — modal and route boundaries.
+- `charts/` and `mastermind/` — chart primitives and the blueprint game components.
+- `ui/` — shared controls, segmented selectors, stats, and loading skeletons.
+- `lib/api.ts`, `lib/adminApi.ts`, `lib/auth.tsx`, and `lib/authApi.ts` — typed API and
+  identity clients; every request routes through `authApi()`.
+- `game/mastermind.ts` — framework-agnostic game logic.
 
-## 8. Things that are NOT done / known broken
+## 8. Things that are NOT done / known limits
 
-1. **Projection is single-object, single-process** — acceptable only because
-   `persisted:false` is explicit; do not treat projection as a truth source.
-   (Backend storage details are out of scope here.)
-2. **Browser-level verification remains scoped** — APPLY→drawer→projection render and
-   revision-cloud click-outside/5-cap still need dedicated browser proof; the durable audit
-   ledger was browser-verified in CYG-109.
+1. **Explicit rehearsal projection is process-local** — it is keyed per object but remains
+   non-durable. This is acceptable only because `persisted:false, rehearsal:true` is
+   explicit; it must never be treated as publication truth.
+2. **The release browser runner is deliberately non-destructive** —
+   `frontend/scripts/run-browser-certification.mjs` proves the unauthenticated deep-link
+   round trip, admin access across all static console routes, command-palette keyboard
+   behavior, mobile navigation/overflow, screenshots, and browser runtime health against
+   the real target. Durable APPLY/propagation mutations and persisted governance truth stay
+   in the separate production-E2E and persisted-domain certification probes.
 
 ### 8.1 Governed observation truth (CYG-97)
 
@@ -247,30 +255,31 @@ Verified against `AppShell.tsx` + `zoom.tsx` + `CommandPalette.tsx`.
 
 ## 13. API Consumption Status (SPA-facing contract)
 
-Verified against `lib/api.ts`, `lib/auth.tsx`, and `lib/notifications.ts`. Every fetcher
-routes through `authApi()`.
+Verified against `lib/api.ts`, `lib/adminApi.ts`, `lib/auth.tsx`, and
+`lib/notifications.ts`. Every fetcher routes through `authApi()`.
 
-| Endpoint | Fetcher | Consumed by |
-|----------|---------|-------------|
-| `POST /api/auth/login` | — (`auth.tsx`) | Login |
-| `GET /api/auth/me` | — (`auth.tsx`) | auth identity + refresh |
-| `GET /api/command-center` | `fetchCommandCenter` | CommandPalette + Overview |
-| `GET /api/review-intake` | `fetchReviewIntake` | ReviewQueue |
-| `POST /api/review-assignments/{signal_ref}/commands` | `applyReviewAssignmentCommand` | AssignOwnerModal |
-| `GET /api/knowledge-graph` | `fetchKnowledgeGraph` | KnowledgeObjects |
-| `GET /api/traceability/{id}` | `fetchTraceability` | KnowledgeObjects drawer |
-| `GET /api/drift` | `fetchDriftSurface` | CoverageDrift |
-| `GET /api/source-blindness` | `fetchSourceBlindnessSurface` | SourcesEvidence |
-| `GET /api/recovery/overview` | `fetchGovernanceOverview` | Overview |
-| `GET /api/recovery/window/{id}` | `fetchRecoveryWindow` | RecoveryDetail |
-| `GET /api/recovery/downstream-reality-check/{id}` | `fetchDownstreamRealityCheck` | RecoveryDetail |
-| `GET /api/publish-preview` | `fetchPublishPreview` | PublishPreviewModal + AudiencePublish |
-| `POST /api/publish/apply` | `applyPublishAction` | PublishPreviewModal (only SPA publish write caller) |
-| `GET /api/publish-propagation` | `fetchPublishPropagation` | Propagation |
-| `GET /api/notifications` | `fetchNotifications` | NotificationBell + revision clouds |
-| `POST /api/notifications/{id}/read` | `markNotificationRead` | NotificationBell |
-| `POST /api/notifications/read-all` | `markAllNotificationsRead` | NotificationBell |
-| `GET /api/governance/audit` | `fetchGovernanceAudit` | Audit (SEC-G) |
+| Endpoint or family | Frontend owner | Consumed by |
+|--------------------|----------------|-------------|
+| `POST /api/auth/login`, `GET /api/auth/me` | `auth.tsx` | Login + identity refresh |
+| `POST /api/auth/change-password` | `adminApi.ts` | Settings |
+| `GET /api/command-center` | `api.ts` | CommandPalette + Overview |
+| `GET /api/review-intake` | `api.ts` | ReviewQueue |
+| `POST /api/review-assignments/{signal_ref}/commands` | `api.ts` | AssignOwnerModal |
+| `POST /api/governance-signals/{signal_ref}/commands/promote-draft` | `api.ts` | ReviewQueue |
+| `GET /api/knowledge-graph`, `GET /api/traceability/{id}` | `api.ts` | KnowledgeObjects + drawer |
+| `GET /api/drift`, `GET /api/source-blindness` | `api.ts` | CoverageDrift + SourcesEvidence |
+| `GET /api/recovery/*` | `api.ts` | Overview + RecoveryDetail |
+| `GET /api/publish-preview` | `api.ts` | PublishPreviewModal + AudiencePublish |
+| `POST /api/publish/apply` | `api.ts` | PublishPreviewModal; only SPA publish write caller |
+| `GET /api/publish-propagation` | `api.ts` | Propagation |
+| `GET/POST /api/notifications*` | `api.ts` | NotificationBell + revision clouds |
+| `GET /api/governance/audit*` | `api.ts` | Audit list + deep-linked event detail |
+| `GET/POST /api/session-bridge/*` | `api.ts` | Copilot capabilities, query, and feedback |
+| `GET/POST/PATCH /api/sources*` | `api.ts` | SourcesEvidence list, upload/URL, retry, freshness, and plan commands |
+| `GET /api/knowledge-types`, `GET /api/departments` | `api.ts` | SourcesEvidence metadata |
+| `POST /api/governance/ticket-imports`, `GET /api/governance/ticket-pilot` | `api.ts` | TicketInsights |
+| `GET /api/roles/catalog`, `GET/POST/PUT/PATCH /api/employees*` | `adminApi.ts` | Role + employee administration |
+| `GET/POST/PUT /api/settings*` | `adminApi.ts` | Model catalog, model switch, and provider credentials |
 
 ## 14. Governance Loop Status (frontend surfaces)
 
@@ -303,8 +312,10 @@ routes through `authApi()`.
 ## 16. How to Run (frontend)
 
 ```bash
-cd frontend && pnpm dev          # Vite dev server, proxies /api → 127.0.0.1:8077
-cd frontend && pnpm run build    # typecheck + vite build
+cd frontend && npm ci
+npm run dev                         # Vite dev server; /api → 127.0.0.1:8077
+npm run lint && npm test
+npm run build && npm run bundle:check
 ```
 
 Backend boot is out of scope for this handoff. The SPA only needs the `/api` origin

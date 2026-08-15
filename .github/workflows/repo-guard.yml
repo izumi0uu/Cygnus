@@ -39,6 +39,24 @@ jobs:
   repo-quality:
     name: Repo quality
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.6-pg16-trixie@sha256:c8483555ce48101872f888c1df8a895ff689d6c7c7a5f7ac266475f9dfe89e0b
+        env:
+          POSTGRES_DB: cygnus_gate
+          POSTGRES_USER: cygnus
+          POSTGRES_PASSWORD: cygnus_gate
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cygnus -d cygnus_gate"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      CYGNUS_GOVERNANCE_TEST_DATABASE_URL: postgresql+asyncpg://cygnus:cygnus_gate@127.0.0.1:5432/cygnus_governance_test
+      CYGNUS_MIGRATION_TEST_DATABASE_URL: postgresql+asyncpg://cygnus:cygnus_gate@127.0.0.1:5432/cygnus_migration_test
+      CYGNUS_WIKI_IDENTITY_TEST_DATABASE_URL: postgresql+asyncpg://cygnus:cygnus_gate@127.0.0.1:5432/cygnus_wiki_identity_test
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -54,6 +72,13 @@ jobs:
           enable-cache: true
       - name: Install locked dependencies
         run: uv sync --frozen --all-extras
+      - name: Prepare isolated Postgres test databases
+        run: |
+          docker exec "${{ job.services.postgres.id }}" createdb -U cygnus cygnus_governance_test
+          docker exec "${{ job.services.postgres.id }}" createdb -U cygnus cygnus_migration_test
+          docker exec "${{ job.services.postgres.id }}" createdb -U cygnus cygnus_wiki_identity_test
+          DATABASE_URL="$CYGNUS_GOVERNANCE_TEST_DATABASE_URL" uv run alembic upgrade head
+          DATABASE_URL="$CYGNUS_WIKI_IDENTITY_TEST_DATABASE_URL" uv run alembic upgrade head
 
       - name: Run local repo checks
         run: bash scripts/repo_check.sh

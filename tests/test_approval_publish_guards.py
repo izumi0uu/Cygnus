@@ -542,6 +542,7 @@ class ApprovalPublishGuardPostgresTests(unittest.TestCase):
                 # The caller always echoes the preview-time attestation; the
                 # signal's current attestation may drift underneath it.
                 preview_freshness = loaded_signal.freshness
+                preview_object_version = loaded_page.version
 
                 async def apply_with(
                     *,
@@ -565,7 +566,7 @@ class ApprovalPublishGuardPostgresTests(unittest.TestCase):
                         command_id=f"guard-drift-{suffix}-{unique}",
                         action_key=action_key,
                         target_channels=target_channels,
-                        expected_version=loaded_page.version,
+                        expected_version=preview_object_version,
                         reason=f"exercise {suffix} drift",
                     )
                     try:
@@ -663,6 +664,7 @@ class ApprovalPublishGuardPostgresTests(unittest.TestCase):
                 # Lifecycle drift: a preview is invalid after resolution or dismissal.
                 for status in ("resolved", "dismissed"):
                     loaded_signal.status = status
+                    loaded_signal.resolved_at = datetime.now(timezone.utc)
                     await session.flush()
                     assert_conflict(
                         await apply_with(
@@ -674,6 +676,7 @@ class ApprovalPublishGuardPostgresTests(unittest.TestCase):
                         fragment="signal lifecycle drift",
                     )
                 loaded_signal.status = "active"
+                loaded_signal.resolved_at = None
                 await session.flush()
                 # Action drift: apply a different action than was previewed.
                 assert_conflict(

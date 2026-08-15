@@ -35,6 +35,6 @@ case "$ACTION" in
       [ -n "${!variable:-}" ] && ! is_placeholder "${!variable}" || die "$variable must be a non-placeholder external input"
     done
     [ -x "$CYGNUS_INCIDENT_CONTAINMENT_RUNNER" ] || die "CYGNUS_INCIDENT_CONTAINMENT_RUNNER must name an executable protected-runner command"
-    exec "$CYGNUS_INCIDENT_CONTAINMENT_RUNNER" --release "$RELEASE" --approval-ref "$CYGNUS_INCIDENT_APPROVAL_REF" --environment-file "$DEPLOY_DIR/.env.prod"
+    exec "$CYGNUS_INCIDENT_CONTAINMENT_RUNNER" --release "$RELEASE" --approval-ref "$CYGNUS_INCIDENT_APPROVAL_REF" --environment-file "$PROD_ENV_FILE"
     ;;
 esac

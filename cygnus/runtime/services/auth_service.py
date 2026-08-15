@@ -8,7 +8,7 @@ Ownership:
 Handles:
   - Password hashing (bcrypt)
   - JWT token generation and verification
-  - Login / logout (stateless JWT)
+  - Login / logout with durable employee session-version revocation
   - Role-based access (admin vs employee)
   - Scoped permission checks (v2: resource:action:scope format)
 """
@@ -24,7 +24,7 @@ import bcrypt
 import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -77,12 +77,20 @@ _DUMMY_PASSWORD_HASH = hash_password("cygnus-invalid-login-password")
 # ---------------------------------------------------------------------------
 
 
-def create_access_token(employee_id: str, role: str, name: str) -> str:
-    """Create a signed JWT token."""
+def create_access_token(
+    employee_id: str,
+    role: str,
+    name: str,
+    session_version: int,
+) -> str:
+    """Create a signed portal JWT bound to the employee's current session version."""
+    if type(session_version) is not int or session_version < 0:
+        raise ValueError("session_version must be a non-negative integer")
     payload = {
         "sub": employee_id,
         "role": role,
         "name": name,
+        "session_version": session_version,
         "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRE_HOURS),
         "iat": datetime.now(timezone.utc),
     }
@@ -199,10 +207,31 @@ end
 return 1
 """
 
+_RECONCILE_LOGIN_SUCCESS_SCRIPT = """
+local ip_value = redis.call('GET', KEYS[2])
+local ip_count = nil
+if ip_value then
+    ip_count = tonumber(ip_value)
+    if not ip_count then
+        return redis.error_reply('login IP counter is not an integer')
+    end
+end
+
+redis.call('DEL', KEYS[1])
+if not ip_count then
+    return 0
+end
+if ip_count <= 1 then
+    redis.call('DEL', KEYS[2])
+    return 0
+end
+return redis.call('DECR', KEYS[2])
+"""
+
 
 @dataclass(frozen=True)
 class LoginAttemptLimiter:
-    """Atomically consume bounded login budgets from the shared Redis store."""
+    """Enforce bounded login-attempt budgets in the shared Redis store."""
 
     redis: Any
     max_attempts: int
@@ -236,10 +265,16 @@ class LoginAttemptLimiter:
             raise LoginRateLimitUnavailable() from exc
         return True
 
-    async def clear(self, *, email: str, client_ip: str) -> None:
-        """Clear the shared budgets only after successful authentication."""
+    async def reconcile_success(self, *, email: str, client_ip: str) -> None:
+        """Atomically clear the email budget and remove this attempt from the IP budget."""
         try:
-            await self.redis.delete(*self._keys(email, client_ip))
+            email_key, ip_key = self._keys(email, client_ip)
+            await self.redis.eval(
+                _RECONCILE_LOGIN_SUCCESS_SCRIPT,
+                2,
+                email_key,
+                ip_key,
+            )
         except Exception as exc:
             raise LoginRateLimitUnavailable() from exc
 
@@ -274,7 +309,7 @@ async def authenticate_employee_with_rate_limit(
 
     employee = await authenticate_employee(db, email, password)
     if employee is not None:
-        await limiter.clear(email=email, client_ip=client_ip)
+        await limiter.reconcile_success(email=email, client_ip=client_ip)
     return employee
 
 
@@ -316,6 +351,39 @@ def is_privileged_employee(employee: Employee) -> bool:
     return employee.role == "admin" or employee.global_role == "admin"
 
 
+async def advance_employee_session_version(
+    db: AsyncSession,
+    employee_id: uuid.UUID,
+    *,
+    password_hash: str | None = None,
+    expected_password_hash: str | None = None,
+) -> int | None:
+    """Atomically revoke portal JWTs, optionally replacing the password hash.
+
+    The column-relative SQL increment prevents concurrent revocations from
+    overwriting one another. Self-service password changes may also supply the
+    hash they verified so a concurrent administrative reset cannot be undone by
+    a request that authenticated with the now-stale password.
+    """
+    if expected_password_hash is not None and password_hash is None:
+        raise ValueError("expected_password_hash requires a replacement hash")
+
+    stmt = update(Employee).where(Employee.id == employee_id)
+    if expected_password_hash is not None:
+        stmt = stmt.where(Employee.password_hash == expected_password_hash)
+    stmt = stmt.values(session_version=Employee.session_version + 1)
+    if password_hash is not None:
+        stmt = stmt.values(password_hash=password_hash)
+
+    result = await db.execute(
+        stmt.returning(Employee.session_version).execution_options(
+            synchronize_session=False
+        )
+    )
+    version = result.scalar_one_or_none()
+    return int(version) if version is not None else None
+
+
 # ---------------------------------------------------------------------------
 # FastAPI dependencies
 # ---------------------------------------------------------------------------
@@ -342,6 +410,20 @@ async def get_current_user(
             detail="Invalid or expired token",
         )
 
+    subject = payload.get("sub")
+    if not isinstance(subject, str):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        )
+    try:
+        employee_id = uuid.UUID(subject)
+    except (AttributeError, TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        )
+
     result = await db.execute(
         select(Employee)
         .options(
@@ -349,13 +431,23 @@ async def get_current_user(
                 EmployeeDepartment.department
             ),
         )
-        .where(Employee.id == uuid.UUID(payload["sub"]))
+        .where(Employee.id == employee_id)
     )
     employee = result.scalar_one_or_none()
     if not employee or not employee.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Account not found or deactivated",
+        )
+
+    token_session_version = payload.get("session_version")
+    if (
+        type(token_session_version) is not int
+        or token_session_version != employee.session_version
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
         )
 
     # Ensure default global_role is populated

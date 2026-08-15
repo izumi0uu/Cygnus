@@ -50,6 +50,7 @@ def test_backend_app_factory_exposes_boot_entry_with_settings_state() -> None:
     assert "/api/publish/apply" in openapi_paths
     assert "/api/auth/login" in openapi_paths
     assert "/api/auth/me" in openapi_paths
+    assert "/api/auth/logout" in openapi_paths
 
 
 def test_module_level_app_uses_same_boot_contract() -> None:

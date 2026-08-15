@@ -15,6 +15,7 @@ from cygnus.substrate.source_language import DEFAULT_SOURCE_LANGUAGE
 from pgvector.sqlalchemy import HALFVEC, Vector
 from sqlalchemy import (
     Boolean,
+    BigInteger,
     CheckConstraint,
     DateTime,
     Float,
@@ -1019,6 +1020,13 @@ class Employee(Base):
         String(500),
         comment="bcrypt hash of password",
     )
+    session_version: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+        comment="Monotonic portal JWT revocation version; independent of MCP tokens",
+    )
     role: Mapped[str] = mapped_column(
         String(20),
         default="employee",
@@ -1073,6 +1081,10 @@ class Employee(Base):
     )
 
     __table_args__ = (
+        CheckConstraint(
+            "session_version >= 0",
+            name="ck_employees_session_version_nonnegative",
+        ),
         Index("ix_employees_mcp_token", "mcp_token"),
         Index(
             "ix_employees_mcp_token_hash",

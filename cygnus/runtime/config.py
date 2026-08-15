@@ -130,6 +130,36 @@ class Settings(BaseSettings):
         default=64,
         description="Maximum element nesting depth for XML parsed from source archives.",
     )
+    max_source_pdf_pages: int = Field(
+        default=500,
+        ge=1,
+        description="Maximum number of pages allowed in a PDF source.",
+    )
+    max_source_pdf_render_pixels: int = Field(
+        default=100_000_000,
+        ge=1,
+        description="Maximum aggregate pixels rendered for PDF OCR fallback.",
+    )
+    max_source_document_images: int = Field(
+        default=1_000,
+        ge=1,
+        description="Maximum embedded images allowed in one source document.",
+    )
+    max_source_document_image_pixels: int = Field(
+        default=100_000_000,
+        ge=1,
+        description="Maximum aggregate decoded pixels across embedded source images.",
+    )
+    max_source_spreadsheet_rows: int = Field(
+        default=100_000,
+        ge=1,
+        description="Maximum aggregate structural rows in a spreadsheet source.",
+    )
+    max_source_spreadsheet_cells: int = Field(
+        default=1_000_000,
+        ge=1,
+        description="Maximum aggregate materialized cells in a spreadsheet source.",
+    )
     max_source_url_fetch_seconds: float = Field(
         default=30.0,
         description="Per-hop timeout (seconds) for public source URL fetches.",
@@ -305,6 +335,19 @@ class Settings(BaseSettings):
     )
 
     @property
+    def max_source_expanded_payload_bytes(self) -> int:
+        """Smallest configured ingress/archive byte ceiling for parser output."""
+        return min(
+            limit
+            for limit in (
+                self.max_source_upload_bytes,
+                self.max_source_url_bytes,
+                self.max_source_archive_bytes,
+            )
+            if limit > 0
+        )
+
+    @property
     def cors_origin_list(self) -> list[str]:
         """Parse CORS_ORIGINS into a list."""
         value = self.cors_origins.strip()
@@ -422,6 +465,29 @@ class Settings(BaseSettings):
                 return False
         return True
 
+    def _delivery_targets_are_safe(self) -> bool:
+        try:
+            targets = self.delivery_targets
+        except ValueError:
+            return False
+        if not targets:
+            return False
+        for raw_url in targets.values():
+            try:
+                parsed = urlsplit(raw_url)
+            except ValueError:
+                return False
+            if (
+                parsed.scheme != "https"
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.query
+                or parsed.fragment
+            ):
+                return False
+        return True
+
     @classmethod
     def _trusted_proxy_configuration_is_safe(cls, value: object) -> bool:
         """Validate explicit, non-global proxy peers before honoring XFF."""
@@ -499,6 +565,14 @@ class Settings(BaseSettings):
         ):
             problems.append(
                 "REDIS_PASSWORD is missing, default, or too weak for production"
+            )
+        if self._secret_is_weak(self.delivery_hmac_secret):
+            problems.append(
+                "DELIVERY_HMAC_SECRET is missing, default, or too weak for production"
+            )
+        if not self._delivery_targets_are_safe():
+            problems.append(
+                "DELIVERY_TARGETS_JSON must contain explicit credential-free HTTPS targets"
             )
         if not self._trusted_proxy_configuration_is_safe(self.trusted_proxy_ips):
             problems.append(

@@ -426,7 +426,7 @@ class WikiPageIdentityPostgresTests(unittest.TestCase):
                     )
                 groups = cast(
                     list[tuple[str, str, str, str, int]],
-                    (await session.connection()).run_sync(
+                    await (await session.connection()).run_sync(
                         lambda conn: module._duplicate_identity_groups(
                             conn, "wiki_pages_identity_probe"
                         )

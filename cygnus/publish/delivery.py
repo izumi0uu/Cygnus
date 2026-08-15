@@ -1151,6 +1151,22 @@ async def _execute_delivery_claim(
                     correlation_id=outcome.ack_correlation_id,
                     traceparent=outcome.ack_traceparent,
                 )
+                synced_delivery = await session.get(
+                    GovernancePropagationDelivery, delivery_id
+                )
+                if synced_delivery is None:
+                    raise DeliveryReceiptNotFound(
+                        f"delivery_id={delivery_id} disappeared after acknowledgment"
+                    )
+                synced_delivery.attempts = attempt
+                _append_attempt_evidence(
+                    synced_delivery,
+                    attempt=attempt,
+                    outcome="synced",
+                    status_code=outcome.status_code,
+                    last_error=None,
+                    occurred_at=occurred_at,
+                )
                 await session.commit()
             except Exception:
                 await session.rollback()

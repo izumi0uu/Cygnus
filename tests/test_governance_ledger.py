@@ -22,15 +22,12 @@ from cygnus.domain import AudienceFilter, Visibility
 from cygnus.domain.objects import governed_object_ref
 from cygnus.governance import (
     AudienceBindingCreate,
-    AudienceBindingLifecycle,
     GovernanceEventType,
     GovernanceLedgerConflict,
     append_draft_event,
     approval_digest,
     create_audience_binding,
-    list_audience_bindings,
     list_draft_events,
-    publish_scope_digest,
 )
 from cygnus.governance.ledger import record_draft_update
 from cygnus.publish import (
@@ -41,6 +38,7 @@ from cygnus.publish import (
     PropagationUpdateCommand,
     acknowledge_propagation_delivery,
     apply_durable_publish,
+    durable_publish_command_for_signal,
     get_publication,
     list_propagation_deliveries,
     list_publication_propagations,
@@ -529,21 +527,6 @@ class GovernanceLedgerPostgresTests(unittest.TestCase):
                 self.assertIsNotNone(loaded_signal)
                 if loaded_draft is None or loaded_page is None or loaded_signal is None:
                     raise AssertionError("guarded publish fixtures unexpectedly absent")
-                sources = (
-                    (
-                        await session.execute(
-                            select(Source).where(Source.id == source_id)
-                        )
-                    )
-                    .scalars()
-                    .all()
-                )
-                binding_rows = await list_audience_bindings(
-                    session,
-                    page_id=loaded_page.id,
-                    object_ref=governed_object_ref(loaded_page.id),
-                    lifecycle_state=AudienceBindingLifecycle.ACTIVE,
-                )
                 canonical_digest = approval_digest(
                     draft=loaded_draft,
                     page=loaded_page,
@@ -556,30 +539,27 @@ class GovernanceLedgerPostgresTests(unittest.TestCase):
                     canonical_digest,
                     approval.payload["approval_digest"],
                 )
-                scope = publish_scope_digest(
-                    approval_ref=approval.id,
-                    approval_digest_value=canonical_digest,
-                    object_version=loaded_page.version,
-                    binding_rows=binding_rows,
-                    source_state=((source.id, source.status) for source in sources),
-                    signal_freshness=loaded_signal.freshness,
-                    signal_id=loaded_signal.id,
-                    signal_status=loaded_signal.status,
+                envelope = await durable_publish_command_for_signal(
+                    session,
+                    signal=loaded_signal,
                     action_key="publish",
-                    target_channels=("agent-copilot", "internal-search"),
                 )
+                self.assertIsNotNone(envelope)
+                if envelope is None:
+                    raise AssertionError("durable publish command unexpectedly absent")
+                self.assertEqual(envelope["approval_digest"], canonical_digest)
                 command = DurablePublishCommand(
-                    draft_id=draft_id,
-                    approval_ref=approval.id,
-                    approval_digest=canonical_digest,
-                    scope_digest=scope,
-                    signal_id=loaded_signal.id,
-                    signal_freshness=loaded_signal.freshness,
+                    draft_id=uuid.UUID(cast(str, envelope["draft_id"])),
+                    approval_ref=uuid.UUID(cast(str, envelope["approval_ref"])),
+                    approval_digest=cast(str, envelope["approval_digest"]),
+                    scope_digest=cast(str, envelope["scope_digest"]),
+                    signal_id=uuid.UUID(cast(str, envelope["signal_id"])),
+                    signal_freshness=cast(str, envelope["signal_freshness"]),
                     command_id=f"publish-{unique}",
-                    action_key="publish",
-                    target_channels=("agent-copilot", "internal-search"),
-                    expected_version=loaded_page.version,
-                    reason="approved evidence and internal audience",
+                    action_key=cast(str, envelope["action_key"]),
+                    target_channels=tuple(cast(list[str], envelope["target_channels"])),
+                    expected_version=cast(int, envelope["expected_version"]),
+                    reason=cast(str, envelope["reason"]),
                 )
                 result = await apply_durable_publish(
                     session,
@@ -627,6 +607,8 @@ class GovernanceLedgerPostgresTests(unittest.TestCase):
                 target = next(
                     item for item in propagations if item.surface_id == "agent-copilot"
                 )
+                target_id = target.id
+                propagation_ids = tuple(item.id for item in propagations)
                 forbidden_update = PropagationUpdateCommand(
                     publication_id=publication_id,
                     surface_id=target.surface_id,
@@ -645,11 +627,9 @@ class GovernanceLedgerPostgresTests(unittest.TestCase):
                     )
                 await session.rollback()
 
-                deliveries = await list_propagation_deliveries(
-                    session, tuple(item.id for item in propagations)
-                )
+                deliveries = await list_propagation_deliveries(session, propagation_ids)
                 delivery = next(
-                    item for item in deliveries if item.propagation_id == target.id
+                    item for item in deliveries if item.propagation_id == target_id
                 )
                 ack_payload = {
                     "publication_id": str(delivery.publication_id),

@@ -37,7 +37,11 @@ class ImageGateTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
-    def manifest(self) -> dict[str, object]:
+    def manifest(
+        self,
+        *,
+        frontend_signature: str = "production/signatures/frontend.sig",
+    ) -> dict[str, object]:
         return writer.build_manifest(
             git_sha="a" * 40,
             git_ref="v1.0.0",
@@ -55,7 +59,7 @@ class ImageGateTests(unittest.TestCase):
             frontend_image="ghcr.io/example/cygnus/frontend:rc",
             frontend_digest=DIGEST,
             sbom_frontend="production/sboms/frontend.json",
-            signature_frontend="production/signatures/frontend.sig",
+            signature_frontend=frontend_signature,
             certificate_frontend="production/signatures/frontend.crt",
             verification_frontend="production/signatures/frontend.verify.json",
             provenance_frontend="production/provenance/frontend.json",
@@ -102,6 +106,12 @@ class ImageGateTests(unittest.TestCase):
         self.materialize(manifest)
         result = gate.validate_manifest(manifest, repo_root=self.root)
         self.assertTrue(result["ok"], result["failures"])
+
+    def test_manifest_rejects_aliased_signature_and_certificate(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must be distinct artifacts"):
+            self.manifest(
+                frontend_signature="production/signatures/frontend.crt",
+            )
 
     def test_unbound_provenance_blocks(self) -> None:
         manifest = self.manifest()

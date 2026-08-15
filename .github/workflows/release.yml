@@ -15,6 +15,11 @@ on:
         description: 'Approved immutable release version (for example 0.2.0)'
         required: true
         type: string
+      deploy_production:
+        description: 'After certification, deploy to the protected Production V1 host'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -54,6 +59,9 @@ jobs:
           --health-retries 20
     env:
       CYGNUS_GATE_DATABASE_URL: postgresql+asyncpg://cygnus:cygnus_gate@127.0.0.1:5432/cygnus_gate
+      CYGNUS_GOVERNANCE_TEST_DATABASE_URL: postgresql+asyncpg://cygnus:cygnus_gate@127.0.0.1:5432/cygnus_governance_test
+      CYGNUS_MIGRATION_TEST_DATABASE_URL: postgresql+asyncpg://cygnus:cygnus_gate@127.0.0.1:5432/cygnus_migration_test
+      CYGNUS_WIKI_IDENTITY_TEST_DATABASE_URL: postgresql+asyncpg://cygnus:cygnus_gate@127.0.0.1:5432/cygnus_wiki_identity_test
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -64,6 +72,13 @@ jobs:
           enable-cache: true
       - name: Install full locked dependencies
         run: uv sync --frozen --all-extras
+      - name: Prepare isolated Postgres test databases
+        run: |
+          docker exec "${{ job.services.postgres.id }}" createdb -U cygnus cygnus_governance_test
+          docker exec "${{ job.services.postgres.id }}" createdb -U cygnus cygnus_migration_test
+          docker exec "${{ job.services.postgres.id }}" createdb -U cygnus cygnus_wiki_identity_test
+          DATABASE_URL="$CYGNUS_GOVERNANCE_TEST_DATABASE_URL" uv run alembic upgrade head
+          DATABASE_URL="$CYGNUS_WIKI_IDENTITY_TEST_DATABASE_URL" uv run alembic upgrade head
       - name: Lint and type check
         run: |
           uv run ruff check .
@@ -299,7 +314,7 @@ jobs:
         run: |
           python3 scripts/write_image_manifest.py --git-sha "$GIT_SHA" --git-ref "$GIT_REF" --version "$VERSION" --created "$BUILD_DATE" --alembic-head "$ALEMBIC_HEAD" \
             --backend-image "$STAGING_BACKEND" --backend-digest "$BACKEND_DIGEST" --sbom-backend production/sboms/backend.spdx.json --signature-backend production/signatures/backend.sig --certificate-backend production/signatures/backend.crt --verification-backend production/signatures/backend.verify.json --scan-backend production/scans/backend-trivy.json --provenance-backend production/provenance/backend.provenance.json \
-            --frontend-image "$STAGING_FRONTEND" --frontend-digest "$FRONTEND_DIGEST" --sbom-frontend production/sboms/frontend.spdx.json --signature-frontend production/signatures/frontend.crt --certificate-frontend production/signatures/frontend.crt --verification-frontend production/signatures/frontend.verify.json --scan-frontend production/scans/frontend-trivy.json --provenance-frontend production/provenance/frontend.provenance.json --out production/image-manifest.json
+            --frontend-image "$STAGING_FRONTEND" --frontend-digest "$FRONTEND_DIGEST" --sbom-frontend production/sboms/frontend.spdx.json --signature-frontend production/signatures/frontend.sig --certificate-frontend production/signatures/frontend.crt --verification-frontend production/signatures/frontend.verify.json --scan-frontend production/scans/frontend-trivy.json --provenance-frontend production/provenance/frontend.provenance.json --out production/image-manifest.json
       - name: Verify supply-chain manifest and write evidence
         run: |
           set -euo pipefail
@@ -322,14 +337,19 @@ jobs:
     timeout-minutes: 120
     permissions:
       contents: read
+      packages: read
     env:
-      CYGNUS_RELEASE: ${{ vars.CYGNUS_RELEASE }}
-      CYGNUS_PRODUCTION_ENV_FILE: ${{ vars.CYGNUS_PRODUCTION_ENV_FILE }}
-      CYGNUS_RELEASE_METADATA_FILE: ${{ vars.CYGNUS_RELEASE_METADATA_FILE }}
-      CYGNUS_PRODUCTION_E2E_RUNNER: ${{ vars.CYGNUS_PRODUCTION_E2E_RUNNER }}
-      CYGNUS_BROWSER_E2E_RUNNER: ${{ vars.CYGNUS_BROWSER_E2E_RUNNER }}
-      CYGNUS_SECURITY_FAILURE_INJECTION_RUNNER: ${{ vars.CYGNUS_SECURITY_FAILURE_INJECTION_RUNNER }}
-      CYGNUS_PERSISTED_DOMAIN_EVAL_RUNNER: ${{ vars.CYGNUS_PERSISTED_DOMAIN_EVAL_RUNNER }}
+      CYGNUS_RELEASE: ${{ inputs.version || github.ref_name }}
+      CYGNUS_PRODUCTION_ENV_B64: ${{ secrets.CYGNUS_PRODUCTION_ENV_B64 }}
+      CYGNUS_PRODUCTION_INPUTS_TEMPLATE_B64: ${{ vars.CYGNUS_PRODUCTION_INPUTS_TEMPLATE_B64 }}
+      CYGNUS_ALERT_THRESHOLDS_B64: ${{ vars.CYGNUS_ALERT_THRESHOLDS_B64 }}
+      CYGNUS_CAPACITY_THRESHOLDS_B64: ${{ vars.CYGNUS_CAPACITY_THRESHOLDS_B64 }}
+      CYGNUS_CAPACITY_TARGETS_B64: ${{ vars.CYGNUS_CAPACITY_TARGETS_B64 }}
+      CYGNUS_PRODUCTION_E2E_RUNNER: ${{ github.workspace }}/scripts/prod/run-production-e2e.sh
+      CYGNUS_BROWSER_E2E_RUNNER: ${{ github.workspace }}/frontend/scripts/run-browser-certification.mjs
+      CYGNUS_SECURITY_FAILURE_INJECTION_RUNNER: ${{ github.workspace }}/scripts/prod/run-security-certification.sh
+      CYGNUS_PERSISTED_DOMAIN_EVAL_RUNNER: ${{ github.workspace }}/scripts/prod/run-persisted-domain-eval.sh
+      CYGNUS_OPERATOR_WORK_DIR: ${{ runner.temp }}/cygnus-operator
       CYGNUS_CERTIFICATION_ARTIFACT_DIR: ${{ github.workspace }}/production/evidence
       CYGNUS_EXPECTED_GIT_SHA: ${{ github.sha }}
       CYGNUS_EXPECTED_BACKEND_IMAGE: ${{ needs.build-staging-images.outputs.backend_ref }}
@@ -338,23 +358,129 @@ jobs:
     steps:
       - name: Checkout certification source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Log in to ghcr.io
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Install uv
         uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
       - name: Download candidate build metadata
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: release-build-metadata
           path: production
+      - name: Materialize protected certification inputs
+        run: |
+          set -euo pipefail
+          python3 scripts/prod/materialize-certification-inputs.py \
+            --output-dir "$RUNNER_TEMP/cygnus-certification-inputs" >> "$GITHUB_ENV"
+      - name: Bind approved production policy to candidate release
+        run: |
+          set -euo pipefail
+          metadata="$GITHUB_WORKSPACE/deploy/releases/$CYGNUS_RELEASE.env"
+          bound_inputs="$RUNNER_TEMP/cygnus-release/$CYGNUS_RELEASE.production-inputs.json"
+          python3 scripts/prod/write-release-env.py "$CYGNUS_RELEASE" \
+            --manifest production/image-manifest.json --force
+          python3 scripts/prod/bind-production-inputs.py \
+            --template "$CYGNUS_PRODUCTION_INPUTS_TEMPLATE_FILE" \
+            --release-metadata "$metadata" --out "$bound_inputs" --force
+          echo "CYGNUS_RELEASE_METADATA_FILE=$metadata" >> "$GITHUB_ENV"
+          echo "CYGNUS_PRODUCTION_INPUTS_FILE=$bound_inputs" >> "$GITHUB_ENV"
       - name: Install locked certification dependencies
         run: uv sync --frozen --all-extras
+      - name: Install locked browser certification dependencies
+        run: |
+          npm ci --prefix frontend --no-audit --no-fund
+          npm --prefix frontend exec -- playwright install chromium
+      - name: Verify protected runner native tools
+        run: |
+          set -euo pipefail
+          for executable in docker curl openssl age pg_dump pg_restore; do
+            command -v "$executable" >/dev/null || { echo "missing required runner tool: $executable" >&2; exit 1; }
+          done
+          docker compose version
+      - name: Generate isolated backup key material
+        run: |
+          set -euo pipefail
+          key_dir="$RUNNER_TEMP/cygnus-certification-keys"
+          mkdir -p "$CYGNUS_OPERATOR_WORK_DIR"
+          chmod 700 "$CYGNUS_OPERATOR_WORK_DIR"
+          mkdir -p "$key_dir"
+          chmod 700 "$key_dir"
+          age-keygen -o "$key_dir/age-identity.txt" >/dev/null 2>&1
+          age_recipient="$(age-keygen -y "$key_dir/age-identity.txt")"
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$key_dir/signing-key.pem" >/dev/null 2>&1
+          openssl pkey -in "$key_dir/signing-key.pem" -pubout -out "$key_dir/signing-public.pem" >/dev/null 2>&1
+          source scripts/prod/lib.sh
+          load_env_file "$CYGNUS_PRODUCTION_ENV_FILE"
+          KEY_MATERIAL_FILE="$key_dir/runtime-key-material.json" python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path(os.environ["KEY_MATERIAL_FILE"])
+          path.write_text(json.dumps({"runtime.secret_key": os.environ["SECRET_KEY"], "runtime.mcp_token_pepper": os.environ["MCP_TOKEN_PEPPER"]}) + "\n", encoding="utf-8")
+          path.chmod(0o600)
+          PY
+          cat >> "$CYGNUS_PRODUCTION_ENV_FILE" <<EOF
+          CYGNUS_TLS_CERT_FILE=$RUNNER_TEMP/cygnus-certification-pki/server.crt
+          CYGNUS_TLS_KEY_FILE=$RUNNER_TEMP/cygnus-certification-pki/server.key
+          CYGNUS_BACKUP_OUTPUT_BASE=$CYGNUS_OPERATOR_WORK_DIR/$CYGNUS_RELEASE/backups
+          CYGNUS_BACKUP_AGE_RECIPIENT=$age_recipient
+          CYGNUS_BACKUP_AGE_IDENTITY_FILE=$key_dir/age-identity.txt
+          CYGNUS_BACKUP_SIGNING_KEY_FILE=$key_dir/signing-key.pem
+          CYGNUS_BACKUP_SIGNING_PUBLIC_KEY_FILE=$key_dir/signing-public.pem
+          CYGNUS_BACKUP_KEY_MATERIAL_FILE=$key_dir/runtime-key-material.json
+          CYGNUS_DRILL_COMPOSE_FILE=$GITHUB_WORKSPACE/deploy/docker-compose.drill.yml
+          CYGNUS_DRILL_COMPOSE_ENV_FILE=$CYGNUS_PRODUCTION_ENV_FILE
+          CYGNUS_DRILL_COMPOSE_PROJECT_DIRECTORY=$GITHUB_WORKSPACE
+          EOF
+          chmod 600 "$CYGNUS_PRODUCTION_ENV_FILE" "$key_dir"/*
+      - name: Start isolated candidate certification stack
+        run: |
+          set -euo pipefail
+          scripts/prod/certification-stack.sh up --release "$CYGNUS_RELEASE"
+          origin="$(scripts/prod/certification-stack.sh origin --release "$CYGNUS_RELEASE")"
+          echo "CYGNUS_CERTIFICATION_TARGET_ORIGIN=$origin" >> "$GITHUB_ENV"
+          echo "CYGNUS_BROWSER_BASE_URL=$origin" >> "$GITHUB_ENV"
+          echo "CURL_CA_BUNDLE=$RUNNER_TEMP/cygnus-certification-pki/server.crt" >> "$GITHUB_ENV"
+          echo "SSL_CERT_FILE=$RUNNER_TEMP/cygnus-certification-pki/server.crt" >> "$GITHUB_ENV"
+          source scripts/prod/lib.sh
+          load_env_file "$CYGNUS_PRODUCTION_ENV_FILE"
+          uv run python scripts/prod/certification-fault-controller.py \
+            --stack "$GITHUB_WORKSPACE/scripts/prod/certification-stack.sh" \
+            --release "$CYGNUS_RELEASE" --origin "$origin" \
+            --ca-file "$RUNNER_TEMP/cygnus-certification-pki/server.crt" \
+            --receipt-path "$CYGNUS_OPERATOR_WORK_DIR/$CYGNUS_RELEASE/certification/governance-smoke.json" \
+            --redis-port "${CYGNUS_CERTIFICATION_REDIS_PORT:-16379}" \
+            >"${RUNNER_TEMP}/cygnus-certification-fault-controller.log" 2>&1 &
+          fault_controller_pid=$!
+          sleep 1
+          kill -0 "$fault_controller_pid"
+          echo "CYGNUS_CERTIFICATION_FAULT_CONTROLLER_PID=$fault_controller_pid" >> "$GITHUB_ENV"
       - name: Run native capacity/browser/security/truth certification
         run: scripts/run_live_production_certification.sh
       - name: Run native encrypted backup and isolated restore drill
         run: scripts/prod/backup_restore_drill.sh
+      - name: Tear down isolated candidate certification stack
+        if: ${{ always() }}
+        run: |
+          if [ -n "${CYGNUS_CERTIFICATION_FAULT_CONTROLLER_PID:-}" ]; then
+            kill "$CYGNUS_CERTIFICATION_FAULT_CONTROLLER_PID" 2>/dev/null || true
+            wait "$CYGNUS_CERTIFICATION_FAULT_CONTROLLER_PID" 2>/dev/null || true
+          fi
+          scripts/prod/certification-stack.sh down --release "$CYGNUS_RELEASE"
       - name: Upload protected live certification evidence
+        if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: release-live-certification
@@ -404,6 +530,21 @@ jobs:
           set -euo pipefail
           docker buildx imagetools create --tag "${BACKEND_IMAGE}:${VERSION}" "$BACKEND_REF"
           docker buildx imagetools create --tag "${FRONTEND_IMAGE}:${VERSION}" "$FRONTEND_REF"
+      - name: Compile promoted immutable deployment contract
+        run: |
+          set -euo pipefail
+          python3 scripts/prod/write-release-env.py "$VERSION" --manifest production/image-manifest.json --force
+          cp production/evidence/cygnus.production-inputs.bound.json \
+            "deploy/releases/$VERSION.production-inputs.json"
+      - name: Upload promoted deployment contract
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: promoted-release
+          path: |
+            deploy/releases/${{ env.VERSION }}.env
+            deploy/releases/${{ env.VERSION }}.production-inputs.json
+          retention-days: 90
+          if-no-files-found: error
       - name: Upload complete release evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -411,3 +552,92 @@ jobs:
           path: production/
           retention-days: 90
           if-no-files-found: error
+
+  deploy-production:
+    if: ${{ github.event_name == 'push' || inputs.deploy_production == true }}
+    name: Deploy exact promoted release to Production V1
+    runs-on: [self-hosted, cygnus-production-deploy]
+    needs: [build-staging-images, live-production-certification, promote-release]
+    environment: production
+    concurrency:
+      group: cygnus-production-deployment
+      cancel-in-progress: false
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    env:
+      RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
+      CYGNUS_DEPLOY_IDENTITY: ${{ vars.CYGNUS_DEPLOY_IDENTITY }}
+      CYGNUS_DEPLOY_HOSTNAME: ${{ vars.CYGNUS_DEPLOY_HOSTNAME }}
+      CYGNUS_PRODUCTION_ENV_FILE: ${{ vars.CYGNUS_PRODUCTION_ENV_FILE }}
+      CYGNUS_DEPLOY_RELEASES_DIR: ${{ vars.CYGNUS_DEPLOY_RELEASES_DIR }}
+      CYGNUS_DEPLOY_CHECKOUTS_DIR: ${{ vars.CYGNUS_DEPLOY_CHECKOUTS_DIR }}
+      CYGNUS_DEPLOY_STATE_FILE: ${{ vars.CYGNUS_DEPLOY_STATE_FILE }}
+      CYGNUS_ACTIVE_CHECKOUT_LINK: ${{ vars.CYGNUS_ACTIVE_CHECKOUT_LINK }}
+      CYGNUS_OPERATOR_WORK_DIR: ${{ vars.CYGNUS_OPERATOR_WORK_DIR }}
+    steps:
+      - name: Checkout exact promoted release source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+      - name: Download promoted release metadata
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: promoted-release
+          path: ${{ runner.temp }}/cygnus-release
+      - name: Install and deploy exact promoted release
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(
+            RELEASE_VERSION CYGNUS_DEPLOY_IDENTITY CYGNUS_DEPLOY_HOSTNAME
+            CYGNUS_PRODUCTION_ENV_FILE CYGNUS_DEPLOY_RELEASES_DIR
+            CYGNUS_DEPLOY_CHECKOUTS_DIR CYGNUS_DEPLOY_STATE_FILE
+            CYGNUS_ACTIVE_CHECKOUT_LINK CYGNUS_OPERATOR_WORK_DIR
+          )
+          for name in "${required[@]}"; do
+            [ -n "${!name:-}" ] || { echo "missing protected deployment input: $name" >&2; exit 1; }
+          done
+          [ "$(id -un)" = "$CYGNUS_DEPLOY_IDENTITY" ] || { echo "unexpected deployment identity" >&2; exit 1; }
+          [ "$(hostname)" = "$CYGNUS_DEPLOY_HOSTNAME" ] || { echo "unexpected deployment host" >&2; exit 1; }
+          [[ "$RELEASE_VERSION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          for name in CYGNUS_PRODUCTION_ENV_FILE CYGNUS_DEPLOY_RELEASES_DIR CYGNUS_DEPLOY_CHECKOUTS_DIR CYGNUS_DEPLOY_STATE_FILE CYGNUS_ACTIVE_CHECKOUT_LINK CYGNUS_OPERATOR_WORK_DIR; do
+            [[ "${!name}" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "$name must be a safe absolute path" >&2; exit 1; }
+          done
+
+          metadata="$RUNNER_TEMP/cygnus-release/$RELEASE_VERSION.env"
+          release_inputs="$RUNNER_TEMP/cygnus-release/$RELEASE_VERSION.production-inputs.json"
+          [ -s "$metadata" ] || { echo "promoted release metadata is missing: $metadata" >&2; exit 1; }
+          [ -s "$release_inputs" ] || { echo "promoted release policy is missing: $release_inputs" >&2; exit 1; }
+          bundle="$RUNNER_TEMP/cygnus-$RELEASE_VERSION-$GITHUB_SHA.tar"
+          git archive --format=tar --output "$bundle" "$GITHUB_SHA"
+          bundle_sha="$(sha256sum "$bundle" | cut -d' ' -f1)"
+          checkout="$CYGNUS_DEPLOY_CHECKOUTS_DIR/$RELEASE_VERSION"
+          if [ -e "$checkout" ]; then
+            [ -f "$checkout/.cygnus-release-commit" ]
+            [ -f "$checkout/.cygnus-source-sha256" ]
+            [ "$(cat "$checkout/.cygnus-release-commit")" = "$GITHUB_SHA" ]
+            [ "$(cat "$checkout/.cygnus-source-sha256")" = "$bundle_sha" ]
+          else
+            staging="${checkout}.staging.$$"
+            trap 'rm -rf "$staging"' EXIT
+            install -m 0750 -d "$staging"
+            tar --no-same-owner --no-same-permissions -xf "$bundle" -C "$staging"
+            printf '%s\n' "$GITHUB_SHA" > "$staging/.cygnus-release-commit"
+            printf '%s\n' "$bundle_sha" > "$staging/.cygnus-source-sha256"
+            chmod -R a-w "$staging"
+            mv "$staging" "$checkout"
+            trap - EXIT
+          fi
+          cd "$checkout"
+          export CYGNUS_RELEASE_METADATA_FILE="$metadata"
+          export CYGNUS_RELEASE_INPUTS_FILE="$release_inputs"
+          export CYGNUS_RELEASES_DIR="$CYGNUS_DEPLOY_RELEASES_DIR"
+          export CYGNUS_CHECKOUTS_DIR="$CYGNUS_DEPLOY_CHECKOUTS_DIR"
+          export CYGNUS_DEPLOY_STATE_FILE
+          export CYGNUS_ACTIVE_CHECKOUT_LINK
+          export CYGNUS_OPERATOR_WORK_DIR
+          scripts/prod/deploy.sh --release "$RELEASE_VERSION"

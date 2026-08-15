@@ -13,9 +13,9 @@ map $http_upgrade $connection_upgrade {
     ''      close;
 }
 
-# Plain HTTP -> HTTPS redirect (HSTS covers the rest).
+# Container HTTP on unprivileged :8080 redirects to the public HTTPS origin.
 server {
-    listen 80;
+    listen 8080;
     server_name ${CYGNUS_DOMAIN};
 
     location / {
@@ -24,7 +24,7 @@ server {
 }
 
 server {
-    listen 443 ssl;
+    listen 8443 ssl;
     http2 on;
     server_name ${CYGNUS_DOMAIN};
 

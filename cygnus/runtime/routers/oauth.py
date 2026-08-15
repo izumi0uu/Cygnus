@@ -272,7 +272,7 @@ def _login_form(
   <div class="wrap">
     <div class="brand">
       <h1>Cygnus</h1>
-      <p>Enterprise AI Control Center</p>
+      <p>Support Knowledge Control Plane</p>
     </div>
     <div class="card">
       <h2>Sign in</h2>

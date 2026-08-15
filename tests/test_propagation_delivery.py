@@ -27,6 +27,7 @@ import uuid
 from unittest.mock import patch
 
 import httpx
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from cygnus.domain.audience import AudienceFilter, Visibility
@@ -77,6 +78,7 @@ from cygnus.runtime.database.models import (
     GovernanceAudienceBinding,
     GovernancePropagation,
     GovernancePropagationDelivery,
+    GovernancePublication,
     Source,
 )
 from tests.fixtures.fake_consumer import FakeConsumer
@@ -555,6 +557,7 @@ class PropagationDeliveryPostgresTests(unittest.TestCase):
         sessions = async_sessionmaker(engine, expire_on_commit=False)
         unique = uuid.uuid4().hex
         seeded = await _seed_publication(sessions, unique)
+        publication_id: uuid.UUID | None = None
         try:
             async with sessions() as session:
                 command = _command_from_envelope(
@@ -583,7 +586,7 @@ class PropagationDeliveryPostgresTests(unittest.TestCase):
                     self.assertEqual(delivery["desired_digest"], digest)
                     self.assertEqual(delivery["attempts"], 0)
                     self.assertEqual(delivery["correlation_id"], f"corr-{unique}")
-                publication_id = cast(str, result["publication_record_id"])
+                publication_id = uuid.UUID(cast(str, result["publication_record_id"]))
                 command_id = cast(str, result["command_id"])
 
                 replay = await apply_durable_publish(
@@ -593,7 +596,7 @@ class PropagationDeliveryPostgresTests(unittest.TestCase):
                 )
                 await session.commit()
                 self.assertTrue(replay["replayed"])
-                self.assertEqual(replay["publication_record_id"], publication_id)
+                self.assertEqual(replay["publication_record_id"], str(publication_id))
                 replay_records = cast(
                     list[dict[str, object]],
                     cast(dict[str, object], replay["propagation"])["records"],
@@ -616,6 +619,7 @@ class PropagationDeliveryPostgresTests(unittest.TestCase):
                 )
                 self.assertEqual(cast(str, replay["command_id"]), command_id)
         finally:
+            await _cleanup_publication(sessions, publication_id)
             await engine.dispose()
 
     def test_ack_contract_syncs_once_and_denies_drift_forgery_stale(self) -> None:
@@ -628,6 +632,7 @@ class PropagationDeliveryPostgresTests(unittest.TestCase):
         sessions = async_sessionmaker(engine, expire_on_commit=False)
         unique = uuid.uuid4().hex
         seeded = await _seed_publication(sessions, unique)
+        publication_id: uuid.UUID | None = None
         try:
             async with sessions() as session:
                 command = _command_from_envelope(
@@ -649,6 +654,14 @@ class PropagationDeliveryPostgresTests(unittest.TestCase):
                 )
                 self.assertEqual(len(deliveries), 2)
                 delivery = deliveries[0]
+                delivery_id = delivery.id
+                propagation_id = delivery.propagation_id
+                desired_digest = delivery.desired_digest
+                ack_body = _ack_body(delivery)
+                forged_body = _ack_body(delivery)
+                drifted_body = _ack_body(delivery, digest="b" * 64)
+                stale_body = _ack_body(delivery, version=999)
+                wrong_surface_body = _ack_body(delivery, surface_id="internal-search")
 
                 # Manual mutation may not set synced.
                 with self.assertRaises(DurablePublishDenied):
@@ -667,10 +680,9 @@ class PropagationDeliveryPostgresTests(unittest.TestCase):
                 await session.rollback()
 
                 # Exact signed ack syncs once.
-                ack_body = _ack_body(delivery)
                 receipt = await acknowledge_propagation_delivery(
                     session,
-                    delivery_id=delivery.id,
+                    delivery_id=delivery_id,
                     ack_body=ack_body,
                     signature=_signed_ack_header(ack_body),
                     secret=_TEST_SECRET,
@@ -679,12 +691,8 @@ class PropagationDeliveryPostgresTests(unittest.TestCase):
                 await session.commit()
                 self.assertFalse(receipt["replayed"])
                 self.assertEqual(receipt["status"], "synced")
-                self.assertEqual(
-                    receipt["acknowledged_digest"], delivery.desired_digest
-                )
-                refreshed = await session.get(
-                    GovernancePropagation, delivery.propagation_id
-                )
+                self.assertEqual(receipt["acknowledged_digest"], desired_digest)
+                refreshed = await session.get(GovernancePropagation, propagation_id)
                 self.assertIsNotNone(refreshed)
                 assert refreshed is not None
                 self.assertEqual(refreshed.status, "synced")
@@ -693,7 +701,7 @@ class PropagationDeliveryPostgresTests(unittest.TestCase):
                 # Exact replay of the same ack returns the same receipt.
                 replay_receipt = await acknowledge_propagation_delivery(
                     session,
-                    delivery_id=delivery.id,
+                    delivery_id=delivery_id,
                     ack_body=ack_body,
                     signature=_signed_ack_header(ack_body),
                     secret=_TEST_SECRET,
@@ -703,11 +711,10 @@ class PropagationDeliveryPostgresTests(unittest.TestCase):
                 self.assertEqual(replay_receipt["delivery_id"], receipt["delivery_id"])
 
                 # Forged signature is denied.
-                forged_body = _ack_body(delivery)
                 with self.assertRaises(DeliveryVerificationError):
                     _ = await acknowledge_propagation_delivery(
                         session,
-                        delivery_id=delivery.id,
+                        delivery_id=delivery_id,
                         ack_body=forged_body,
                         signature=_signed_ack_header(forged_body, "wrong-secret"),
                         secret=_TEST_SECRET,
@@ -715,11 +722,10 @@ class PropagationDeliveryPostgresTests(unittest.TestCase):
                 await session.rollback()
 
                 # Drift (different digest) is denied as a conflict.
-                drifted_body = _ack_body(delivery, digest="b" * 64)
                 with self.assertRaises(DeliveryAckConflict):
                     _ = await acknowledge_propagation_delivery(
                         session,
-                        delivery_id=delivery.id,
+                        delivery_id=delivery_id,
                         ack_body=drifted_body,
                         signature=_signed_ack_header(drifted_body),
                         secret=_TEST_SECRET,
@@ -727,11 +733,10 @@ class PropagationDeliveryPostgresTests(unittest.TestCase):
                 await session.rollback()
 
                 # Stale version is denied.
-                stale_body = _ack_body(delivery, version=999)
                 with self.assertRaises(DeliveryAckConflict):
                     _ = await acknowledge_propagation_delivery(
                         session,
-                        delivery_id=delivery.id,
+                        delivery_id=delivery_id,
                         ack_body=stale_body,
                         signature=_signed_ack_header(stale_body),
                         secret=_TEST_SECRET,
@@ -739,17 +744,17 @@ class PropagationDeliveryPostgresTests(unittest.TestCase):
                 await session.rollback()
 
                 # Wrong channel binding is denied.
-                wrong_surface_body = _ack_body(delivery, surface_id="internal-search")
                 with self.assertRaises(DeliveryAckConflict):
                     _ = await acknowledge_propagation_delivery(
                         session,
-                        delivery_id=delivery.id,
+                        delivery_id=delivery_id,
                         ack_body=wrong_surface_body,
                         signature=_signed_ack_header(wrong_surface_body),
                         secret=_TEST_SECRET,
                     )
                 await session.rollback()
         finally:
+            await _cleanup_publication(sessions, publication_id)
             await engine.dispose()
 
     def test_sweep_dispatches_through_fake_consumer_and_dead_letters(self) -> None:
@@ -762,6 +767,7 @@ class PropagationDeliveryPostgresTests(unittest.TestCase):
         sessions = async_sessionmaker(engine, expire_on_commit=False)
         unique = uuid.uuid4().hex
         seeded = await _seed_publication(sessions, unique)
+        publication_id: uuid.UUID | None = None
         try:
             with patch(
                 "cygnus.publish.durable.get_settings",
@@ -842,6 +848,7 @@ class PropagationDeliveryPostgresTests(unittest.TestCase):
                 self.assertIsNotNone(truth["acknowledged_digest"])
                 self.assertIsNotNone(truth["acknowledged_at"])
         finally:
+            await _cleanup_publication(sessions, publication_id)
             await engine.dispose()
 
     def test_bounded_retries_dead_letter_with_durable_evidence(self) -> None:
@@ -854,6 +861,7 @@ class PropagationDeliveryPostgresTests(unittest.TestCase):
         sessions = async_sessionmaker(engine, expire_on_commit=False)
         unique = uuid.uuid4().hex
         seeded = await _seed_publication(sessions, unique)
+        publication_id: uuid.UUID | None = None
         try:
             with patch(
                 "cygnus.publish.durable.get_settings",
@@ -952,7 +960,33 @@ class PropagationDeliveryPostgresTests(unittest.TestCase):
                     "dead_letter",
                 )
         finally:
+            await _cleanup_publication(sessions, publication_id)
             await engine.dispose()
+
+
+async def _cleanup_publication(
+    sessions: async_sessionmaker[AsyncSession],
+    publication_id: uuid.UUID | None,
+) -> None:
+    if publication_id is None:
+        return
+    async with sessions() as session:
+        _ = await session.execute(
+            delete(GovernancePropagationDelivery).where(
+                GovernancePropagationDelivery.publication_id == publication_id
+            )
+        )
+        _ = await session.execute(
+            delete(GovernancePropagation).where(
+                GovernancePropagation.publication_id == publication_id
+            )
+        )
+        _ = await session.execute(
+            delete(GovernancePublication).where(
+                GovernancePublication.id == publication_id
+            )
+        )
+        await session.commit()
 
 
 async def _seed_publication(

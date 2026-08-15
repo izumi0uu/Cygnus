@@ -28,7 +28,7 @@ _PROM_LINE_RE = re.compile(
 _LABEL_RE = re.compile(r'([a-zA-Z_][a-zA-Z0-9_]*)="([^"]*)"')
 
 
-def _parse_prometheus_metrics(
+def parse_prometheus_metrics(
     text: str,
 ) -> tuple[float | None, float | None, float | None]:
     """Extract queue age and DB pool saturation from Prometheus text.
@@ -160,11 +160,11 @@ class HttpRouteTarget:
             try:
                 payload = response.json()
             except ValueError:
-                return _parse_prometheus_metrics(response.text)
+                return parse_prometheus_metrics(response.text)
         except httpx.HTTPError:
             return None, None, None
         if not isinstance(payload, dict):
-            return _parse_prometheus_metrics(str(payload))
+            return parse_prometheus_metrics(str(payload))
         try:
             queue_age = float(payload["queue_age_seconds"])
             saturation = float(payload["pool_saturation"])

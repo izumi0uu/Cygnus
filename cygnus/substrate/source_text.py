@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import re
 import zipfile
 from html import unescape
@@ -53,6 +54,7 @@ _BINARY_DOCUMENT_CONTENT_TYPES = {
 }
 
 _GENERIC_BINARY_CONTENT_TYPE = "application/octet-stream"
+_PDF_OCR_SCALE = 2
 _TEXTUAL_SOURCE_KINDS = frozenset({"text", "html", "json", "xml", "yaml", "csv"})
 _SOURCE_KIND_BY_EXTENSION = {
     "txt": "text",
@@ -97,12 +99,20 @@ class SourceContentTypeError(ValueError):
     """Raised when a source payload type is unsupported or mismatched."""
 
 
-class SourceArchiveLimitError(ValueError):
+class SourceParsingLimitError(ValueError):
+    """Base error for deterministic source parser safety-budget violations."""
+
+
+class SourceArchiveLimitError(SourceParsingLimitError):
     """Raised when a source archive violates member/count/ratio/size bounds."""
 
 
-class SourceXMLLimitError(ValueError):
+class SourceXMLLimitError(SourceParsingLimitError):
     """Raised when XML parsed from a source payload violates safety bounds."""
+
+
+class SourceDocumentLimitError(SourceParsingLimitError):
+    """Raised when a PDF or spreadsheet exceeds source parsing budgets."""
 
 
 def _guess_content_type(file_name: str) -> str:
@@ -400,16 +410,27 @@ def _source_archive_limits() -> tuple[int, int, int]:
     )
 
 
-def _source_xml_max_bytes() -> int:
-    """Use existing ingress/archive budgets as the XML parser byte ceiling."""
+def _source_expanded_payload_max_bytes() -> int:
+    """Reuse the strictest configured ingress/archive ceiling after expansion."""
     from cygnus.runtime.config import settings
 
-    limits = (
-        settings.max_source_upload_bytes,
-        settings.max_source_url_bytes,
-        settings.max_source_archive_bytes,
+    return settings.max_source_expanded_payload_bytes
+
+
+def _source_pdf_limits() -> tuple[int, int]:
+    from cygnus.runtime.config import settings
+
+    return settings.max_source_pdf_pages, settings.max_source_pdf_render_pixels
+
+
+def _source_spreadsheet_limits() -> tuple[int, int, int]:
+    from cygnus.runtime.config import settings
+
+    return (
+        settings.max_source_spreadsheet_rows,
+        settings.max_source_spreadsheet_cells,
+        settings.max_source_archive_members,
     )
-    return min(limit for limit in limits if limit > 0)
 
 
 def _guard_zip_bounds(
@@ -486,7 +507,300 @@ def _guard_zip_bounds(
                 )
 
 
-def _guard_office_archive(file_data: bytes, *, expected_root: str) -> None:
+def _guard_xml_payload(xml_bytes: bytes, *, max_bytes: int) -> None:
+    if len(xml_bytes) > max_bytes:
+        raise SourceXMLLimitError(f"XML payload exceeds the limit of {max_bytes} bytes")
+
+    lowered = xml_bytes.lower()
+    if b"<!doctype" in lowered or b"<!entity" in lowered:
+        raise SourceXMLLimitError(
+            "XML document type/entity declarations are not allowed"
+        )
+
+
+def _enforce_spreadsheet_bounds(
+    rows: int,
+    cells: int,
+    *,
+    max_rows: int,
+    max_cells: int,
+) -> None:
+    if rows > max_rows:
+        raise SourceDocumentLimitError(
+            f"Spreadsheet row count exceeds the limit of {max_rows}"
+        )
+    if cells > max_cells:
+        raise SourceDocumentLimitError(
+            f"Spreadsheet cell count exceeds the limit of {max_cells}"
+        )
+
+
+def _spreadsheet_cell_position(reference: str) -> tuple[int, int]:
+    if len(reference) > 32:
+        raise SourceDocumentLimitError("Spreadsheet cell reference is not bounded")
+    match = re.fullmatch(r"([A-Za-z]+)([1-9][0-9]*)", reference)
+    if match is None:
+        raise SourceDocumentLimitError("Spreadsheet cell reference is not valid")
+
+    column = 0
+    for character in match.group(1).upper():
+        column = column * 26 + (ord(character) - ord("A") + 1)
+    return column, int(match.group(2))
+
+
+def _spreadsheet_range_extent(reference: str) -> tuple[int, int]:
+    if len(reference) > 65:
+        raise SourceDocumentLimitError("Spreadsheet range reference is not bounded")
+    endpoints = reference.split(":", 1)
+    start_column, start_row = _spreadsheet_cell_position(endpoints[0])
+    end_column, end_row = _spreadsheet_cell_position(endpoints[-1])
+    if end_column < start_column or end_row < start_row:
+        raise SourceDocumentLimitError("Spreadsheet range reference is not valid")
+    return end_column, end_row
+
+
+def _inspect_spreadsheet_xml_bounds(
+    xml_bytes: bytes,
+    *,
+    max_bytes: int,
+    max_rows: int,
+    max_cells: int,
+    rows_used: int,
+    cells_used: int,
+) -> tuple[int, int]:
+    """Stream one XLSX worksheet, bounding its actual and materialized shape."""
+    from cygnus.runtime.config import settings
+
+    _guard_xml_payload(xml_bytes, max_bytes=max_bytes)
+    depth = 0
+    saw_root = False
+    actual_rows = 0
+    actual_cells = 0
+    max_row_index = 0
+    max_column_index = 0
+    current_row_cells = 0
+
+    try:
+        for event, element in ElementTree.iterparse(
+            io.BytesIO(xml_bytes), events=("start", "end")
+        ):
+            if event == "start":
+                saw_root = True
+                depth += 1
+                if depth > settings.max_source_xml_depth:
+                    raise SourceXMLLimitError(
+                        "XML nesting depth exceeds the limit of "
+                        f"{settings.max_source_xml_depth}"
+                    )
+
+                local_name = element.tag.rsplit("}", 1)[-1]
+                if local_name in ("dimension", "mergeCell"):
+                    range_reference = element.attrib.get("ref")
+                    if not range_reference:
+                        raise SourceDocumentLimitError(
+                            "Spreadsheet range reference is not valid"
+                        )
+                    column_index, row_index = _spreadsheet_range_extent(range_reference)
+                    max_column_index = max(max_column_index, column_index)
+                    max_row_index = max(max_row_index, row_index)
+                elif local_name == "row":
+                    actual_rows += 1
+                    current_row_cells = 0
+                    row_reference = element.attrib.get("r")
+                    if row_reference is None:
+                        row_index = actual_rows
+                    elif (
+                        len(row_reference) > 20
+                        or not row_reference.isascii()
+                        or not row_reference.isdigit()
+                        or row_reference.startswith("0")
+                    ):
+                        raise SourceDocumentLimitError(
+                            "Spreadsheet row reference is not valid"
+                        )
+                    else:
+                        row_index = int(row_reference)
+                    max_row_index = max(max_row_index, row_index)
+                elif local_name == "c":
+                    actual_cells += 1
+                    current_row_cells += 1
+                    cell_reference = element.attrib.get("r")
+                    if cell_reference is None:
+                        max_row_index = max(max_row_index, actual_rows or 1)
+                        max_column_index = max(max_column_index, current_row_cells)
+                    else:
+                        column_index, row_index = _spreadsheet_cell_position(
+                            cell_reference
+                        )
+                        max_column_index = max(max_column_index, column_index)
+                        max_row_index = max(max_row_index, row_index)
+
+                if local_name in ("dimension", "mergeCell", "row", "c"):
+                    sheet_rows = max(actual_rows, max_row_index)
+                    sheet_cells = max(actual_cells, sheet_rows * max_column_index)
+                    _enforce_spreadsheet_bounds(
+                        rows_used + sheet_rows,
+                        cells_used + sheet_cells,
+                        max_rows=max_rows,
+                        max_cells=max_cells,
+                    )
+            else:
+                depth -= 1
+                element.clear()
+    except ElementTree.ParseError as exc:
+        raise SourceXMLLimitError("XML document is not well-formed") from exc
+
+    if not saw_root:
+        raise SourceXMLLimitError("XML document has no root element")
+    sheet_rows = max(actual_rows, max_row_index)
+    sheet_cells = max(actual_cells, sheet_rows * max_column_index)
+    return sheet_rows, sheet_cells
+
+
+def _guard_csv_spreadsheet_bounds(
+    file_data: bytes,
+    *,
+    max_rows: int | None = None,
+    max_cells: int | None = None,
+) -> None:
+    """Count CSV records and their materialized shape without allocating fields."""
+    if max_rows is None or max_cells is None:
+        default_rows, default_cells, _ = _source_spreadsheet_limits()
+        max_rows = default_rows if max_rows is None else max_rows
+        max_cells = default_cells if max_cells is None else max_cells
+
+    row_count = 0
+    total_cells = 0
+    max_columns = 0
+    row_columns = 1
+    row_has_data = False
+    in_quotes = False
+    index = 0
+    data_length = len(file_data)
+
+    at_field_start = True
+    while index < data_length:
+        byte = file_data[index]
+        if byte == 0x22:
+            row_has_data = True
+            if in_quotes:
+                if index + 1 < data_length and file_data[index + 1] == 0x22:
+                    index += 2
+                    continue
+                in_quotes = False
+            elif at_field_start:
+                in_quotes = True
+            at_field_start = False
+        elif byte == 0x2C and not in_quotes:
+            row_has_data = True
+            row_columns += 1
+            at_field_start = True
+            projected_columns = max(max_columns, row_columns)
+            _enforce_spreadsheet_bounds(
+                row_count + 1,
+                max(total_cells + row_columns, (row_count + 1) * projected_columns),
+                max_rows=max_rows,
+                max_cells=max_cells,
+            )
+        elif (byte == 0x0A or byte == 0x0D) and not in_quotes:
+            if (
+                byte == 0x0D
+                and index + 1 < data_length
+                and file_data[index + 1] == 0x0A
+            ):
+                index += 1
+            if row_has_data:
+                row_count += 1
+                total_cells += row_columns
+                max_columns = max(max_columns, row_columns)
+                _enforce_spreadsheet_bounds(
+                    row_count,
+                    max(total_cells, row_count * max_columns),
+                    max_rows=max_rows,
+                    max_cells=max_cells,
+                )
+            row_columns = 1
+            row_has_data = False
+            at_field_start = True
+        else:
+            row_has_data = True
+            at_field_start = False
+        index += 1
+
+    if row_has_data:
+        row_count += 1
+        total_cells += row_columns
+        max_columns = max(max_columns, row_columns)
+        _enforce_spreadsheet_bounds(
+            row_count,
+            max(total_cells, row_count * max_columns),
+            max_rows=max_rows,
+            max_cells=max_cells,
+        )
+
+
+def _guard_xls_spreadsheet_bounds(
+    file_data: bytes,
+    *,
+    max_rows: int | None = None,
+    max_cells: int | None = None,
+    max_sheets: int | None = None,
+) -> None:
+    """Inspect legacy XLS dimensions before pandas materializes worksheets."""
+    if max_rows is None or max_cells is None or max_sheets is None:
+        default_rows, default_cells, default_sheets = _source_spreadsheet_limits()
+        max_rows = default_rows if max_rows is None else max_rows
+        max_cells = default_cells if max_cells is None else max_cells
+        max_sheets = default_sheets if max_sheets is None else max_sheets
+
+    import xlrd
+
+    try:
+        workbook = xlrd.open_workbook(file_contents=file_data, on_demand=True)
+    except Exception as exc:
+        raise SourceDocumentLimitError(
+            "Legacy spreadsheet structure could not be inspected safely"
+        ) from exc
+
+    try:
+        if workbook.nsheets > max_sheets:
+            raise SourceDocumentLimitError(
+                f"Spreadsheet sheet count exceeds the limit of {max_sheets}"
+            )
+        total_rows = 0
+        total_cells = 0
+        for sheet_index in range(workbook.nsheets):
+            sheet = workbook.sheet_by_index(sheet_index)
+            sheet_rows = int(sheet.nrows)
+            sheet_columns = int(sheet.ncols)
+            if sheet_rows < 0 or sheet_columns < 0:
+                raise SourceDocumentLimitError(
+                    "Legacy spreadsheet dimensions are not valid"
+                )
+            total_rows += sheet_rows
+            total_cells += sheet_rows * sheet_columns
+            _enforce_spreadsheet_bounds(
+                total_rows,
+                total_cells,
+                max_rows=max_rows,
+                max_cells=max_cells,
+            )
+    except SourceParsingLimitError:
+        raise
+    except Exception as exc:
+        raise SourceDocumentLimitError(
+            "Legacy spreadsheet dimensions could not be inspected safely"
+        ) from exc
+    finally:
+        workbook.release_resources()
+
+
+def _guard_office_archive(
+    file_data: bytes,
+    *,
+    expected_root: str,
+    spreadsheet_limits: tuple[int, int] | None = None,
+) -> None:
     """Validate Office ZIP/XML members before their third-party parser runs."""
     _guard_zip_bounds(file_data)
     with zipfile.ZipFile(io.BytesIO(file_data)) as archive:
@@ -495,7 +809,9 @@ def _guard_office_archive(file_data: bytes, *, expected_root: str) -> None:
             raise SourceArchiveLimitError(
                 f"Archive is not a valid {expected_root.rstrip('/')} package"
             )
-        max_xml_bytes = _source_xml_max_bytes()
+        max_xml_bytes = _source_expanded_payload_max_bytes()
+        total_rows = 0
+        total_cells = 0
         for info in members:
             normalized_name = info.filename.replace("\\", "/").lower()
             if not normalized_name.endswith((".xml", ".rels")):
@@ -504,7 +820,25 @@ def _guard_office_archive(file_data: bytes, *, expected_root: str) -> None:
                 raise SourceXMLLimitError(
                     f"Archive XML member exceeds the limit of {max_xml_bytes} bytes"
                 )
-            _parse_xml_bytes(archive.read(info.filename), max_bytes=max_xml_bytes)
+            xml_bytes = archive.read(info.filename)
+            if (
+                spreadsheet_limits is not None
+                and normalized_name.startswith("xl/worksheets/")
+                and normalized_name.endswith(".xml")
+            ):
+                max_rows, max_cells = spreadsheet_limits
+                sheet_rows, sheet_cells = _inspect_spreadsheet_xml_bounds(
+                    xml_bytes,
+                    max_bytes=max_xml_bytes,
+                    max_rows=max_rows,
+                    max_cells=max_cells,
+                    rows_used=total_rows,
+                    cells_used=total_cells,
+                )
+                total_rows += sheet_rows
+                total_cells += sheet_cells
+            else:
+                _parse_xml_bytes(xml_bytes, max_bytes=max_xml_bytes)
 
 
 def _parse_xml_bytes(
@@ -525,15 +859,8 @@ def _parse_xml_bytes(
 
         max_depth = settings.max_source_xml_depth
     if max_bytes is None:
-        max_bytes = _source_xml_max_bytes()
-    if len(xml_bytes) > max_bytes:
-        raise SourceXMLLimitError(f"XML payload exceeds the limit of {max_bytes} bytes")
-
-    lowered = xml_bytes.lower()
-    if b"<!doctype" in lowered or b"<!entity" in lowered:
-        raise SourceXMLLimitError(
-            "XML document type/entity declarations are not allowed"
-        )
+        max_bytes = _source_expanded_payload_max_bytes()
+    _guard_xml_payload(xml_bytes, max_bytes=max_bytes)
 
     # Enforce nesting while the parser consumes bytes rather than after a
     # potentially hostile deep tree has already been fully materialized.
@@ -643,71 +970,172 @@ async def _extract_text_from_file(
     if ext == "pdf":
         import fitz
 
+        max_pages, max_render_pixels = _source_pdf_limits()
+        max_render_bytes = _source_archive_limits()[0]
+        max_page_render_pixels = min(max_render_pixels, max_render_bytes // 4)
         doc = fitz.open(stream=file_data, filetype="pdf")
-        empty_pages: list[tuple[int, int]] = []  # (index, page_number)
+        try:
+            page_count = doc.page_count
+            if page_count > max_pages:
+                raise SourceDocumentLimitError(
+                    f"PDF page count exceeds the limit of {max_pages}"
+                )
 
-        for i, page in enumerate(doc):
-            text = (page.get_text() or "").strip()
-            pages_data.append({"content": text, "page_number": i + 1})
-            if not text:
-                empty_pages.append((i, i + 1))
+            empty_pages: list[tuple[int, int]] = []
+            render_pixels = 0
+            for index in range(page_count):
+                page = doc[index]
+                text = (page.get_text() or "").strip()
+                pages_data.append({"content": text, "page_number": index + 1})
+                if text or vision_provider is None:
+                    continue
 
-        # --- Gemini Vision OCR fallback for empty pages ---
-        if empty_pages and vision_provider:
-            logger.info(
-                f"OCR fallback: {len(empty_pages)}/{len(pages_data)} empty pages "
-                f"in '{file_name}', using vision provider"
-            )
-            ocr_prompt = (
-                "Extract ALL text from this document page exactly as written. "
-                "Preserve the original layout, headings, tables, and formatting "
-                "as closely as possible using markdown. If the page contains a "
-                "table, reproduce it as a markdown table. If there is no text "
-                "at all, respond with an empty string."
-            )
-            for idx, page_num in empty_pages:
-                try:
-                    page = doc[idx]
-                    # Render at 2x for better OCR quality
-                    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
-                    img_bytes = pix.tobytes("png")
-                    ocr_text = await vision_provider.analyze_image(
-                        img_bytes,
-                        mime_type="image/png",
-                        prompt=ocr_prompt,
+                width = float(page.rect.width)
+                height = float(page.rect.height)
+                if (
+                    not math.isfinite(width)
+                    or not math.isfinite(height)
+                    or width <= 0
+                    or height <= 0
+                ):
+                    raise SourceDocumentLimitError(
+                        f"PDF page {index + 1} has invalid render dimensions"
                     )
-                    if ocr_text and ocr_text.strip():
-                        pages_data[idx]["content"] = ocr_text.strip()
-                        logger.debug(f"OCR page {page_num}: {len(ocr_text)} chars")
-                except Exception as e:
-                    logger.warning(
-                        f"OCR failed for page {page_num} of '{file_name}': {e}"
+                scaled_width = width * _PDF_OCR_SCALE
+                scaled_height = height * _PDF_OCR_SCALE
+                if not math.isfinite(scaled_width) or not math.isfinite(scaled_height):
+                    raise SourceDocumentLimitError(
+                        f"PDF page {index + 1} has invalid render dimensions"
                     )
+                page_render_pixels = math.ceil(scaled_width) * math.ceil(scaled_height)
+                if page_render_pixels > max_page_render_pixels:
+                    raise SourceDocumentLimitError(
+                        f"PDF page {index + 1} render pixels exceed the per-page "
+                        f"limit of {max_page_render_pixels}"
+                    )
+                render_pixels += page_render_pixels
+                if render_pixels > max_render_pixels:
+                    raise SourceDocumentLimitError(
+                        f"PDF OCR render pixels exceed the limit of {max_render_pixels}"
+                    )
+                empty_pages.append((index, index + 1))
 
-        doc.close()
-        return pages_data
+            # --- Gemini Vision OCR fallback for empty pages ---
+            if empty_pages:
+                logger.info(
+                    f"OCR fallback: {len(empty_pages)}/{len(pages_data)} empty pages "
+                    f"in '{file_name}', using vision provider"
+                )
+                ocr_prompt = (
+                    "Extract ALL text from this document page exactly as written. "
+                    "Preserve the original layout, headings, tables, and formatting "
+                    "as closely as possible using markdown. If the page contains a "
+                    "table, reproduce it as a markdown table. If there is no text "
+                    "at all, respond with an empty string."
+                )
+                matrix = fitz.Matrix(_PDF_OCR_SCALE, _PDF_OCR_SCALE)
+                max_image_bytes = _source_expanded_payload_max_bytes()
+                actual_render_bytes = 0
+                actual_render_pixels = 0
+                for index, page_number in empty_pages:
+                    try:
+                        page = doc[index]
+                        pix = page.get_pixmap(matrix=matrix)
+                        actual_render_pixels += int(pix.width) * int(pix.height)
+                        if actual_render_pixels > max_render_pixels:
+                            raise SourceDocumentLimitError(
+                                "PDF OCR render pixels exceed the limit of "
+                                f"{max_render_pixels}"
+                            )
+                        image_bytes = pix.tobytes("png")
+                        image_size = len(image_bytes)
+                        if image_size > max_image_bytes:
+                            raise SourceDocumentLimitError(
+                                "Rendered PDF page exceeds the expanded payload "
+                                f"limit of {max_image_bytes} bytes"
+                            )
+                        actual_render_bytes += image_size
+                        if actual_render_bytes > max_render_bytes:
+                            raise SourceDocumentLimitError(
+                                "Rendered PDF bytes exceed the aggregate limit of "
+                                f"{max_render_bytes} bytes"
+                            )
+                        ocr_text = await vision_provider.analyze_image(
+                            image_bytes,
+                            mime_type="image/png",
+                            prompt=ocr_prompt,
+                        )
+                        if ocr_text and ocr_text.strip():
+                            pages_data[index]["content"] = ocr_text.strip()
+                            logger.debug(
+                                f"OCR page {page_number}: {len(ocr_text)} chars"
+                            )
+                    except SourceParsingLimitError:
+                        raise
+                    except Exception as exc:
+                        logger.warning(
+                            f"OCR failed for page {page_number} of '{file_name}': {exc}"
+                        )
+
+            return pages_data
+        finally:
+            doc.close()
 
     # --- Excel / Spreadsheet extraction ---
     if ext in ("xlsx", "xls", "csv"):
+        max_rows, max_cells, max_sheets = _source_spreadsheet_limits()
         if ext == "xlsx":
-            # Validate the package and every XML member before pandas/openpyxl
-            # receives untrusted archive content.
-            _guard_office_archive(file_data, expected_root="xl/")
+            # Count worksheet structure while validating XML, before pandas or
+            # openpyxl can materialize an attacker-controlled rectangular frame.
+            _guard_office_archive(
+                file_data,
+                expected_root="xl/",
+                spreadsheet_limits=(max_rows, max_cells),
+            )
+        elif ext == "csv":
+            _guard_csv_spreadsheet_bounds(
+                file_data, max_rows=max_rows, max_cells=max_cells
+            )
+        else:
+            _guard_xls_spreadsheet_bounds(
+                file_data,
+                max_rows=max_rows,
+                max_cells=max_cells,
+                max_sheets=max_sheets,
+            )
         try:
-            import io
             import pandas as pd
 
             pages_data = []
             if ext == "csv":
                 df = pd.read_csv(io.BytesIO(file_data))
+                column_count = len(df.columns)
+                parsed_rows = len(df.index) + (1 if column_count else 0)
+                _enforce_spreadsheet_bounds(
+                    parsed_rows,
+                    parsed_rows * column_count,
+                    max_rows=max_rows,
+                    max_cells=max_cells,
+                )
                 md = df.to_markdown(index=False)
                 pages_data.append({"content": md or "", "page_number": 1})
             else:
-                # Read all sheets
+                parsed_rows = 0
+                parsed_cells = 0
                 xls = pd.ExcelFile(io.BytesIO(file_data))
-                for sheet_idx, sheet_name in enumerate(xls.sheet_names):
+                for sheet_index, sheet_name in enumerate(xls.sheet_names):
                     try:
                         df = pd.read_excel(xls, sheet_name=sheet_name)
+                        column_count = len(df.columns)
+                        sheet_rows = len(df.index) + (1 if column_count else 0)
+                        parsed_rows += sheet_rows
+                        parsed_cells += sheet_rows * column_count
+                        _enforce_spreadsheet_bounds(
+                            parsed_rows,
+                            parsed_cells,
+                            max_rows=max_rows,
+                            max_cells=max_cells,
+                        )
                         if df.empty:
                             continue
                         header = f"## Sheet: {sheet_name}\n\n"
@@ -715,16 +1143,20 @@ async def _extract_text_from_file(
                         pages_data.append(
                             {
                                 "content": header + (md or ""),
-                                "page_number": sheet_idx + 1,
+                                "page_number": sheet_index + 1,
                             }
                         )
-                    except Exception as e:
-                        logger.warning(f"Failed to read sheet '{sheet_name}': {e}")
+                    except SourceParsingLimitError:
+                        raise
+                    except Exception as exc:
+                        logger.warning(f"Failed to read sheet '{sheet_name}': {exc}")
             if pages_data:
                 return pages_data
             # Fall through if all sheets are empty
-        except Exception as e:
-            logger.warning(f"Spreadsheet extraction failed for '{file_name}': {e}")
+        except SourceParsingLimitError:
+            raise
+        except Exception as exc:
+            logger.warning(f"Spreadsheet extraction failed for '{file_name}': {exc}")
             # Fall through to the remaining Cygnus-owned extraction paths
 
     if ext == "docx":

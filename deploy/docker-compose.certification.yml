@@ -1,0 +1,15 @@
+# Isolated self-hosted certification overlay. Never use without
+# deploy/docker-compose.prod.yml as the first Compose file.
+services:
+  api:
+    environment:
+      CYGNUS_CERTIFICATION_MODE: "1"
+  postgres:
+    ports:
+      - "127.0.0.1:${CYGNUS_CERTIFICATION_POSTGRES_PORT:-15432}:5432"
+  redis:
+    ports:
+      - "127.0.0.1:${CYGNUS_CERTIFICATION_REDIS_PORT:-16379}:6379"
+  minio:
+    ports:
+      - "127.0.0.1:${CYGNUS_CERTIFICATION_MINIO_PORT:-19000}:9000"

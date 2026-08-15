@@ -73,7 +73,7 @@ sh scripts/docker_smoke.sh
 
 ### Local endpoints
 
-- Frontend: `http://localhost:5173`
+- Frontend: `http://localhost:5173` (host `:5173` maps to unprivileged container `:8080`)
 - API: `http://localhost:8077`
 - API health: `http://localhost:8077/health`
 - MinIO API: `http://localhost:9000`
@@ -101,7 +101,7 @@ Boundary detail:
 Production uses a separate immutable manifest: [`deploy/docker-compose.prod.yml`](./deploy/docker-compose.prod.yml). It differs deliberately from the local stack:
 
 - **Prebuilt, digest-pinned images only** — no `build:`, no application source mounts. `api`/`worker`/`worker-skills`/`migrator` run the backend image and `frontend` runs the nginx image, both referenced as `name@sha256:...` from release metadata. Only read-only config/ops files (nginx template, security headers, worker healthcheck) and TLS secrets are mounted.
-- **Only the reverse proxy is exposed** — the `frontend` service publishes `:80`/`:443` (TLS termination + strict headers + same-origin `/api`, `/oauth`, `/mcp`, `/.well-known` and presigned MinIO bucket paths). Postgres, Redis, MinIO, API and workers publish no host ports.
+- **Only the reverse proxy is exposed** — the `frontend` service maps public host `:80`/`:443` to unprivileged container `:8080`/`:8443` (TLS termination + strict headers + same-origin `/api`, `/oauth`, `/mcp`, `/.well-known` and presigned MinIO bucket paths). Postgres, Redis, MinIO, API and workers publish no host ports.
 - **Distinct app services with healthchecks and drain grace** — `api`, `worker` (default queue) and `worker-skills` each have a healthcheck (workers probe the per-role runtime heartbeat in Redis), run under the graceful drain runner (`python -m cygnus.runtime.worker <Settings>`), and get a 120s `stop_grace_period` that exceeds `worker_drain_grace_seconds`.
 - **Migration job first** — the one-shot `migrator` runs `alembic upgrade head` (the `20260627_00_pre_governance_baseline` root covers empty databases) followed by `cygnus.runtime.bootstrap.ensure_storage` (settings validation + bucket ensure only — no `create_all`, no stamp, no seeding). Every app service `depends_on` it with `service_completed_successfully`; even a bare `docker compose up -d` upgrades the DB before rollout.
 - **Named persistent volumes** — `cygnus-prod-postgres`, `cygnus-prod-redis`, `cygnus-prod-minio`.
@@ -203,6 +203,14 @@ sh scripts/docker_smoke.sh
 CYGNUS_CERTIFICATION_ARTIFACT_DIR="$PWD/production/evidence" \
   scripts/run_live_production_certification.sh
 
+Browser certification defaults to the locked repository runner at
+`frontend/scripts/run-browser-certification.mjs`; `CYGNUS_BROWSER_E2E_RUNNER`
+may replace it only with a separately approved executable. The remaining live probes are
+operator-supplied. Every runner must return its native `v1` report with the exact
+`release_identity` passed on the command line: full Git commit, backend and frontend
+`name@sha256:` refs, and Alembic head. Git-only or semantically incomplete browser reports
+are rejected.
+
 # The underlying native staging capacity command; every threshold, route target,
 # and approval reference is an external deployment input. Missing refs BLOCK.
 CYGNUS_CAPACITY_GATE_INJECTION=1 uv run python scripts/load_gate.py \
@@ -266,9 +274,9 @@ digest with a mutable tag.
 
 ### Security posture
 
-- only `:80`/`:443` published; everything else internal to `prodnet`
+- only public host `:80`/`:443` are published, mapped to the frontend's unprivileged container `:8080`/`:8443`; everything else stays internal to `prodnet`
 - backend containers run `read_only: true`, as uid `65534`, `cap_drop: [ALL]`, `no-new-privileges`, with `/tmp` tmpfs
-- frontend (nginx) runs `read_only: true` with tmpfs for cache/run/conf, `cap_drop: [ALL]` plus only `NET_BIND_SERVICE, CHOWN, SETUID, SETGID`
+- frontend nginx runs as the image's unprivileged `nginx` user with `read_only: true`, bounded tmpfs for cache/run/conf, `cap_drop: [ALL]`, `no-new-privileges`, and no added or file capabilities
 - TLS 1.2/1.3 with modern ciphers, HSTS, strict CSP/headers (see `deploy/nginx/security-headers.conf`)
 - credentials live only in `deploy/.env.prod` (git-ignored, `required: true`) and TLS material is referenced by external path (compose secrets → `/run/secrets/`)
 - Production pins pgvector `0.8.6-pg16-trixie`, Redis `7.4-alpine3.21`, and MinIO `RELEASE.2025-09-07T16-13-09Z` to reviewed multi-architecture manifest digests. Update each tag and digest together, then rerun migration, compose-smoke, backup/restore, and vulnerability gates before rollout; the local stack pins only MinIO's named release for developer reproducibility.

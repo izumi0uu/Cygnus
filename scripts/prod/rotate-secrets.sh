@@ -27,9 +27,9 @@ for variable in CYGNUS_SECRET_ROTATION_RUNNER CYGNUS_SECRET_ROTATION_APPROVAL_RE
 done
 [ -x "$CYGNUS_SECRET_ROTATION_RUNNER" ] || die "CYGNUS_SECRET_ROTATION_RUNNER must name an executable protected-runner command"
 if [ "$DRY_RUN" = 1 ]; then
-  "$CYGNUS_SECRET_ROTATION_RUNNER" --release "$RELEASE" --environment-file "$DEPLOY_DIR/.env.prod" --approval-ref "$CYGNUS_SECRET_ROTATION_APPROVAL_REF" --dry-run
+  "$CYGNUS_SECRET_ROTATION_RUNNER" --release "$RELEASE" --environment-file "$PROD_ENV_FILE" --approval-ref "$CYGNUS_SECRET_ROTATION_APPROVAL_REF" --dry-run
   log "secret rotation dry run passed; no secret or container changed"
   exit 0
 fi
-"$CYGNUS_SECRET_ROTATION_RUNNER" --release "$RELEASE" --environment-file "$DEPLOY_DIR/.env.prod" --approval-ref "$CYGNUS_SECRET_ROTATION_APPROVAL_REF"
+"$CYGNUS_SECRET_ROTATION_RUNNER" --release "$RELEASE" --environment-file "$PROD_ENV_FILE" --approval-ref "$CYGNUS_SECRET_ROTATION_APPROVAL_REF"
 exec "$SCRIPT_DIR/deploy.sh" --release "$RELEASE"

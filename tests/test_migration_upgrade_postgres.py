@@ -213,6 +213,10 @@ class MigrationUpgradeDowngradePostgresTests(unittest.TestCase):
         self.assertIn("governance_ledger_events", tables)
         self.assertIn("wiki_draft_ai_pre_review_dispatches", tables)
         self.assertTrue(asyncio.run(_skill_status_enum_exists(self.database_url)))
+        self.assertIn(
+            "session_version",
+            asyncio.run(_column_names(self.database_url, "employees")),
+        )
 
     def test_upgrade_from_baseline_schema_works(self) -> None:
         self._upgrade("20260627_00")
@@ -248,11 +252,17 @@ class MigrationUpgradeDowngradePostgresTests(unittest.TestCase):
             "version",
             asyncio.run(_column_names(self.database_url, "wiki_page_drafts")),
         )
+        self.assertNotIn(
+            "session_version",
+            asyncio.run(_column_names(self.database_url, "employees")),
+        )
 
-        # Downgrade to base leaves the schema empty and drops the enum.
+        # Alembic retains its empty version table at base; every application
+        # table and the baseline-owned enum must be gone.
         self._downgrade("base")
         tables = asyncio.run(_table_names(self.database_url))
-        self.assertEqual(tables, set())
+        self.assertEqual(tables, {"alembic_version"})
+        self.assertEqual(asyncio.run(_alembic_version_rows(self.database_url)), [])
         self.assertFalse(asyncio.run(_skill_status_enum_exists(self.database_url)))
 
         # Recreate the exact frozen baseline after its complete teardown. This

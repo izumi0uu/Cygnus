@@ -16,12 +16,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from cygnus.domain.audience import AudienceFilter, Visibility
 from cygnus.domain.objects import KnowledgeObjectType, governed_object_ref
 from cygnus.evidence.records import FreshnessState
-from cygnus.governance.approval_guards import approval_digest, publish_scope_digest
+from cygnus.governance.approval_guards import approval_digest
 from cygnus.governance.audience_bindings import (
     AudienceBindingCreate,
-    AudienceBindingLifecycle,
     create_audience_binding,
-    list_audience_bindings,
 )
 from cygnus.governance.ledger import GovernanceEventType, list_draft_events
 from cygnus.governance.signals import (
@@ -41,7 +39,11 @@ from cygnus.governance.ticket_pilot import (
     TicketPilotFunnelQuery,
     get_ticket_pilot_funnel,
 )
-from cygnus.publish.durable import DurablePublishCommand, apply_durable_publish
+from cygnus.publish.durable import (
+    DurablePublishCommand,
+    apply_durable_publish,
+    durable_publish_command_for_signal,
+)
 from cygnus.review.contributions import approve_wiki_draft, submit_wiki_draft
 from cygnus.review.intake import PressureSignalType
 from cygnus.runtime.database.models import (
@@ -295,21 +297,6 @@ class TicketSourcePublicationPostgresTests(unittest.TestCase):
                 refreshed_signal = await session.get(
                     GovernanceSignal, publication_signal_id
                 )
-                sources = tuple(
-                    (
-                        await session.execute(
-                            select(Source).where(Source.id == source_id)
-                        )
-                    )
-                    .scalars()
-                    .all()
-                )
-                binding_rows = await list_audience_bindings(
-                    session,
-                    page_id=page.id,
-                    object_ref=object_ref,
-                    lifecycle_state=AudienceBindingLifecycle.ACTIVE,
-                )
                 canonical_digest = approval_digest(
                     draft=draft,
                     page=page,
@@ -324,30 +311,27 @@ class TicketSourcePublicationPostgresTests(unittest.TestCase):
                 )
                 if refreshed_signal is None:
                     raise AssertionError("pilot signal fixture unexpectedly absent")
-                scope_digest = publish_scope_digest(
-                    approval_ref=approval.id,
-                    approval_digest_value=canonical_digest,
-                    object_version=page.version,
-                    binding_rows=binding_rows,
-                    source_state=((source.id, source.status) for source in sources),
-                    signal_freshness=refreshed_signal.freshness,
-                    signal_id=refreshed_signal.id,
-                    signal_status=refreshed_signal.status,
+                envelope = await durable_publish_command_for_signal(
+                    session,
+                    signal=refreshed_signal,
                     action_key="publish",
-                    target_channels=("internal_copilot",),
                 )
+                self.assertIsNotNone(envelope)
+                if envelope is None:
+                    raise AssertionError("pilot publish command unexpectedly absent")
+                self.assertEqual(envelope["approval_digest"], canonical_digest)
                 publish_command = DurablePublishCommand(
-                    draft_id=draft.id,
-                    approval_ref=approval.id,
-                    approval_digest=canonical_digest,
-                    scope_digest=scope_digest,
-                    signal_id=refreshed_signal.id,
-                    signal_freshness=refreshed_signal.freshness,
+                    draft_id=uuid.UUID(cast(str, envelope["draft_id"])),
+                    approval_ref=uuid.UUID(cast(str, envelope["approval_ref"])),
+                    approval_digest=cast(str, envelope["approval_digest"]),
+                    scope_digest=cast(str, envelope["scope_digest"]),
+                    signal_id=uuid.UUID(cast(str, envelope["signal_id"])),
+                    signal_freshness=cast(str, envelope["signal_freshness"]),
                     command_id=f"cyg125-publish:{unique}",
-                    action_key="publish",
-                    target_channels=("internal_copilot",),
-                    expected_version=page.version,
-                    reason="Publish the approved source-grounded pilot object.",
+                    action_key=cast(str, envelope["action_key"]),
+                    target_channels=tuple(cast(list[str], envelope["target_channels"])),
+                    expected_version=cast(int, envelope["expected_version"]),
+                    reason=cast(str, envelope["reason"]),
                 )
                 publish_result = await apply_durable_publish(
                     session,

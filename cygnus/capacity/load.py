@@ -27,6 +27,7 @@ class RouteTarget(Protocol):
         self,
     ) -> tuple[float, Outcome, float | None, float | None, float | None]:
         """Return (duration_ms, outcome, queue_age_seconds, pool_in_use, pool_size)."""
+        ...
 
     def supports_injection(self, target: InjectionTarget) -> bool:
         """Whether this target can inject the requested fault on this deployment."""
@@ -158,9 +159,11 @@ async def run_route_phase(
                     if outcome in ("error", "denied"):
                         failures_during_window += 1
                 elif attempt_started >= disable_at:
-                    if first_success_after_disable is None and outcome == "success":
-                        first_success_after_disable = attempt_started - disable_at
-                    if outcome == "success":
+                    if first_success_after_disable is None:
+                        if outcome == "success":
+                            first_success_after_disable = attempt_started - disable_at
+                            post_successes += 1
+                    elif outcome == "success":
                         post_successes += 1
                     elif outcome in ("error", "denied"):
                         post_errors += 1
@@ -189,20 +192,25 @@ async def run_route_phase(
         fault_task = asyncio.create_task(fault_scheduler(scenario))
 
     if fault_task is not None:
-        await asyncio.gather(*workers, fault_task)
+        _ = await asyncio.gather(*workers, fault_task)
     else:
-        await asyncio.gather(*workers)
+        _ = await asyncio.gather(*workers)
     wall = clock() - started
 
     recovery: RecoveryEvidence | None = None
     if scenario is not None:
         post_total = post_successes + post_errors
         post_error_rate = post_errors / post_total if post_total else 0.0
-        recovered = first_success_after_disable is not None and post_error_rate == 0.0
+        recovered = (
+            failures_during_window > 0
+            and first_success_after_disable is not None
+            and post_error_rate == 0.0
+        )
         if first_success_after_disable is not None:
             detail = (
                 f"fault window {scenario.duration_seconds:g}s on {scenario.target}; "
-                f"first success {first_success_after_disable:.3f}s after restore; "
+                f"{failures_during_window} failures observed; first success "
+                f"{first_success_after_disable:.3f}s after restore; "
                 f"post-recovery error rate {post_error_rate:.3f}"
             )
         else:

@@ -4,9 +4,9 @@
 #
 # - Dependencies are installed with `npm ci` against package-lock.json; the
 #   prod stage ships only the built SPA.
-# - The nginx master runs as the unprivileged `nginx` user: the single
-#   `cap_net_bind_service` file capability keeps the conventional :80 port,
-#   pid/log/cache paths are redirected under nginx-writable directories.
+# - The nginx master runs as the unprivileged `nginx` user on unprivileged
+#   container ports; pid/log/cache paths are redirected under nginx-writable
+#   directories, so the image needs no Linux capabilities.
 # - Build identity is injected by .github/workflows/release.yml; local builds
 #   fall back to `unknown` so they are never mistaken for release artifacts.
 
@@ -61,19 +61,12 @@ RUN sed -i \
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 
-# Non-root master on the standard port: grant the nginx binary the only bind
-# capability it needs. Logs are stdout/stderr and cache/config paths are tmpfs
-# in production, so no writable image directory is retained.
-RUN apk add --no-cache libcap \
-    && setcap cap_net_bind_service=+ep /usr/sbin/nginx \
-    && apk del libcap
-
 USER nginx
 
-EXPOSE 80
+EXPOSE 8080 8443
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1/health"]
+    CMD ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
 
 # The base nginx config redirects its pid under /tmp and logs to stdout/stderr.
 # Production mounts only bounded tmpfs cache/config paths before launching this

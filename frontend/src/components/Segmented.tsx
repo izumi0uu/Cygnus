@@ -24,6 +24,7 @@ export function Segmented<T extends string>({
       />
       {options.map((o) => (
         <button
+          key={o.value}
           type="button"
           aria-pressed={value === o.value}
           data-on={value === o.value}

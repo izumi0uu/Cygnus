@@ -171,7 +171,7 @@ def build_blocked_report(
 def _recovery_ok(
     evidence: RecoveryEvidence, max_recovery_seconds: float | None
 ) -> bool:
-    if not evidence.recovered:
+    if not evidence.recovered or evidence.failures_during_window <= 0:
         return False
     if max_recovery_seconds is not None:
         return (

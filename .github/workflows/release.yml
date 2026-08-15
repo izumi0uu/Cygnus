@@ -1,0 +1,413 @@
+name: Release — certify, attest, and promote
+
+# Production V1 is deliberately fail-closed. Hosted CI proves the hermetic
+# code/build contract, then a protected self-hosted runner proves the live
+# capacity, backup/restore, browser, security, and persisted-truth contracts.
+# No tag is promoted until both sets of evidence validate against the same
+# immutable image digests and Alembic head.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Approved immutable release version (for example 0.2.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: '3.12'
+  UV_VERSION: '0.9.11'
+  NODE_VERSION: '22'
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE: ghcr.io/${{ github.repository }}/backend
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository }}/frontend
+  GIT_SHA: ${{ github.sha }}
+  GIT_REF: ${{ github.ref_name }}
+  VERSION: ${{ inputs.version || github.ref_name }}
+
+jobs:
+  backend-gates:
+    name: Backend gates (locked deps, lint, types, tests, migrations, scans)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.6-pg16-trixie@sha256:c8483555ce48101872f888c1df8a895ff689d6c7c7a5f7ac266475f9dfe89e0b
+        env:
+          POSTGRES_DB: cygnus_gate
+          POSTGRES_USER: cygnus
+          POSTGRES_PASSWORD: cygnus_gate
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cygnus -d cygnus_gate"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      CYGNUS_GATE_DATABASE_URL: postgresql+asyncpg://cygnus:cygnus_gate@127.0.0.1:5432/cygnus_gate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - name: Install full locked dependencies
+        run: uv sync --frozen --all-extras
+      - name: Lint and type check
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run mypy
+      - name: Test suite
+        run: uv run pytest
+      - name: Repository and static delivery contracts
+        run: |
+          bash scripts/repo_check.sh
+          uv run python scripts/release_contract_gate.py --quiet
+      - name: Governed golden and domain evaluation gates
+        run: |
+          uv run python scripts/governance_golden_path_gate.py --quiet
+          uv run python scripts/domain_eval_gate.py --quiet
+      - name: Dependency and secret scans
+        run: |
+          uv run python scripts/secrets_scan.py --report production/evidence/secrets-scan.native.json
+          uv run python scripts/dependency_gate.py --report production/evidence/dependency-lock.native.json
+          uv run python scripts/dependency_gate.py --audit --report production/evidence/dependency-audit.native.json
+      - name: Migration rollback-compatibility gate
+        run: uv run python scripts/migration_gate.py --database-url "$CYGNUS_GATE_DATABASE_URL" --report production/evidence/migrations-applied.native.json
+      - name: Write backend evidence records
+        run: |
+          set -euo pipefail
+          hash() { python3 -c 'import hashlib,pathlib,sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$1"; }
+          uv run python scripts/write_evidence.py backend-tests --passed --git-sha "$GIT_SHA" --tool "ruff,mypy,pytest,repo_check" --check ruff=true --check mypy=true --check pytest=true --check repo-check=true --out production/evidence/backend-tests.json
+          uv run python scripts/write_evidence.py golden-path --passed --git-sha "$GIT_SHA" --tool governance_golden_path_gate --check gate=true --out production/evidence/golden-path.json
+          uv run python scripts/write_evidence.py domain-eval --passed --git-sha "$GIT_SHA" --tool domain_eval_gate --check gate=true --out production/evidence/domain-eval.json
+          uv run python scripts/write_evidence.py repo-check --passed --git-sha "$GIT_SHA" --tool release_contract_gate --check gate=true --out production/evidence/repo-check.json
+          uv run python scripts/write_evidence.py secrets-scan --passed --git-sha "$GIT_SHA" --tool secrets_scan --check "report_sha256=$(hash production/evidence/secrets-scan.native.json)" --out production/evidence/secrets-scan.json
+          uv run python scripts/write_evidence.py dependency-audit --passed --git-sha "$GIT_SHA" --tool dependency_gate --check "report_sha256=$(hash production/evidence/dependency-audit.native.json)" --out production/evidence/dependency-audit.json
+          uv run python scripts/write_evidence.py migrations-applied --passed --git-sha "$GIT_SHA" --tool migration_gate --check "report_sha256=$(hash production/evidence/migrations-applied.native.json)" --out production/evidence/migrations-applied.json
+      - name: Upload backend evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: evidence-backend
+          path: production/evidence
+          if-no-files-found: error
+
+  frontend-gates:
+    name: Frontend gates (locked deps, lint, test, build, bundle, audit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frozen frontend dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Audit production dependency vulnerabilities
+        run: npm audit --omit=dev --audit-level=high
+      - name: Lint, test, build, and check bundle budget
+        run: |
+          npm run lint
+          npm test
+          npm run build
+          npm run bundle:check
+      - name: Write frontend evidence
+        run: |
+          cd ..
+          python3 scripts/write_evidence.py frontend-tests --passed --git-sha "$GIT_SHA" --tool "npm ci,npm audit,eslint,vitest,tsc + vite build,bundle budget" --check lockfile=true --check audit=true --check lint=true --check test=true --check build=true --check bundle=true --out production/evidence/frontend-tests.json
+      - name: Upload frontend evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: evidence-frontend
+          path: production/evidence/frontend-tests.json
+          if-no-files-found: error
+
+  docker-smoke:
+    name: Docker compose smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Run compose smoke gate
+        run: sh scripts/docker_smoke.sh
+      - name: Write smoke evidence
+        run: python3 scripts/write_evidence.py docker-smoke --passed --git-sha "$GIT_SHA" --tool "docker compose + docker_smoke.sh" --check smoke=true --out production/evidence/docker-smoke.json
+      - name: Upload smoke evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: evidence-smoke
+          path: production/evidence/docker-smoke.json
+          if-no-files-found: error
+
+  build-staging-images:
+    name: Build, scan, sign, and attest immutable staging images
+    runs-on: ubuntu-latest
+    needs: [backend-gates, frontend-gates, docker-smoke]
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+    outputs:
+      backend_ref: ${{ steps.digests.outputs.backend_ref }}
+      frontend_ref: ${{ steps.digests.outputs.frontend_ref }}
+      backend_digest: ${{ steps.digests.outputs.backend_digest }}
+      frontend_digest: ${{ steps.digests.outputs.frontend_digest }}
+      backend_image: ${{ steps.refs.outputs.backend_image }}
+      frontend_image: ${{ steps.refs.outputs.frontend_image }}
+      alembic_head: ${{ steps.identity.outputs.alembic_head }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Reject an ambiguous manual release identity
+        run: |
+          set -euo pipefail
+          printf '%s' "$VERSION" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
+          if [ "$GITHUB_REF_TYPE" != tag ] && [ -z "${{ inputs.version }}" ]; then
+            echo 'workflow_dispatch must supply version' >&2
+            exit 1
+          fi
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - name: Determine one immutable Alembic head
+        id: identity
+        run: |
+          set -euo pipefail
+          uv sync --frozen --all-extras
+          heads="$(uv run alembic heads | cut -d ' ' -f 1)"
+          [ "$(printf '%s\n' "$heads" | wc -l | tr -d ' ')" = 1 ]
+          printf '%s' "$heads" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
+          echo "alembic_head=$heads" >> "$GITHUB_OUTPUT"
+      - name: Set up buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - name: Verify reviewed base-image registry manifests
+        run: uv run python scripts/image_reference_gate.py --report production/evidence/image-reference-gate.native.json
+      - name: Log in to ghcr.io
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download hosted gate evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: evidence-*
+          path: production/evidence
+          merge-multiple: true
+      - name: Compute staging references
+        id: refs
+        run: |
+          set -euo pipefail
+          repository="$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          backend_image="ghcr.io/${repository}/backend"
+          frontend_image="ghcr.io/${repository}/frontend"
+          staging="rc-${GIT_SHA:0:12}"
+          echo "BACKEND_IMAGE=$backend_image" >> "$GITHUB_ENV"
+          echo "FRONTEND_IMAGE=$frontend_image" >> "$GITHUB_ENV"
+          echo "STAGING_BACKEND=${backend_image}:${staging}" >> "$GITHUB_ENV"
+          echo "STAGING_FRONTEND=${frontend_image}:${staging}" >> "$GITHUB_ENV"
+          echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+          echo "backend_image=$backend_image" >> "$GITHUB_OUTPUT"
+          echo "frontend_image=$frontend_image" >> "$GITHUB_OUTPUT"
+      - name: Build and push backend multi-architecture image
+        run: |
+          docker buildx build --push --platform linux/amd64,linux/arm64 --provenance=true --sbom=true \
+            --build-arg GIT_SHA="$GIT_SHA" --build-arg GIT_REF="$GIT_REF" --build-arg BUILD_DATE="$BUILD_DATE" --build-arg VERSION="$VERSION" \
+            -t "$STAGING_BACKEND" .
+      - name: Build and push frontend multi-architecture image
+        run: |
+          docker buildx build --push --platform linux/amd64,linux/arm64 --provenance=true --sbom=true \
+            --build-arg GIT_SHA="$GIT_SHA" --build-arg GIT_REF="$GIT_REF" --build-arg BUILD_DATE="$BUILD_DATE" --build-arg VERSION="$VERSION" \
+            -t "$STAGING_FRONTEND" ./frontend
+      - name: Resolve exact multi-architecture manifest digests
+        id: digests
+        run: |
+          set -euo pipefail
+          backend_digest="$(docker buildx imagetools inspect "$STAGING_BACKEND" --format '{{.Manifest.Digest}}' | tr -d '\"')"
+          frontend_digest="$(docker buildx imagetools inspect "$STAGING_FRONTEND" --format '{{.Manifest.Digest}}' | tr -d '\"')"
+          printf '%s' "$backend_digest" | grep -Eq '^sha256:[0-9a-f]{64}$'
+          printf '%s' "$frontend_digest" | grep -Eq '^sha256:[0-9a-f]{64}$'
+          echo "backend_digest=$backend_digest" >> "$GITHUB_OUTPUT"
+          echo "frontend_digest=$frontend_digest" >> "$GITHUB_OUTPUT"
+          echo "backend_ref=$STAGING_BACKEND@$backend_digest" >> "$GITHUB_OUTPUT"
+          echo "frontend_ref=$STAGING_FRONTEND@$frontend_digest" >> "$GITHUB_OUTPUT"
+      - name: Install cosign
+        uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9
+      - name: Sign exact image digests with GitHub OIDC
+        env:
+          BACKEND_REF: ${{ steps.digests.outputs.backend_ref }}
+          FRONTEND_REF: ${{ steps.digests.outputs.frontend_ref }}
+        run: |
+          set -euo pipefail
+          mkdir -p production/sboms production/signatures production/provenance production/scans
+          cosign sign --yes --output-certificate production/signatures/backend.crt --output-signature production/signatures/backend.sig "$BACKEND_REF"
+          cosign sign --yes --output-certificate production/signatures/frontend.crt --output-signature production/signatures/frontend.sig "$FRONTEND_REF"
+      - name: Download digest-bound SBOM and provenance attestations
+        env:
+          BACKEND_REF: ${{ steps.digests.outputs.backend_ref }}
+          FRONTEND_REF: ${{ steps.digests.outputs.frontend_ref }}
+        run: |
+          set -euo pipefail
+          cosign download sbom "$BACKEND_REF" > production/sboms/backend.spdx.json
+          cosign download sbom "$FRONTEND_REF" > production/sboms/frontend.spdx.json
+          cosign download attestation "$BACKEND_REF" > production/provenance/backend.provenance.json
+          cosign download attestation "$FRONTEND_REF" > production/provenance/frontend.provenance.json
+      - name: Verify keyless cosign signatures against exact digest identity
+        env:
+          BACKEND_REF: ${{ steps.digests.outputs.backend_ref }}
+          FRONTEND_REF: ${{ steps.digests.outputs.frontend_ref }}
+        run: |
+          set -euo pipefail
+          identity="^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@"
+          cosign verify --certificate-identity-regexp "$identity" --certificate-oidc-issuer https://token.actions.githubusercontent.com --output json "$BACKEND_REF" > production/signatures/backend.verify.json
+          cosign verify --certificate-identity-regexp "$identity" --certificate-oidc-issuer https://token.actions.githubusercontent.com --output json "$FRONTEND_REF" > production/signatures/frontend.verify.json
+      - name: Scan backend image (HIGH/CRITICAL blocks)
+        env:
+          BACKEND_REF: ${{ steps.digests.outputs.backend_ref }}
+        run: docker run --rm -v "$PWD/production/scans:/scans" aquasec/trivy:0.58.0@sha256:b88012e2a0a309d6a8a00463d4e63e5e513377fb74eccbc8f9b0f8f81940ebeb image --severity HIGH,CRITICAL --exit-code 1 --format json --output /scans/backend-trivy.json "$BACKEND_REF"
+      - name: Scan frontend image (HIGH/CRITICAL blocks)
+        env:
+          FRONTEND_REF: ${{ steps.digests.outputs.frontend_ref }}
+        run: docker run --rm -v "$PWD/production/scans:/scans" aquasec/trivy:0.58.0@sha256:b88012e2a0a309d6a8a00463d4e63e5e513377fb74eccbc8f9b0f8f81940ebeb image --severity HIGH,CRITICAL --exit-code 1 --format json --output /scans/frontend-trivy.json "$FRONTEND_REF"
+      - name: Write immutable image manifest
+        env:
+          BACKEND_REF: ${{ steps.digests.outputs.backend_ref }}
+          FRONTEND_REF: ${{ steps.digests.outputs.frontend_ref }}
+          BACKEND_DIGEST: ${{ steps.digests.outputs.backend_digest }}
+          FRONTEND_DIGEST: ${{ steps.digests.outputs.frontend_digest }}
+          ALEMBIC_HEAD: ${{ steps.identity.outputs.alembic_head }}
+        run: |
+          python3 scripts/write_image_manifest.py --git-sha "$GIT_SHA" --git-ref "$GIT_REF" --version "$VERSION" --created "$BUILD_DATE" --alembic-head "$ALEMBIC_HEAD" \
+            --backend-image "$STAGING_BACKEND" --backend-digest "$BACKEND_DIGEST" --sbom-backend production/sboms/backend.spdx.json --signature-backend production/signatures/backend.sig --certificate-backend production/signatures/backend.crt --verification-backend production/signatures/backend.verify.json --scan-backend production/scans/backend-trivy.json --provenance-backend production/provenance/backend.provenance.json \
+            --frontend-image "$STAGING_FRONTEND" --frontend-digest "$FRONTEND_DIGEST" --sbom-frontend production/sboms/frontend.spdx.json --signature-frontend production/signatures/frontend.crt --certificate-frontend production/signatures/frontend.crt --verification-frontend production/signatures/frontend.verify.json --scan-frontend production/scans/frontend-trivy.json --provenance-frontend production/provenance/frontend.provenance.json --out production/image-manifest.json
+      - name: Verify supply-chain manifest and write evidence
+        run: |
+          set -euo pipefail
+          python3 scripts/image_gate.py --manifest production/image-manifest.json --report production/evidence/image-gate.native.json
+          hash="$(python3 -c 'import hashlib,pathlib; print(hashlib.sha256(pathlib.Path("production/image-manifest.json").read_bytes()).hexdigest())')"
+          python3 scripts/write_evidence.py image-supply-chain --passed --git-sha "$GIT_SHA" --tool "buildx,cosign,trivy,image_gate" --check "manifest_sha256=$hash" --out production/evidence/image-supply-chain.json
+      - name: Upload immutable build metadata
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-build-metadata
+          path: production/
+          retention-days: 90
+          if-no-files-found: error
+
+  live-production-certification:
+    name: Protected live certification (capacity, drill, browser, security, truth)
+    runs-on: [self-hosted, cygnus-production-certification]
+    needs: [build-staging-images]
+    environment: production
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    env:
+      CYGNUS_RELEASE: ${{ vars.CYGNUS_RELEASE }}
+      CYGNUS_PRODUCTION_ENV_FILE: ${{ vars.CYGNUS_PRODUCTION_ENV_FILE }}
+      CYGNUS_RELEASE_METADATA_FILE: ${{ vars.CYGNUS_RELEASE_METADATA_FILE }}
+      CYGNUS_PRODUCTION_E2E_RUNNER: ${{ vars.CYGNUS_PRODUCTION_E2E_RUNNER }}
+      CYGNUS_BROWSER_E2E_RUNNER: ${{ vars.CYGNUS_BROWSER_E2E_RUNNER }}
+      CYGNUS_SECURITY_FAILURE_INJECTION_RUNNER: ${{ vars.CYGNUS_SECURITY_FAILURE_INJECTION_RUNNER }}
+      CYGNUS_PERSISTED_DOMAIN_EVAL_RUNNER: ${{ vars.CYGNUS_PERSISTED_DOMAIN_EVAL_RUNNER }}
+      CYGNUS_CERTIFICATION_ARTIFACT_DIR: ${{ github.workspace }}/production/evidence
+      CYGNUS_EXPECTED_GIT_SHA: ${{ github.sha }}
+      CYGNUS_EXPECTED_BACKEND_IMAGE: ${{ needs.build-staging-images.outputs.backend_ref }}
+      CYGNUS_EXPECTED_FRONTEND_IMAGE: ${{ needs.build-staging-images.outputs.frontend_ref }}
+      CYGNUS_EXPECTED_ALEMBIC_HEAD: ${{ needs.build-staging-images.outputs.alembic_head }}
+    steps:
+      - name: Checkout certification source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - name: Download candidate build metadata
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-build-metadata
+          path: production
+      - name: Install locked certification dependencies
+        run: uv sync --frozen --all-extras
+      - name: Run native capacity/browser/security/truth certification
+        run: scripts/run_live_production_certification.sh
+      - name: Run native encrypted backup and isolated restore drill
+        run: scripts/prod/backup_restore_drill.sh
+      - name: Upload protected live certification evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-live-certification
+          path: production/evidence/
+          retention-days: 90
+          if-no-files-found: error
+
+  promote-release:
+    name: Verify complete evidence and promote exact digests
+    runs-on: ubuntu-latest
+    needs: [build-staging-images, live-production-certification]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Set up buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - name: Log in to ghcr.io
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download immutable build metadata
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-build-metadata
+          path: production
+      - name: Download protected live certification evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-live-certification
+          path: production/evidence
+      - name: Validate exact image and all publication evidence
+        run: |
+          python3 scripts/image_gate.py --manifest production/image-manifest.json
+          python3 scripts/release_gate.py --manifest production/image-manifest.json --evidence-dir production/evidence --report production/evidence/release-gate.json
+      - name: Promote only immutable candidate digest references
+        env:
+          BACKEND_REF: ${{ needs.build-staging-images.outputs.backend_ref }}
+          FRONTEND_REF: ${{ needs.build-staging-images.outputs.frontend_ref }}
+          BACKEND_IMAGE: ${{ needs.build-staging-images.outputs.backend_image }}
+          FRONTEND_IMAGE: ${{ needs.build-staging-images.outputs.frontend_image }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create --tag "${BACKEND_IMAGE}:${VERSION}" "$BACKEND_REF"
+          docker buildx imagetools create --tag "${FRONTEND_IMAGE}:${VERSION}" "$FRONTEND_REF"
+      - name: Upload complete release evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-evidence-${{ github.run_id }}
+          path: production/
+          retention-days: 90
+          if-no-files-found: error

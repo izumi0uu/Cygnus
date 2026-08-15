@@ -197,6 +197,7 @@ services:
     init: true
     environment:
       CYGNUS_DOMAIN: "${CYGNUS_DOMAIN:?CYGNUS_DOMAIN required in production environment}"
+      CYGNUS_PUBLIC_ORIGIN: "${CYGNUS_PUBLIC_ORIGIN:?CYGNUS_PUBLIC_ORIGIN required in production environment}"
       CYGNUS_METRICS_ALLOWED_CIDR: "${CYGNUS_METRICS_ALLOWED_CIDR:?CYGNUS_METRICS_ALLOWED_CIDR required in production environment}"
       MINIO_BUCKET: "${MINIO_BUCKET:?MINIO_BUCKET required in production environment}"
     ports:

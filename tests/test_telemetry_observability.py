@@ -477,6 +477,38 @@ class ProductionAlertInputGateTest(unittest.TestCase):
         self.assertEqual(failures, [])
         self.assertTrue(checks["alert_threshold_binding"])
 
+    def test_public_origin_accepts_approved_nonstandard_tls_port(self) -> None:
+        failures: list[str] = []
+        domain = self.gate._domain(
+            "vm-0-7-ubuntu.tailc9ec74.ts.net", "public_endpoint.domain", failures
+        )
+        origin = self.gate._origin(
+            "https://vm-0-7-ubuntu.tailc9ec74.ts.net:8443",
+            domain=domain,
+            path="public_endpoint.origin",
+            failures=failures,
+        )
+
+        self.assertEqual(failures, [])
+        self.assertEqual(origin, "https://vm-0-7-ubuntu.tailc9ec74.ts.net:8443")
+
+    def test_public_origin_rejects_reserved_domain_and_host_mismatch(self) -> None:
+        failures: list[str] = []
+        self.gate._domain(
+            "cygnus-certification.local", "public_endpoint.domain", failures
+        )
+        self.gate._origin(
+            "https://other.tailc9ec74.ts.net:8443",
+            domain="vm-0-7-ubuntu.tailc9ec74.ts.net",
+            path="public_endpoint.origin",
+            failures=failures,
+        )
+
+        self.assertTrue(any("public FQDN" in failure for failure in failures))
+        self.assertTrue(
+            any("canonical HTTPS origin" in failure for failure in failures)
+        )
+
 
 class AlertRulesTest(unittest.TestCase):
     def test_alert_rules_are_machine_readable_with_owner_runbook_recovery(self) -> None:

@@ -101,7 +101,7 @@ Boundary detail:
 Production uses a separate immutable manifest: [`deploy/docker-compose.prod.yml`](./deploy/docker-compose.prod.yml). It differs deliberately from the local stack:
 
 - **Prebuilt, digest-pinned images only** — no `build:`, no application source mounts. `api`/`worker`/`worker-skills`/`migrator` run the backend image and `frontend` runs the nginx image, both referenced as `name@sha256:...` from release metadata. Only read-only config/ops files (nginx template, security headers, worker healthcheck) and TLS secrets are mounted.
-- **Only the reverse proxy is exposed** — the `frontend` service maps public host `:80`/`:443` to unprivileged container `:8080`/`:8443` (TLS termination + strict headers + same-origin `/api`, `/oauth`, `/mcp`, `/.well-known` and presigned MinIO bucket paths). Postgres, Redis, MinIO, API and workers publish no host ports.
+- **Only the reverse proxy is exposed** — the `frontend` service maps configurable host ports (default `:80`/`:443`) to unprivileged container `:8080`/`:8443`. `CYGNUS_PUBLIC_ORIGIN` may name an approved external TLS terminator on a different port; same-origin `/api`, `/oauth`, `/mcp`, `/.well-known`, and presigned MinIO paths remain mandatory. Postgres, Redis, MinIO, API, and workers publish no host ports.
 - **Distinct app services with healthchecks and drain grace** — `api`, `worker` (default queue) and `worker-skills` each have a healthcheck (workers probe the per-role runtime heartbeat in Redis), run under the graceful drain runner (`python -m cygnus.runtime.worker <Settings>`), and get a 120s `stop_grace_period` that exceeds `worker_drain_grace_seconds`.
 - **Migration job first** — the one-shot `migrator` runs `alembic upgrade head` (the `20260627_00_pre_governance_baseline` root covers empty databases) followed by `cygnus.runtime.bootstrap.ensure_storage` (settings validation + bucket ensure only — no `create_all`, no stamp, no seeding). Every app service `depends_on` it with `service_completed_successfully`; even a bare `docker compose up -d` upgrades the DB before rollout.
 - **Named persistent volumes** — `cygnus-prod-postgres`, `cygnus-prod-redis`, `cygnus-prod-minio`.
@@ -112,7 +112,7 @@ Production uses a separate immutable manifest: [`deploy/docker-compose.prod.yml`
 | Path | Purpose |
 | --- | --- |
 | `deploy/docker-compose.prod.yml` | production manifest (immutable, digest-pinned) |
-| `deploy/nginx/nginx.prod.conf.template` | TLS reverse-proxy config, rendered by the nginx image entrypoint (envsubst); `CYGNUS_DOMAIN` and `MINIO_BUCKET` are substituted, nginx `$vars` are preserved |
+| `deploy/nginx/nginx.prod.conf.template` | TLS reverse-proxy config, rendered by the nginx image entrypoint (envsubst); `CYGNUS_DOMAIN`, `CYGNUS_PUBLIC_ORIGIN`, and `MINIO_BUCKET` are substituted, nginx `$vars` are preserved |
 | `deploy/nginx/security-headers.conf` | HSTS, CSP, X-Frame-Options, nosniff, referrer/permissions/COOP/CORP policies |
 | `deploy/healthchecks/worker_healthcheck.py` | per-role worker healthcheck (Redis + heartbeat freshness) |
 | `deploy/.env.prod.example` | template for `deploy/.env.prod` (git-ignored) — secrets and runtime settings |
@@ -133,9 +133,10 @@ cd /srv/cygnus
 cp deploy/.env.prod.example deploy/.env.prod
 $EDITOR deploy/.env.prod
 
-# 2. Approved non-secret Production V1 decision manifest. It binds public DNS,
-# metrics CIDR, capacity and alert-threshold identity/hash, delivery endpoints/
-# allowlist, HMAC secret-store reference, recovery objectives, and approvals.
+# 2. Approved non-secret Production V1 decision manifest. It binds public DNS
+# and canonical origin (including any non-default TLS port), metrics CIDR,
+# capacity and alert-threshold identity/hash, delivery endpoints/allowlist,
+# HMAC secret-store reference, recovery objectives, and approvals.
 cp deploy/production-inputs.example.json deploy/production-inputs.json
 $EDITOR deploy/production-inputs.json
 
@@ -159,9 +160,13 @@ CYGNUS_RELEASE=0.1.0
 # private stateful services -> current-image migration -> rollout -> TLS JSON gates.
 scripts/prod/deploy.sh --release "$CYGNUS_RELEASE"
 
-# Read-only health proof through the actual TLS proxy. No -k is allowed.
-curl --fail --resolve "${CYGNUS_DOMAIN}:443:127.0.0.1" "https://${CYGNUS_DOMAIN}/livez"
-curl --fail --resolve "${CYGNUS_DOMAIN}:443:127.0.0.1" "https://${CYGNUS_DOMAIN}/readyz"
+# Read-only local health proof through the deployed TLS proxy. No -k is allowed.
+LOCAL_TLS_ORIGIN="https://${CYGNUS_DOMAIN}:${CYGNUS_HTTPS_BIND_PORT}"
+curl --fail --resolve "${CYGNUS_DOMAIN}:${CYGNUS_HTTPS_BIND_PORT}:127.0.0.1" "${LOCAL_TLS_ORIGIN}/livez"
+curl --fail --resolve "${CYGNUS_DOMAIN}:${CYGNUS_HTTPS_BIND_PORT}:127.0.0.1" "${LOCAL_TLS_ORIGIN}/readyz"
+
+# Independently prove the approved external origin/port.
+curl --fail "${CYGNUS_PUBLIC_ORIGIN}/readyz"
 ```
 
 `deploy.sh` verifies a plain-HTTP redirect and JSON `alive`/`ready` responses
@@ -274,19 +279,19 @@ digest with a mutable tag.
 
 ### Security posture
 
-- only public host `:80`/`:443` are published, mapped to the frontend's unprivileged container `:8080`/`:8443`; everything else stays internal to `prodnet`
+- only the configurable frontend host bindings (default `:80`/`:443`) are published, mapped to unprivileged container `:8080`/`:8443`; an approved external TLS terminator may expose a different port recorded in `CYGNUS_PUBLIC_ORIGIN`; everything else stays internal to `prodnet`
 - backend containers run `read_only: true`, as uid `65534`, `cap_drop: [ALL]`, `no-new-privileges`, with `/tmp` tmpfs
 - frontend nginx runs as the image's unprivileged `nginx` user with `read_only: true`, bounded tmpfs for cache/run/conf, `cap_drop: [ALL]`, `no-new-privileges`, and no added or file capabilities
 - TLS 1.2/1.3 with modern ciphers, HSTS, strict CSP/headers (see `deploy/nginx/security-headers.conf`)
 - credentials live only in `deploy/.env.prod` (git-ignored, `required: true`) and TLS material is referenced by external path (compose secrets → `/run/secrets/`)
 - Production pins pgvector `0.8.6-pg16-trixie`, Redis `7.4-alpine3.21`, and MinIO `RELEASE.2025-09-07T16-13-09Z` to reviewed multi-architecture manifest digests. Update each tag and digest together, then rerun migration, compose-smoke, backup/restore, and vulnerability gates before rollout; the local stack pins only MinIO's named release for developer reproducibility.
-- MinIO presigned URLs must stay same-origin: set `MINIO_PUBLIC_ENDPOINT` to the same host as `CYGNUS_DOMAIN` (no scheme/path) so the proxy can serve the bucket path
+- MinIO presigned URLs must stay same-origin: set `MINIO_PUBLIC_ENDPOINT` to the authority (`host[:port]`) from `CYGNUS_PUBLIC_ORIGIN` so the proxy can serve the bucket path
 - `TRUSTED_PROXY_IPS` is exactly the deterministic production `prodnet` CIDR (`172.30.0.0/24`); the API honors forwarded client addresses only from that immediate nginx peer, never from arbitrary internet clients.
 - The production CSP is self-origin only for scripts/fonts. The SPA uses `/theme-bootstrap.js` and local assets; Google Fonts and inline scripts are intentionally absent so CSP does not silently block the console.
 
 ### Production notes
 
-- **Presigned URLs**: with `MINIO_PUBLIC_ENDPOINT` set, the API signs URLs against `https://<domain>/<bucket>/<key>` and the nginx template routes `/<bucket>/` to MinIO. Do not point `MINIO_PUBLIC_ENDPOINT` at a different origin unless you extend the CSP (`img-src`/`connect-src`) in `deploy/nginx/security-headers.conf`.
+- **Presigned URLs**: with `MINIO_PUBLIC_ENDPOINT` set, the API signs URLs against the exact `CYGNUS_PUBLIC_ORIGIN` authority and the nginx template routes `/<bucket>/` to MinIO. Do not point `MINIO_PUBLIC_ENDPOINT` at a different origin unless you extend the CSP (`img-src`/`connect-src`) in `deploy/nginx/security-headers.conf`.
 - **Drain contract**: worker `stop_grace_period` (120s) must stay above `WORKER_DRAIN_GRACE_SECONDS` (default 30s) plus the heartbeat stop window; raise both together.
 - **Migration model**: schema is owned exclusively by alembic — `20260627_00_pre_governance_baseline` is the empty-DB root that froze the pre-governance runtime schema, and later governance revisions chain from it. The production migrator runs `alembic upgrade head` then the narrow `ensure_storage` step; nothing in deploy/rollback/compose calls `create_all`, `stamp`, or admin seeding (those remain local-stack-only conveniences in `init_local_stack`).
 - **No `CYGNUS_` env prefix**: `deploy/.env.prod` uses the raw runtime setting names (case-insensitive), same contract as `.env.docker.example`.

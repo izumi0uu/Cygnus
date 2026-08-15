@@ -492,6 +492,7 @@ def _validate_production_inputs(
     for key in (
         "metrics_allowlist_binding",
         "public_domain_binding",
+        "public_origin_binding",
         "capacity_threshold_binding",
         "alert_threshold_binding",
         "backup_objective_binding",

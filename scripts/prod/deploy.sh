@@ -53,7 +53,7 @@ recover_failed_rollout() {
 log "release:   $RELEASE"
 log "api:       $CYGNUS_API_IMAGE"
 log "frontend:  $CYGNUS_FRONTEND_IMAGE"
-log "ingress:   https://$CYGNUS_DOMAIN"
+log "ingress:   $CYGNUS_PUBLIC_ORIGIN"
 log "identity:  release=$APP_RELEASE commit=$APP_COMMIT_SHA deployment=$APP_DEPLOYMENT_ID head=$EXPECTED_ALEMBIC_HEAD"
 
 if [ "$DRY_RUN" = 1 ]; then
@@ -94,7 +94,7 @@ activate_release_checkout "$RELEASE"
 save_state "$PREVIOUS" "$RELEASE"
 trap - EXIT
 
-log "deploy complete: $RELEASE is ready at https://$CYGNUS_DOMAIN"
+log "deploy complete: $RELEASE is ready at $CYGNUS_PUBLIC_ORIGIN"
 if [ -n "$PREVIOUS" ]; then
   log "rollback target: scripts/prod/rollback.sh --release $PREVIOUS"
 fi

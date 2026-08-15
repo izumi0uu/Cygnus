@@ -218,6 +218,7 @@ class ReleaseGateTests(unittest.TestCase):
                 "release_alembic_head": {"matches": True},
                 "metrics_allowlist_binding": True,
                 "public_domain_binding": True,
+                "public_origin_binding": True,
                 "capacity_threshold_binding": True,
                 "alert_threshold_binding": True,
                 "backup_objective_binding": True,

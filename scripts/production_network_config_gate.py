@@ -10,6 +10,8 @@ import re
 import sys
 from pathlib import Path
 from typing import TypedDict
+from urllib.parse import urlsplit
+
 
 FQDN_RE = re.compile(
     r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$"
@@ -17,26 +19,61 @@ FQDN_RE = re.compile(
 PLACEHOLDER_RE = re.compile(
     r"(?:change|replace|example|placeholder|todo)", re.IGNORECASE
 )
+RESERVED_TLDS = frozenset({"example", "invalid", "local", "localhost", "test"})
 
 
 class NetworkGateResult(TypedDict):
     ok: bool
     failures: list[str]
     domain: str
+    public_origin: str
     metrics_cidr: str
     proxy_cidr: str
 
 
+def _public_origin_failure(*, domain: str, public_origin: str) -> str | None:
+    try:
+        parsed = urlsplit(public_origin)
+        port = parsed.port
+    except ValueError:
+        return "CYGNUS_PUBLIC_ORIGIN must be a canonical HTTPS origin"
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != domain
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path
+        or parsed.query
+        or parsed.fragment
+        or port == 0
+    ):
+        return "CYGNUS_PUBLIC_ORIGIN must be a canonical HTTPS origin for CYGNUS_DOMAIN"
+    authority = domain if port is None else f"{domain}:{port}"
+    if public_origin != f"https://{authority}":
+        return "CYGNUS_PUBLIC_ORIGIN must not contain credentials, a path, or non-canonical host syntax"
+    return None
+
+
 def validate(
-    *, domain: str, metrics_cidr: str, expected_proxy_cidr: str
+    *,
+    domain: str,
+    public_origin: str,
+    metrics_cidr: str,
+    expected_proxy_cidr: str,
 ) -> NetworkGateResult:
     failures: list[str] = []
     if (
         domain != domain.lower()
         or not FQDN_RE.fullmatch(domain)
         or PLACEHOLDER_RE.search(domain)
+        or domain.rsplit(".", 1)[-1] in RESERVED_TLDS
     ):
-        failures.append("CYGNUS_DOMAIN must be a lowercase, non-placeholder bare FQDN")
+        failures.append(
+            "CYGNUS_DOMAIN must be a lowercase, non-placeholder public FQDN"
+        )
+    origin_failure = _public_origin_failure(domain=domain, public_origin=public_origin)
+    if origin_failure:
+        failures.append(origin_failure)
     if (
         any(character.isspace() for character in metrics_cidr)
         or ";" in metrics_cidr
@@ -72,6 +109,7 @@ def validate(
         "ok": not failures,
         "failures": failures,
         "domain": domain,
+        "public_origin": public_origin,
         "metrics_cidr": metrics_cidr,
         "proxy_cidr": expected_proxy_cidr,
     }
@@ -80,6 +118,7 @@ def validate(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--domain", required=True)
+    parser.add_argument("--public-origin", required=True)
     parser.add_argument("--metrics-cidr", required=True)
     parser.add_argument("--expected-proxy-cidr", required=True)
     parser.add_argument("--report", type=Path)
@@ -87,6 +126,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     result = validate(
         domain=args.domain,
+        public_origin=args.public_origin,
         metrics_cidr=args.metrics_cidr,
         expected_proxy_cidr=args.expected_proxy_cidr,
     )

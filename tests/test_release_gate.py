@@ -13,10 +13,54 @@ from typing import TypeAlias, cast
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 SHA = "b" * 40
 DIGEST = "sha256:" + "c" * 64
+PLATFORM_DIGESTS = {
+    "linux/amd64": "sha256:" + "d" * 64,
+    "linux/arm64": "sha256:" + "e" * 64,
+}
 
 JSONValue: TypeAlias = (
     None | bool | int | float | str | list["JSONValue"] | dict[str, "JSONValue"]
 )
+
+
+def sbom_bundle() -> dict[str, JSONValue]:
+    return {
+        "schema_version": 1,
+        "image_index_digest": DIGEST,
+        "platforms": {
+            platform: {
+                "manifest_digest": manifest_digest,
+                "document": {"SPDXID": "SPDXRef-DOCUMENT"},
+            }
+            for platform, manifest_digest in PLATFORM_DIGESTS.items()
+        },
+    }
+
+
+def provenance_bundle() -> dict[str, JSONValue]:
+    return {
+        "schema_version": 1,
+        "image_index_digest": DIGEST,
+        "platforms": {
+            platform: {
+                "manifest_digest": manifest_digest,
+                "attestations": [
+                    {
+                        "_type": "https://in-toto.io/Statement/v1",
+                        "predicateType": "https://slsa.dev/provenance/v1",
+                        "subject": [
+                            {
+                                "digest": {
+                                    "sha256": manifest_digest.removeprefix("sha256:")
+                                }
+                            }
+                        ],
+                    }
+                ],
+            }
+            for platform, manifest_digest in PLATFORM_DIGESTS.items()
+        },
+    }
 
 
 def load(name: str):
@@ -81,13 +125,9 @@ class ReleaseGateTests(unittest.TestCase):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 value: JSONValue
                 if artifact == "sbom":
-                    value = {"SPDXID": "SPDXRef-DOCUMENT"}
+                    value = sbom_bundle()
                 elif artifact == "provenance":
-                    value = {
-                        "_type": "https://in-toto.io/Statement/v1",
-                        "predicateType": "https://slsa.dev/provenance/v1",
-                        "subject": [{"digest": {"sha256": DIGEST[7:]}}],
-                    }
+                    value = provenance_bundle()
                 elif artifact == "verification":
                     value = [
                         {"critical": {"image": {"docker-manifest-digest": DIGEST}}}

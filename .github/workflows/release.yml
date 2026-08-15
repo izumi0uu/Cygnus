@@ -277,16 +277,20 @@ jobs:
           mkdir -p production/sboms production/signatures production/provenance production/scans
           cosign sign --yes --output-certificate production/signatures/backend.crt --output-signature production/signatures/backend.sig "$BACKEND_REF"
           cosign sign --yes --output-certificate production/signatures/frontend.crt --output-signature production/signatures/frontend.sig "$FRONTEND_REF"
-      - name: Download digest-bound SBOM and provenance attestations
+      - name: Collect platform-bound SBOM and provenance attestations
         env:
           BACKEND_REF: ${{ steps.digests.outputs.backend_ref }}
           FRONTEND_REF: ${{ steps.digests.outputs.frontend_ref }}
         run: |
           set -euo pipefail
-          cosign download sbom "$BACKEND_REF" > production/sboms/backend.spdx.json
-          cosign download sbom "$FRONTEND_REF" > production/sboms/frontend.spdx.json
-          cosign download attestation "$BACKEND_REF" > production/provenance/backend.provenance.json
-          cosign download attestation "$FRONTEND_REF" > production/provenance/frontend.provenance.json
+          uv run python scripts/collect_image_attestations.py \
+            --image "$BACKEND_REF" \
+            --sbom-out production/sboms/backend.bundle.json \
+            --provenance-out production/provenance/backend.bundle.json
+          uv run python scripts/collect_image_attestations.py \
+            --image "$FRONTEND_REF" \
+            --sbom-out production/sboms/frontend.bundle.json \
+            --provenance-out production/provenance/frontend.bundle.json
       - name: Verify keyless cosign signatures against exact digest identity
         env:
           BACKEND_REF: ${{ steps.digests.outputs.backend_ref }}
@@ -313,8 +317,8 @@ jobs:
           ALEMBIC_HEAD: ${{ steps.identity.outputs.alembic_head }}
         run: |
           python3 scripts/write_image_manifest.py --git-sha "$GIT_SHA" --git-ref "$GIT_REF" --version "$VERSION" --created "$BUILD_DATE" --alembic-head "$ALEMBIC_HEAD" \
-            --backend-image "$STAGING_BACKEND" --backend-digest "$BACKEND_DIGEST" --sbom-backend production/sboms/backend.spdx.json --signature-backend production/signatures/backend.sig --certificate-backend production/signatures/backend.crt --verification-backend production/signatures/backend.verify.json --scan-backend production/scans/backend-trivy.json --provenance-backend production/provenance/backend.provenance.json \
-            --frontend-image "$STAGING_FRONTEND" --frontend-digest "$FRONTEND_DIGEST" --sbom-frontend production/sboms/frontend.spdx.json --signature-frontend production/signatures/frontend.sig --certificate-frontend production/signatures/frontend.crt --verification-frontend production/signatures/frontend.verify.json --scan-frontend production/scans/frontend-trivy.json --provenance-frontend production/provenance/frontend.provenance.json --out production/image-manifest.json
+            --backend-image "$STAGING_BACKEND" --backend-digest "$BACKEND_DIGEST" --sbom-backend production/sboms/backend.bundle.json --signature-backend production/signatures/backend.sig --certificate-backend production/signatures/backend.crt --verification-backend production/signatures/backend.verify.json --scan-backend production/scans/backend-trivy.json --provenance-backend production/provenance/backend.bundle.json \
+            --frontend-image "$STAGING_FRONTEND" --frontend-digest "$FRONTEND_DIGEST" --sbom-frontend production/sboms/frontend.bundle.json --signature-frontend production/signatures/frontend.sig --certificate-frontend production/signatures/frontend.crt --verification-frontend production/signatures/frontend.verify.json --scan-frontend production/scans/frontend-trivy.json --provenance-frontend production/provenance/frontend.bundle.json --out production/image-manifest.json
       - name: Verify supply-chain manifest and write evidence
         run: |
           set -euo pipefail

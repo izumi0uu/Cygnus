@@ -21,6 +21,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_VERSION = 2
 DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 FAILING_SEVERITIES = frozenset({"HIGH", "CRITICAL"})
+REQUIRED_PLATFORMS = ("linux/amd64", "linux/arm64")
 
 
 class GateResult(TypedDict):
@@ -88,35 +89,106 @@ def _has_digest(value: Any, digest: str) -> bool:
     return False
 
 
-def _validate_sbom(
-    path: Path, key: str, failures: list[str], checks: dict[str, object]
-) -> None:
-    data = _json_file(path, f"images.{key}.sbom", failures)
+def _contains_text(value: object, fragment: str) -> bool:
+    return any(
+        isinstance(item, str) and fragment in item for item in _walk_values(value)
+    )
+
+
+def _bundle_platform_digests(
+    data: object,
+    *,
+    label: str,
+    index_digest: str,
+    failures: list[str],
+) -> dict[str, str] | None:
     if not isinstance(data, dict):
-        return
-    spdx = data.get("SPDXID")
-    checks[f"{key}_sbom_spdx"] = spdx
-    if not isinstance(spdx, str) or not spdx:
-        failures.append(f"images.{key}.sbom is not an SPDX document (no SPDXID)")
+        failures.append(f"{label} must be a JSON object")
+        return None
+    if data.get("schema_version") != 1:
+        failures.append(f"{label}.schema_version must be 1")
+    if data.get("image_index_digest") != index_digest:
+        failures.append(f"{label} is not bound to image index {index_digest}")
+    raw_platforms = data.get("platforms")
+    if not isinstance(raw_platforms, dict):
+        failures.append(f"{label}.platforms must be an object")
+        return None
+    manifests: dict[str, str] = {}
+    for platform in REQUIRED_PLATFORMS:
+        entry = raw_platforms.get(platform)
+        if not isinstance(entry, dict):
+            failures.append(f"{label} is missing platform {platform}")
+            continue
+        manifest_digest = entry.get("manifest_digest")
+        if not isinstance(manifest_digest, str) or not DIGEST_PATTERN.fullmatch(
+            manifest_digest
+        ):
+            failures.append(f"{label}.{platform}.manifest_digest is invalid")
+            continue
+        manifests[platform] = manifest_digest
+    return manifests
+
+
+def _validate_sbom(
+    path: Path,
+    key: str,
+    digest: str,
+    failures: list[str],
+    checks: dict[str, object],
+) -> dict[str, str] | None:
+    label = f"images.{key}.sbom"
+    data = _json_file(path, label, failures)
+    manifests = _bundle_platform_digests(
+        data, label=label, index_digest=digest, failures=failures
+    )
+    if not isinstance(data, dict) or manifests is None:
+        return manifests
+    raw_platforms = data.get("platforms")
+    if not isinstance(raw_platforms, dict):
+        return manifests
+    for platform in REQUIRED_PLATFORMS:
+        entry = raw_platforms.get(platform)
+        if not isinstance(entry, dict):
+            continue
+        document = entry.get("document")
+        spdx = document.get("SPDXID") if isinstance(document, dict) else None
+        checks[f"{key}_{platform}_sbom_spdx"] = spdx
+        if not isinstance(spdx, str) or not spdx:
+            failures.append(f"{label}.{platform}.document is not an SPDX document")
+    return manifests
 
 
 def _validate_provenance(
-    path: Path, key: str, digest: str, failures: list[str], checks: dict[str, object]
-) -> None:
-    data = _json_file(path, f"images.{key}.provenance", failures)
-    if data is None:
-        return
-    serialized = json.dumps(data, sort_keys=True)
-    checks[f"{key}_provenance_digest_bound"] = _has_digest(data, digest)
-    if (
-        "slsa.dev/provenance" not in serialized
-        and "in-toto.io/Statement" not in serialized
-    ):
-        failures.append(
-            f"images.{key}.provenance is not an in-toto/SLSA provenance record"
-        )
-    if not _has_digest(data, digest):
-        failures.append(f"images.{key}.provenance is not bound to {digest}")
+    path: Path,
+    key: str,
+    digest: str,
+    failures: list[str],
+    checks: dict[str, object],
+) -> dict[str, str] | None:
+    label = f"images.{key}.provenance"
+    data = _json_file(path, label, failures)
+    manifests = _bundle_platform_digests(
+        data, label=label, index_digest=digest, failures=failures
+    )
+    if not isinstance(data, dict) or manifests is None:
+        return manifests
+    raw_platforms = data.get("platforms")
+    if not isinstance(raw_platforms, dict):
+        return manifests
+    for platform, manifest_digest in manifests.items():
+        entry = raw_platforms.get(platform)
+        attestations = entry.get("attestations") if isinstance(entry, dict) else None
+        has_slsa = _contains_text(attestations, "slsa.dev/provenance")
+        digest_bound = _has_digest(attestations, manifest_digest)
+        checks[f"{key}_{platform}_provenance_digest_bound"] = digest_bound
+        if not isinstance(attestations, list) or not attestations:
+            failures.append(f"{label}.{platform}.attestations must be non-empty")
+            continue
+        if not has_slsa:
+            failures.append(f"{label}.{platform} has no SLSA provenance record")
+        if not digest_bound:
+            failures.append(f"{label}.{platform} is not bound to {manifest_digest}")
+    return manifests
 
 
 def _validate_verification(
@@ -222,10 +294,24 @@ def validate_manifest(manifest: dict[str, object], repo_root: Path) -> GateResul
             )
             if path is not None:
                 paths[artifact] = path
+        sbom_manifests: dict[str, str] | None = None
+        provenance_manifests: dict[str, str] | None = None
         if "sbom" in paths:
-            _validate_sbom(paths["sbom"], key, failures, checks)
+            sbom_manifests = _validate_sbom(
+                paths["sbom"], key, digest, failures, checks
+            )
         if "provenance" in paths:
-            _validate_provenance(paths["provenance"], key, digest, failures, checks)
+            provenance_manifests = _validate_provenance(
+                paths["provenance"], key, digest, failures, checks
+            )
+        if (
+            sbom_manifests is not None
+            and provenance_manifests is not None
+            and sbom_manifests != provenance_manifests
+        ):
+            failures.append(
+                f"images.{key} SBOM and provenance platform manifests disagree"
+            )
         if "verification" in paths:
             _validate_verification(paths["verification"], key, digest, failures, checks)
         if "scan" in paths:

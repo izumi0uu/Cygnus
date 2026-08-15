@@ -82,6 +82,7 @@ def validate_repository(root: Path = REPO_ROOT) -> GateResult:
         "scripts/prod/rotate-secrets.sh",
         "scripts/prod/incident.sh",
         "scripts/production_inputs_gate.py",
+        "scripts/collect_image_attestations.py",
         "scripts/render_alert_rules.py",
         "scripts/release_gate.py",
     )
@@ -229,8 +230,9 @@ def validate_repository(root: Path = REPO_ROOT) -> GateResult:
         "--certificate-backend production/signatures/backend.crt",
         "--signature-frontend production/signatures/frontend.sig",
         "--certificate-frontend production/signatures/frontend.crt",
-        "cosign download sbom",
-        "cosign download attestation",
+        "collect_image_attestations.py",
+        "backend.bundle.json",
+        "frontend.bundle.json",
         "image_reference_gate.py",
         "image_gate.py",
         "release_gate.py",
@@ -259,6 +261,27 @@ def validate_repository(root: Path = REPO_ROOT) -> GateResult:
     failures.extend(
         f"release workflow missing required step/fragment: {fragment}"
         for fragment in missing_workflow
+    )
+    collector = _read(root, "scripts/collect_image_attestations.py")
+    required_collector_fragments = (
+        '"download",',
+        '"sbom",',
+        '"attestation",',
+        '"--platform",',
+        '"linux/amd64"',
+        '"linux/arm64"',
+        '"image_index_digest"',
+        '"manifest_digest"',
+    )
+    missing_collector = [
+        fragment
+        for fragment in required_collector_fragments
+        if fragment not in collector
+    ]
+    checks["platform_attestation_collector"] = {"missing": missing_collector}
+    failures.extend(
+        f"image attestation collector missing required fragment: {fragment}"
+        for fragment in missing_collector
     )
     required_repo_guard_fragments = (
         "pgvector/pgvector:0.8.6-pg16-trixie@sha256:",

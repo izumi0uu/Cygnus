@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_BASE_REF = "origin/main"
+RESTORE_USER_NAME = "Cygnus Restore Verification"
+RESTORE_USER_EMAIL = "cygnus-restore@example.invalid"
 
 
 @dataclass
@@ -267,6 +269,8 @@ def verify_patch_series(
     restore_root = Path(tempfile.mkdtemp(prefix="cygnus-arkon-restore-patch-"))
     subprocess.check_call(["git", "clone", "--quiet", str(repo), str(restore_root)])
     run_git_quiet(restore_root, "checkout", artifact.base_commit)
+    run_git_quiet(restore_root, "config", "user.name", RESTORE_USER_NAME)
+    run_git_quiet(restore_root, "config", "user.email", RESTORE_USER_EMAIL)
     subprocess.check_call(
         [
             "git",

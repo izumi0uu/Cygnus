@@ -45,6 +45,7 @@ from cygnus.publish.durable import (
     durable_publish_command_for_signal,
 )
 from cygnus.review.contributions import approve_wiki_draft, submit_wiki_draft
+from cygnus.retrieval.substrate_provider import load_substrate_snapshot
 from cygnus.review.intake import PressureSignalType
 from cygnus.runtime.database.models import (
     AuditLog,
@@ -381,6 +382,22 @@ class TicketSourcePublicationPostgresTests(unittest.TestCase):
                     persisted_publication.object_ref,
                     governed_object_ref(persisted_page.id),
                 )
+                snapshot = await load_substrate_snapshot(session)
+                published_truth = snapshot.persisted_truth_by_object.get(object_ref)
+                self.assertIsNotNone(published_truth)
+                if published_truth is None:
+                    raise AssertionError(
+                        "durably published object was omitted from governed retrieval"
+                    )
+                self.assertTrue(published_truth.source_evidence_complete)
+                self.assertEqual(
+                    [
+                        record.binding_key
+                        for record in snapshot.delivery_records_by_object[object_ref]
+                    ],
+                    [binding.binding_key],
+                )
+                self.assertIn(object_ref, {item.object_id for item in snapshot.objects})
 
                 replayed_publish = await apply_durable_publish(
                     session,

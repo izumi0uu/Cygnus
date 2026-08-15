@@ -56,7 +56,7 @@ from cygnus.retrieval.contracts import (
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from cygnus.runtime.database.models import Source, WikiPage
+    from cygnus.runtime.database.models import GovernanceAudienceBinding, Source, WikiPage
 
 RESERVED_WIKI_SLUGS = ("_index", "_log", "_hot")
 
@@ -456,13 +456,16 @@ def _binding_version_map(raw: object) -> dict[str, int]:
     return result
 
 
-def _binding_keys(raw: object) -> set[str]:
+def _binding_is_referenced(binding: GovernanceAudienceBinding, raw: object) -> bool:
+    """Match one persisted binding to the canonical publish-binding payload."""
     values = raw if isinstance(raw, list) else ()
-    return {
-        item["binding_key"]
+    expected_audience = _audience_filter_from_binding(binding).to_dict()
+    return any(
+        isinstance(item, dict)
+        and item.get("channel") == binding.channel
+        and item.get("audience_filter") == expected_audience
         for item in values
-        if isinstance(item, dict) and isinstance(item.get("binding_key"), str)
-    }
+    )
 
 
 def _datetime_value(value: datetime | None) -> str | None:
@@ -645,8 +648,8 @@ async def load_substrate_snapshot(
             propagation = propagation_by_publication_channel.get(
                 (publication.id, binding.channel)
             )
-            if propagation is None or binding.binding_key not in _binding_keys(
-                propagation.binding_refs
+            if propagation is None or not _binding_is_referenced(
+                binding, propagation.binding_refs
             ):
                 continue
             delivery = delivery_by_propagation.get(propagation.id)

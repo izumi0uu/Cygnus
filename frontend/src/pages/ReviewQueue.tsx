@@ -1,7 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
-import { SlidersHorizontal, Plus, X } from 'lucide-react'
+import { RotateCw, X } from 'lucide-react'
 import {
   fetchReviewIntake,
   type ReviewIntakeSurface,
@@ -9,7 +9,6 @@ import {
   type PriorityItem,
   type ReviewAssignmentCommandResult,
 } from '@/lib/api'
-import { Button } from '@/components/ui/button'
 import { Segmented } from '@/components/Segmented'
 import { Stat } from '@/components/Stat'
 import { useVocab } from '@/lib/vocab'
@@ -19,46 +18,83 @@ import { useFocusTrap } from '@/lib/useFocusTrap'
 import { PlotterPanel } from '@/components/PlotterPanel'
 import { ObservationBanner } from '@/components/ObservationBanner'
 import { SourceFailureCard } from '@/components/SourceFailureCard'
+import { RequestErrorState } from '@/components/RequestState'
 
 const HEAT: Record<string, string> = { urgent: 'bp-tol-urgent', high: 'bp-tol-high', medium: 'bp-tol-high', low: 'bp-tol-flat' }
 const DOT: Record<string, string> = { urgent: 'var(--urgent)', high: 'var(--high)', medium: 'var(--medium)', low: 'var(--faint)' }
+const EVIDENCE_LABEL_KEY: Record<string, string> = {
+  sufficient: 'queue.evidence.sufficient',
+  partial: 'queue.evidence.partial',
+  insufficient: 'queue.evidence.insufficient',
+}
 
 type Filter = 'all' | 'urgent' | 'unassigned'
 
 export default function ReviewQueue() {
   const { t } = useTranslation()
-  const v = useVocab()
   const [data, setData] = useState<ReviewIntakeSurface | null>(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [filter, setFilter] = useState<Filter>('all')
+  const [error, setError] = useState<unknown>(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshError, setRefreshError] = useState<unknown>(null)
   const [searchParams, setSearchParams] = useSearchParams()
+  const filterParam = searchParams.get('filter')
+  const filter: Filter = filterParam === 'urgent' || filterParam === 'unassigned' ? filterParam : 'all'
+  const setFilter = (nextFilter: Filter) => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      if (nextFilter === 'all') next.delete('filter')
+      else next.set('filter', nextFilter)
+      return next
+    }, { replace: true })
+  }
+  const requestKey = useRef(0)
 
-  const load = (background = false) => {
-    // Background re-reads (after a durable queue command) must not flip
-    // the page into the skeleton or tear down the open drawer/modal; on
-    // failure the stale surface stays and the durable receipt still carries
-    // the authoritative server response.
-    if (!background) {
+  const load = useCallback((background = false) => {
+    const key = ++requestKey.current
+    if (background) {
+      setRefreshing(true)
+      setRefreshError(null)
+    } else {
       setLoading(true)
       setError(null)
     }
     fetchReviewIntake()
-      .then(setData)
-      .catch((e) => {
-        if (!background) setError(String(e))
+      .then((next) => {
+        if (key === requestKey.current) setData(next)
       })
-      .finally(() => setLoading(false))
-  }
-  useEffect(() => {
-    fetchReviewIntake().then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false))
+      .catch((nextError: unknown) => {
+        if (key !== requestKey.current) return
+        if (background) setRefreshError(nextError)
+        else setError(nextError)
+      })
+      .finally(() => {
+        if (key !== requestKey.current) return
+        if (background) setRefreshing(false)
+        else setLoading(false)
+      })
   }, [])
 
-  // bundle lookup by object_ref (proposal_id === object_ref)
+  useEffect(() => {
+    let active = true
+    queueMicrotask(() => { if (active) load() })
+    return () => {
+      active = false
+      requestKey.current += 1
+    }
+  }, [load])
+
+  // Durable evidence and audience-impact projections are keyed by object ref;
+  // rendering code does not derive either fact from counts or local heuristics.
   const bundlesByRef = useMemo(() => {
-    const m = new Map<string, ReviewIntakeBundle>()
-    data?.bundles.forEach((b) => m.set(b.proposal_id, b))
-    return m
+    const next = new Map<string, ReviewIntakeBundle>()
+    data?.bundles.forEach((bundle) => next.set(bundle.proposal_id, bundle))
+    return next
+  }, [data])
+  const pressureByRef = useMemo(() => {
+    const next = new Map<string, NonNullable<ReviewIntakeSurface['pressure_surface']>['pressure_lines'][number]>()
+    data?.pressure_surface?.pressure_lines.forEach((line) => next.set(line.proposal_ref, line))
+    return next
   }, [data])
 
   const openRisk = (id: string) =>
@@ -71,28 +107,44 @@ export default function ReviewQueue() {
   )
 
   if (loading) return <PageSkeleton />
-  if (error)
-    return (
-      <div className="bp-panel p-4">
-        <div className="font-mono text-sm" style={{ color: 'var(--urgent)' }}>⚠ {t('state.error')}</div>
-        <Button variant="ghost" className="mt-3" onClick={() => load()}>{t('state.retry')}</Button>
-      </div>
-    )
+  if (error) return <RequestErrorState error={error} onRetry={() => load()} />
   if (!data) return null
 
   const home = data.review_home
   const sf = home.situation_frame
   const selectedId = searchParams.get('risk')
   const sourceFailures = data.source_blindness_surface?.source_observations ?? []
-  const selected = selectedId ? home.priority_stack.find((it) => it.risk_id === selectedId) ?? null : null
+  const selected = selectedId
+    ? home.priority_stack.find((item) => item.risk_id === selectedId || item.object_ref === selectedId || item.signal_ref === selectedId) ?? null
+    : null
   const rows = home.priority_stack.filter((it) =>
     filter === 'all' ? true : filter === 'urgent' ? it.urgency === 'urgent' : it.owner_state === 'unassigned',
   )
+  const emptyCopyKey = home.observation.state === 'ready'
+    ? `queue.empty.${filter}`
+    : `queue.emptyPartial.${filter}`
 
   return (
-    <>
+    <div className="space-y-4">
+      <header className="bp-panel p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="bp-label">{t('queue.subtitle')}</div>
+            <h1 className="mt-2 font-mono text-xl font-bold tracking-tight">{t('queue.title')}</h1>
+            <p className="mt-2 max-w-3xl font-mono text-xs leading-relaxed text-muted-foreground">{sf.briefing_note}</p>
+          </div>
+          {refreshing ? (
+            <span role="status" className="bp-tol bp-tol-flat inline-flex items-center gap-1.5">
+              <RotateCw aria-hidden="true" size={12} className="animate-spin" /> {t('queue.refreshing')}
+            </span>
+          ) : null}
+        </div>
+      </header>
+
+      {refreshError ? <RequestErrorState error={refreshError} onRetry={() => load(true)} compact stale /> : null}
       <ObservationBanner observation={home.observation} />
-      <div className="mb-4 flex flex-wrap gap-2.5">
+
+      <div className="flex flex-wrap gap-2.5">
         <Stat n={home.priority_stack.length} label={t('observation.completeRisks')} />
         <Stat n={sourceFailures.length} label={t('observation.sourceFacts')} dot="var(--high)" />
         <Stat n={sf.urgent_items} label={t('frame.urgent')} dot="var(--urgent)" />
@@ -100,106 +152,155 @@ export default function ReviewQueue() {
         <Stat n={sf.affected_surfaces?.length ?? 0} label={t('queue.statSurfaces')} />
       </div>
 
-      {sourceFailures.length > 0 && (
-        <section className="mb-5" aria-labelledby="review-source-facts-heading">
-          <div id="review-source-facts-heading" className="mb-2 bp-label">{t('observation.sourceFacts')}</div>
+      {sourceFailures.length > 0 ? (
+        <section aria-labelledby="review-source-facts-heading">
+          <h2 id="review-source-facts-heading" className="mb-2 bp-label">{t('observation.sourceFacts')}</h2>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {sourceFailures.map((failure) => <SourceFailureCard key={failure.source_id} failure={failure} />)}
           </div>
         </section>
-      )}
+      ) : null}
 
-      <div className="mb-3.5 flex items-center gap-3">
-        <Segmented
-          value={filter}
-          onChange={setFilter}
-          options={[
-            { value: 'all', label: t('queue.all') },
-            { value: 'urgent', label: t('queue.urgent') },
-            { value: 'unassigned', label: t('queue.unassigned') },
-          ]}
-        />
-        <Button variant="ghost" size="sm" className="ml-auto"><SlidersHorizontal size={14} /> {t('queue.sort')}</Button>
-        <Button size="sm"><Plus size={14} /> {t('queue.command')}</Button>
-      </div>
-
-      <div className="overflow-hidden bp-panel">
-        <div className="grid grid-cols-[96px_1fr_140px_140px_150px] gap-3.5 bp-dim px-[18px] py-2.5 font-mono text-[10px] uppercase tracking-[1px] text-faint">
-          <span>{t('queue.thUrgency')}</span>
-          <span>{t('queue.thRisk')}</span>
-          <span>{t('queue.thScope')}</span>
-          <span>{t('queue.thOwner')}</span>
-          <span>{t('queue.thCommand')}</span>
+      <section aria-labelledby="review-list-heading">
+        <div className="mb-3 flex flex-wrap items-center gap-3">
+          <h2 id="review-list-heading" className="sr-only">{t('queue.listHeading')}</h2>
+          <Segmented
+            value={filter}
+            onChange={setFilter}
+            ariaLabel={t('queue.filterLabel')}
+            options={[
+              { value: 'all', label: t('queue.all') },
+              { value: 'urgent', label: t('queue.urgent') },
+              { value: 'unassigned', label: t('queue.unassigned') },
+            ]}
+          />
         </div>
-        {rows.map((it) => (
-          <div
-            key={it.risk_id}
-            role="button"
-            tabIndex={0}
-            onClick={() => openRisk(it.risk_id)}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openRisk(it.risk_id) } }}
-            className="bp-anno grid cursor-pointer grid-cols-[96px_1fr_140px_140px_150px] items-center gap-3.5 px-[18px] py-[15px]"
-          >
-            <span>
-              <span className={`bp-tol ${HEAT[it.urgency]}`}>
-                <span className="h-1.5 w-1.5 rotate-45" style={{ background: DOT[it.urgency] }} />
-                {t(`urgency.${it.urgency}`)}
-              </span>
-            </span>
-            <div className="min-w-0">
-              <div className="font-mono text-sm font-semibold leading-snug">{it.title}</div>
-              <div className="mt-0.5 line-clamp-1 font-mono text-xs text-muted-foreground">{it.why_now_summary}</div>
-              <div className="mt-1.5">
-                <span className="bp-tol bp-tol-flat">{v.riskType(it.risk_type)}</span>
-              </div>
-            </div>
-            <span className="font-mono text-[11px] text-muted-foreground">
-              {t('queue.scopeFmt', { a: it.audience_labels.length, s: it.affected_surfaces.length })}
-            </span>
-            <span>
-              {it.owner_state === 'unassigned' ? (
-                <span className="bp-tol bp-tol-high">{t('owner.gap')}</span>
-              ) : it.owner_state === 'escalated' ? (
-                <span className="bp-tol bp-tol-urgent">{t('owner.escalatedFmt', { owner: it.queue_owner ?? '—' })}</span>
-              ) : (
-                <span className="font-mono text-[11.5px] text-muted-foreground">@{it.queue_owner}</span>
-              )}
-            </span>
-            <span>
-              <button className="bp-cmd" onClick={(e) => { e.stopPropagation(); openRisk(it.risk_id) }}>
-                {it.primary_command === 'create_draft' ? t('commands.createDraft') : v.command(it.primary_command)} →
-              </button>
-            </span>
-          </div>
-        ))}
-        {rows.length === 0 && (
-          <div className="px-[18px] py-10 text-center font-mono text-sm text-muted-foreground">
-            {home.observation.state === 'ready' ? t('state.empty') : t('observation.queueEmptyPartial')}
-          </div>
-        )}
-      </div>
 
-      {selected && (
+        <div className="overflow-hidden bp-panel">
+          <div className="hidden gap-4 bp-dim px-4 py-2.5 font-mono text-xs uppercase tracking-wide text-faint xl:grid xl:grid-cols-[6rem_minmax(0,1.2fr)_minmax(0,1fr)_8rem_8rem_9rem]">
+            <span>{t('queue.thUrgency')}</span>
+            <span>{t('queue.thRisk')}</span>
+            <span>{t('queue.thEvidenceImpact')}</span>
+            <span>{t('queue.thScope')}</span>
+            <span>{t('queue.thOwner')}</span>
+            <span>{t('queue.thCommand')}</span>
+          </div>
+          {rows.map((item) => {
+            const bundle = bundlesByRef.get(item.object_ref)
+            const pressure = pressureByRef.get(item.object_ref)
+            return (
+              <QueueRow
+                key={item.risk_id}
+                item={item}
+                evidenceSufficiency={bundle?.evidence_sufficiency ?? pressure?.evidence_sufficiency ?? null}
+                audienceImpact={pressure?.impact_summary ?? bundle?.audience_notes[0] ?? null}
+                onOpen={() => openRisk(item.risk_id)}
+              />
+            )
+          })}
+          {rows.length === 0 ? (
+            <div className="px-4 py-10 text-center">
+              <h3 className="font-mono text-sm font-bold">{t(emptyCopyKey)}</h3>
+              <p className="mx-auto mt-2 max-w-xl font-mono text-xs leading-relaxed text-muted-foreground">{t(`queue.emptyHint.${filter}`)}</p>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      {selected ? (
         <Drawer
           key={selected.risk_id}
           item={selected}
           bundle={bundlesByRef.get(selected.object_ref) ?? null}
+          refreshError={refreshError}
           onClose={closeRisk}
           onChanged={() => load(true)}
         />
-      )}
-    </>
+      ) : null}
+    </div>
+  )
+}
+
+function QueueRow({
+  item,
+  evidenceSufficiency,
+  audienceImpact,
+  onOpen,
+}: {
+  item: PriorityItem
+  evidenceSufficiency: string | null
+  audienceImpact: string | null
+  onOpen: () => void
+}) {
+  const { t } = useTranslation()
+  const v = useVocab()
+  return (
+    <article className="bp-anno grid cursor-default gap-3 px-4 py-4 xl:grid-cols-[6rem_minmax(0,1.2fr)_minmax(0,1fr)_8rem_8rem_9rem] xl:items-center">
+      <div>
+        <span className="mb-1 block font-mono text-xs uppercase text-faint xl:hidden">{t('queue.thUrgency')}</span>
+        <span className={`bp-tol ${HEAT[item.urgency]}`}>
+          <span aria-hidden="true" className="h-1.5 w-1.5 rotate-45" style={{ background: DOT[item.urgency] }} />
+          {t(`urgency.${item.urgency}`)}
+        </span>
+      </div>
+      <div className="min-w-0">
+        <span className="mb-1 block font-mono text-xs uppercase text-faint xl:hidden">{t('queue.thRisk')}</span>
+        <button
+          type="button"
+          onClick={onOpen}
+          className="block min-h-11 w-full text-left font-mono text-sm font-semibold leading-snug underline-offset-4 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={t('queue.openRisk', { title: item.title })}
+        >
+          {item.title}
+        </button>
+        <p className="mt-1 line-clamp-2 font-mono text-xs leading-relaxed text-muted-foreground">{item.why_now_summary}</p>
+        <span className="mt-2 inline-flex bp-tol bp-tol-flat">{v.riskType(item.risk_type)}</span>
+      </div>
+      <div className="min-w-0">
+        <span className="mb-1 block font-mono text-xs uppercase text-faint xl:hidden">{t('queue.thEvidenceImpact')}</span>
+        {evidenceSufficiency && EVIDENCE_LABEL_KEY[evidenceSufficiency] ? (
+          <span className={`bp-tol ${evidenceSufficiency === 'sufficient' ? 'bp-tol-ok' : 'bp-tol-high'}`}>{t(EVIDENCE_LABEL_KEY[evidenceSufficiency])}</span>
+        ) : <span className="bp-tol bp-tol-flat">{t('queue.notObserved')}</span>}
+        <p className="mt-2 line-clamp-2 font-mono text-xs leading-relaxed text-muted-foreground">
+          {audienceImpact ?? t('queue.noAudienceImpact')}
+        </p>
+      </div>
+      <div>
+        <span className="mb-1 block font-mono text-xs uppercase text-faint xl:hidden">{t('queue.thScope')}</span>
+        <span className="font-mono text-xs text-muted-foreground">
+          {t('queue.scopeFmt', { a: item.audience_labels.length, s: item.affected_surfaces.length })}
+        </span>
+      </div>
+      <div>
+        <span className="mb-1 block font-mono text-xs uppercase text-faint xl:hidden">{t('queue.thOwner')}</span>
+        {item.owner_state === 'unassigned' ? (
+          <span className="bp-tol bp-tol-high">{t('owner.gap')}</span>
+        ) : item.owner_state === 'escalated' ? (
+          <span className="bp-tol bp-tol-urgent">{t('owner.escalatedFmt', { owner: item.queue_owner ?? '—' })}</span>
+        ) : (
+          <span className="font-mono text-xs text-muted-foreground">@{item.queue_owner}</span>
+        )}
+      </div>
+      <div>
+        <span className="mb-1 block font-mono text-xs uppercase text-faint xl:hidden">{t('queue.thCommand')}</span>
+        <button type="button" className="bp-cmd min-h-11" onClick={onOpen}>
+          {item.primary_command === 'create_draft' ? t('commands.createDraft') : v.command(item.primary_command)} →
+        </button>
+      </div>
+    </article>
   )
 }
 
 function Drawer({
   item,
   bundle,
+  refreshError,
   onClose,
   onChanged,
 }: {
   item: PriorityItem
   bundle: ReviewIntakeBundle | null
+  refreshError: unknown
   onClose: () => void
   /** Re-read the queue after a durable assignment or ticket-draft mutation. */
   onChanged: () => void
@@ -225,34 +326,39 @@ function Drawer({
         role="dialog"
         aria-modal="true"
         aria-labelledby="rq-drawer-title"
+        aria-describedby="rq-drawer-summary"
         tabIndex={-1}
         replayKey={item.risk_id}
         lapDuration={0.4}
-        className="fixed right-0 top-0 z-50 flex h-full w-full max-w-[440px] flex-col overflow-y-auto border-l-0 p-5 outline-none"
+        className="thin-scroll fixed inset-y-0 right-0 z-50 flex h-dvh w-full max-w-[440px] flex-col overflow-y-auto border-l-0 p-4 outline-none sm:p-5"
       >
         <div className="flex items-center gap-2">
           <span className={`bp-tol ${HEAT[item.urgency]}`}>{t(`urgency.${item.urgency}`)}</span>
           <span className="bp-tol bp-tol-flat">{v.riskType(item.risk_type)}</span>
           <button
-            className="ml-auto flex h-8 w-8 items-center justify-center bp-panel text-muted-foreground hover:bg-muted"
+            type="button"
+            className="ml-auto flex h-11 w-11 items-center justify-center bp-panel text-muted-foreground hover:bg-muted"
             aria-label={t('detail.close')}
             onClick={onClose}
           >
-            <X size={15} />
+            <X size={15} aria-hidden="true" />
           </button>
         </div>
         <h2 id="rq-drawer-title" className="mt-3 font-mono text-lg font-bold leading-tight">{item.title}</h2>
         <div className="mt-1 font-mono text-[11px] text-faint">{item.object_ref} · {v.objectType(item.object_type)}</div>
+        {refreshError ? <RequestErrorState error={refreshError} onRetry={onChanged} compact stale /> : null}
 
         <Section label={t('detail.whyNow')}>
-          <p className="font-mono text-[13px] leading-relaxed text-muted-foreground">{item.why_now_summary}</p>
+          <p id="rq-drawer-summary" className="font-mono text-[13px] leading-relaxed text-muted-foreground">{item.why_now_summary}</p>
         </Section>
         {bundle && (
           <Section label={t('detail.intake')}>
             <div className="space-y-2.5">
               <div className="flex items-center gap-2 text-[12.5px]">
                 <span className="font-mono text-[10px] uppercase text-faint">{t('detail.evidenceSufficiency')}</span>
-                <span className={`bp-tol ${bundle.evidence_sufficiency === 'sufficient' ? 'bp-tol-ok' : 'bp-tol-high'}`}>{bundle.evidence_sufficiency}</span>
+                <span className={`bp-tol ${bundle.evidence_sufficiency === 'sufficient' ? 'bp-tol-ok' : 'bp-tol-high'}`}>
+                  {t(EVIDENCE_LABEL_KEY[bundle.evidence_sufficiency] ?? 'queue.notObserved')}
+                </span>
               </div>
               <div className="flex items-center gap-2 text-[12.5px]">
                 <span className="font-mono text-[10px] uppercase text-faint">{t('detail.suggestedReviewOwner')}</span>
@@ -364,7 +470,7 @@ function Drawer({
 function Section({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="bp-dim mt-5 pt-4">
-      <div className="mb-2 bp-label">{label}</div>
+      <h3 className="mb-2 bp-label">{label}</h3>
       {children}
     </div>
   )

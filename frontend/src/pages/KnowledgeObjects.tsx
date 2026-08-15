@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
-import { X } from 'lucide-react'
+import { TriangleAlert, X } from 'lucide-react'
 import ForceGraph2D from 'react-force-graph-2d'
 import type { ForceGraphMethods, GraphData, LinkObject, NodeObject } from 'react-force-graph-2d'
 import {
@@ -126,7 +126,7 @@ export default function KnowledgeObjects() {
   if (error)
     return (
       <div className="bp-panel p-4">
-        <div className="font-mono text-sm" style={{ color: 'var(--urgent)' }}>⚠ {t('state.error')}</div>
+        <div className="flex items-center gap-1.5 font-mono text-sm" style={{ color: 'var(--urgent)' }}><TriangleAlert size={15} aria-hidden="true" /> {t('state.error')}</div>
         <Button variant="ghost" className="mt-3" onClick={load}>{t('state.retry')}</Button>
       </div>
     )
@@ -164,6 +164,7 @@ export default function KnowledgeObjects() {
 
   return (
     <>
+      <h1 className="sr-only">{t('nav.objects')}</h1>
       <div className="mb-3 flex flex-wrap items-center gap-4">
         <Legend color="#185ee0" ring label={t('kg.object')} extra={t('kg.objectNote')} />
         <Legend color="#30a46c" label={t('kg.evidence')} />

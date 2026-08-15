@@ -1,6 +1,7 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/lib/auth'
+import { NotificationProvider } from '@/lib/notification-state'
 
 export default function RequireAuth() {
   const { user, loading } = useAuth()
@@ -14,7 +15,16 @@ export default function RequireAuth() {
       </div>
     )
 
-  if (!user) return <Navigate to="/login" replace state={{ from: location.pathname }} />
+  // Preserve the full deep link (pathname + search + hash) through the login
+  // round-trip so authenticated redirects land on the exact target — e.g. a
+  // shared notification URL like /console/queue?risk=…#top stays intact.
+  const from = location.pathname + location.search + location.hash
 
-  return <Outlet />
+  if (!user) return <Navigate to="/login" replace state={{ from }} />
+
+  return (
+    <NotificationProvider>
+      <Outlet />
+    </NotificationProvider>
+  )
 }

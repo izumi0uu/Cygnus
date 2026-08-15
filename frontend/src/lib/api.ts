@@ -752,9 +752,14 @@ export interface BlastRadiusPreview {
 export interface DurablePublishCommandEnvelope {
   draft_id: string
   approval_ref: string
+  approval_digest: string
+  scope_digest: string
+  signal_id: string
+  signal_freshness: 'fresh' | 'stale' | 'unknown'
   command_id: string
   action_key: string
   target_channels: string[]
+  expected_version: number
   reason: string | null
 }
 
@@ -840,9 +845,14 @@ export async function applyPublishAction(
       body: {
         draft_id: durableCommand.draft_id,
         approval_ref: durableCommand.approval_ref,
+        approval_digest: durableCommand.approval_digest,
+        scope_digest: durableCommand.scope_digest,
+        signal_id: durableCommand.signal_id,
+        signal_freshness: durableCommand.signal_freshness,
         command_id: durableCommand.command_id,
         action_key: durableCommand.action_key,
         target_channels: durableCommand.target_channels,
+        expected_version: durableCommand.expected_version,
         reason: durableCommand.reason,
       },
     })
@@ -1184,4 +1194,442 @@ export async function fetchGovernanceAudit(
   const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
   if (phase) params.set('phase', phase)
   return authApi<GovernanceAuditPage>(`/api/governance/audit?${params.toString()}`)
+}
+
+export async function fetchGovernanceAuditEvent(eventId: string): Promise<GovernanceAuditEvent> {
+  return authApi<GovernanceAuditEvent>(`/api/governance/audit/${encodeURIComponent(eventId)}`)
+}
+
+// ============================================================
+// Internal Copilot — one bounded, request-scoped governed query.
+// The manifest version is negotiated in a header; it is not duplicated in
+// the body. Every submission re-reads Cygnus truth and carries no chat memory.
+// ============================================================
+
+export const SESSION_CONTRACT_VERSION = '1.0' as const
+
+export type SessionVisibility = 'internal' | 'external'
+export type SessionGovernanceDisposition = 'answerable' | 'restricted' | 'fallback' | 'escalate'
+
+export interface SessionAudienceContext {
+  visibility: SessionVisibility
+  brand?: string | null
+  product_line?: string | null
+  plan_tier?: string | null
+  region?: string | null
+  language?: string | null
+  product_version?: string | null
+}
+
+export interface SessionManifestTool {
+  name: string
+  description: string
+  input_schema: Record<string, unknown>
+  output_schema: Record<string, unknown>
+  permission_requirement: string
+  risk_class: string
+  side_effect_class: string
+  idempotency_class: string
+  timeout_seconds: number
+  retry_policy: Record<string, unknown>
+  availability_semantics: string
+  availability: 'available' | 'denied'
+  denial_reason: string | null
+}
+
+export interface SessionBridgeManifest {
+  contract_version: string
+  schema_fingerprint: string
+  governed_tools: SessionManifestTool[]
+  visible_tools: SessionManifestTool[]
+  denied_tools: SessionManifestTool[]
+}
+
+export interface SessionGovernanceContext {
+  governance_state: SessionGovernanceDisposition
+  audience_context: SessionAudienceContext
+  object_id: string | null
+  object_version: number | null
+  trace_ref: string | null
+  freshness: string | null
+}
+
+export interface SessionContinuity {
+  state: 'started' | 'revalidated' | 'refreshed' | 'invalidated'
+  revalidated: boolean
+  session_memory_used_as_truth: false
+  reasons: string[]
+  governance_context: SessionGovernanceContext
+}
+
+export interface SessionAnswer {
+  object_id: string
+  slug: string
+  object_type: string
+  title: string
+  audience_match: string
+  freshness: string
+  publication_status: string
+  snippet: string
+  trace_ref: string
+  content: Record<string, unknown> | null
+  allowed_channels: string[]
+  usage: 'direct' | 'internal_reference_only' | 'withheld'
+  direct_external_use: boolean
+}
+
+export interface SessionQueryData {
+  request_ref: string
+  session_ref: string | null
+  query: string
+  audience_context: SessionAudienceContext
+  governance: {
+    state: SessionGovernanceDisposition
+    codes: string[]
+    directives: string[]
+  }
+  answer: SessionAnswer | null
+  source_trace: SourceTrace | null
+  alternatives: Array<Omit<SessionAnswer, 'content' | 'allowed_channels' | 'usage' | 'direct_external_use'>>
+  continuity: SessionContinuity
+  governance_context: SessionGovernanceContext
+  tool_trace: Array<{
+    name: string
+    risk_level: string
+    owner: string
+    result_ref: string | null
+  }>
+}
+
+export interface SessionQueryResponse {
+  contract_version: string
+  status: string
+  summary: string
+  data: SessionQueryData
+  trace_ref: string | null
+  warnings: string[]
+  errors: string[]
+}
+
+export interface SessionQueryRequest {
+  request_ref: string
+  session_ref?: string | null
+  query: string
+  channel: string
+  audience_context: SessionAudienceContext
+  object_types?: string[]
+  limit?: number
+  previous_governance_context?: SessionGovernanceContext | null
+}
+
+const SESSION_CONTRACT_HEADER = {
+  'X-Cygnus-Session-Contract-Version': SESSION_CONTRACT_VERSION,
+}
+
+export async function fetchSessionBridgeManifest(): Promise<SessionBridgeManifest> {
+  return authApi<SessionBridgeManifest>('/api/session-bridge/capabilities', {
+    headers: SESSION_CONTRACT_HEADER,
+  })
+}
+
+export async function submitSessionQuery(input: SessionQueryRequest): Promise<SessionQueryResponse> {
+  return authApi<SessionQueryResponse>('/api/session-bridge/query', {
+    method: 'POST',
+    headers: SESSION_CONTRACT_HEADER,
+    body: input,
+  })
+}
+
+export type SessionFeedbackSignalType =
+  | 'answer_accepted'
+  | 'human_rewrite'
+  | 'escalated'
+  | 'low_rating'
+  | 'unsupported_answer'
+  | 'stale_answer'
+
+export interface SessionFeedbackResponse {
+  contract_version: string
+  status: 'success' | 'conflict' | string
+  summary: string
+  data: Record<string, unknown>
+  signal_id?: string
+  command_id?: string
+  replayed?: boolean
+  signal_type?: SessionFeedbackSignalType
+  object_id?: string | null
+  draft_id?: string | null
+  routing_state?: string
+  route_id?: string | null
+  route_ref?: string | null
+  persisted?: boolean
+  rehearsal?: boolean
+  trace_ref?: string | null
+  warnings?: string[]
+  errors: string[]
+}
+
+export async function submitSessionFeedback(input: {
+  command_id: string
+  signal_type: SessionFeedbackSignalType
+  audience_context: SessionAudienceContext
+  object_id?: string
+  notes?: string
+  source_context_ref?: string
+}): Promise<SessionFeedbackResponse> {
+  return authApi<SessionFeedbackResponse>('/api/session-bridge/feedback', {
+    method: 'POST',
+    headers: SESSION_CONTRACT_HEADER,
+    body: input,
+  })
+}
+
+// ============================================================
+// Source Operations — persisted inventory, bounded ingestion, progress, and
+// compilation-plan commands. Command responses prove only the server truth
+// named by each receipt; the SPA never synthesizes lifecycle completion.
+// ============================================================
+
+export type SourceLifecycleStatus =
+  | 'pending'
+  | 'processing'
+  | 'awaiting_approval'
+  | 'plan_ready'
+  | 'ready'
+  | 'error'
+  | 'deleting'
+
+export type SourceFreshnessState = 'fresh' | 'stale' | 'unknown'
+export type SourceLanguage = 'en' | 'zh'
+
+export interface SourceRecord extends ReadySourceOption {
+  language: SourceLanguage
+  url: string | null
+  file_size: number | null
+  error_message: string | null
+  progress: number
+  progress_message: string | null
+  job_id: string | null
+  page_count: number
+  wiki_page_count: number
+  extracted_token_count: number | null
+  image_count: number
+  auto_recover_count: number
+  knowledge_type_id: string | null
+  knowledge_type_name: string | null
+  knowledge_type_color: string | null
+  department_ids: string[]
+  department_names: string[]
+  contributed_by_employee_id: string | null
+  contributed_by_name: string | null
+  scope_type: string
+  scope_id: string | null
+  preserve_verbatim: boolean
+  freshness_state: SourceFreshnessState
+  freshness_active: boolean
+  freshness_expired: boolean
+  freshness_actor_id: string | null
+  freshness_reason: string | null
+  freshness_attested_at: string | null
+  freshness_expires_at: string | null
+}
+
+export interface SourceOperationsPage {
+  items: SourceRecord[]
+  total: number
+  page: number
+  page_size: number
+  total_pages: number
+}
+
+export interface SourceProgress {
+  id: string
+  status: SourceLifecycleStatus
+  progress: number
+  progress_message: string | null
+  page_count: number
+  wiki_page_count: number
+}
+
+export interface SourceCompilationPlanPage {
+  action: string
+  slug: string
+  title: string
+  summary?: string
+  priority?: number
+}
+
+export interface SourceCompilationPlan {
+  id: string
+  source_id: string
+  status: 'pending_review' | 'approved' | 'regenerating' | 'rejected' | 'done'
+  plan: Record<string, unknown> & { pages?: SourceCompilationPlanPage[] }
+  created_at: string
+  reviewed_at: string | null
+  review_note: string | null
+}
+
+export type SourceScopeType = 'global' | 'department'
+
+export interface SourceKnowledgeType {
+  id: string
+  slug: string
+  name: string
+  color: string
+  description: string | null
+  sort_order: number
+  source_count: number
+}
+
+export interface SourceDepartment {
+  id: string
+  name: string
+  description: string | null
+  employee_count: number
+}
+
+export async function fetchSourceKnowledgeTypes(): Promise<SourceKnowledgeType[]> {
+  return authApi<SourceKnowledgeType[]>('/api/knowledge-types')
+}
+
+export async function fetchSourceDepartments(): Promise<SourceDepartment[]> {
+  return authApi<SourceDepartment[]>('/api/departments')
+}
+
+export async function fetchSources(input: {
+  search?: string
+  status?: string
+  page?: number
+  pageSize?: number
+} = {}): Promise<SourceOperationsPage> {
+  const params = new URLSearchParams({
+    page: String(input.page ?? 1),
+    page_size: String(input.pageSize ?? 20),
+  })
+  if (input.search?.trim()) params.set('search', input.search.trim())
+  if (input.status?.trim()) params.set('status', input.status.trim())
+  return authApi<SourceOperationsPage>(`/api/sources?${params.toString()}`)
+}
+
+export async function uploadSource(input: {
+  file: File
+  language: SourceLanguage
+  title?: string
+  knowledgeTypeId?: string
+  departmentIds?: string[]
+  scopeType?: SourceScopeType
+  scopeId?: string
+  preserveVerbatim?: boolean
+}): Promise<SourceRecord> {
+  const body = new FormData()
+  body.set('file', input.file)
+  body.set('language', input.language)
+  if (input.title?.trim()) body.set('title', input.title.trim())
+  if (input.knowledgeTypeId) body.set('knowledge_type_id', input.knowledgeTypeId)
+  if (input.departmentIds?.length) body.set('department_ids', input.departmentIds.join(','))
+  if (input.scopeType) body.set('scope_type', input.scopeType)
+  if (input.scopeId) body.set('scope_id', input.scopeId)
+  body.set('preserve_verbatim', String(input.preserveVerbatim ?? false))
+  return authApi<SourceRecord>('/api/sources/upload', { method: 'POST', body })
+}
+
+export async function addUrlSource(input: {
+  url: string
+  language: SourceLanguage
+  title?: string
+  knowledgeTypeId?: string
+  departmentIds?: string[]
+  scopeType?: SourceScopeType
+  scopeId?: string
+  preserveVerbatim?: boolean
+}): Promise<SourceRecord> {
+  return authApi<SourceRecord>('/api/sources/url', {
+    method: 'POST',
+    body: {
+      url: input.url,
+      language: input.language,
+      title: input.title?.trim() || null,
+      knowledge_type_id: input.knowledgeTypeId || null,
+      department_ids: input.departmentIds ?? [],
+      scope_type: input.scopeType ?? null,
+      scope_id: input.scopeId ?? null,
+      preserve_verbatim: input.preserveVerbatim ?? false,
+    },
+  })
+}
+
+export async function updateSourceLanguage(sourceId: string, language: SourceLanguage): Promise<SourceRecord> {
+  return authApi<SourceRecord>(`/api/sources/${encodeURIComponent(sourceId)}`, {
+    method: 'PATCH',
+    body: { language },
+  })
+}
+
+export async function fetchSourceProgress(sourceId: string): Promise<SourceProgress> {
+  return authApi<SourceProgress>(`/api/sources/${encodeURIComponent(sourceId)}/progress`)
+}
+
+export async function retrySource(sourceId: string): Promise<SourceRecord> {
+  return authApi<SourceRecord>(`/api/sources/${encodeURIComponent(sourceId)}/retry`, { method: 'POST' })
+}
+
+export async function attestSourceFreshness(sourceId: string, input: {
+  freshnessState: SourceFreshnessState
+  reason: string
+  expiresAt?: string
+}): Promise<SourceRecord> {
+  return authApi<SourceRecord>(`/api/sources/${encodeURIComponent(sourceId)}/freshness`, {
+    method: 'POST',
+    body: {
+      freshness_state: input.freshnessState,
+      reason: input.reason.trim(),
+      expires_at: input.freshnessState === 'fresh' ? input.expiresAt ?? null : null,
+    },
+  })
+}
+
+export async function fetchSourceCompilationPlan(sourceId: string): Promise<SourceCompilationPlan> {
+  return authApi<SourceCompilationPlan>(`/api/sources/${encodeURIComponent(sourceId)}/plan`)
+}
+
+export async function approveSourceExtraction(sourceId: string): Promise<{
+  status: string
+  job_id: string
+  has_images: boolean
+  token_count: number | null
+}> {
+  return authApi<{ status: string; job_id: string; has_images: boolean; token_count: number | null }>(
+    `/api/sources/${encodeURIComponent(sourceId)}/approve-extraction`,
+    { method: 'POST' },
+  )
+}
+
+export async function approveSourceCompilationPlan(sourceId: string, note?: string): Promise<{
+  approved: true
+  job_id: string
+}> {
+  return authApi<{ approved: true; job_id: string }>(`/api/sources/${encodeURIComponent(sourceId)}/plan/approve`, {
+    method: 'POST',
+    body: { note: note?.trim() || null },
+  })
+}
+
+export async function regenerateSourceCompilationPlan(sourceId: string, note: string): Promise<{
+  queued: true
+  status: string
+  job_id: string
+}> {
+  return authApi<{ queued: true; status: string; job_id: string }>(
+    `/api/sources/${encodeURIComponent(sourceId)}/plan/regenerate`,
+    { method: 'POST', body: { note: note.trim() } },
+  )
+}
+
+export async function rejectSourceCompilationPlan(sourceId: string, note: string): Promise<{
+  rejected: true
+}> {
+  return authApi<{ rejected: true }>(`/api/sources/${encodeURIComponent(sourceId)}/plan/reject`, {
+    method: 'POST',
+    body: { note: note.trim() },
+  })
 }

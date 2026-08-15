@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router-dom'
+import { TriangleAlert } from 'lucide-react'
 import { fetchGovernanceOverview, type GovernanceOverviewSurface, type GovernanceOpenLoopRank } from '@/lib/api'
 import { ApiError } from '@/lib/authApi'
 import { Button } from '@/components/ui/button'
@@ -91,7 +92,7 @@ export default function Overview() {
   if (error)
     return (
       <div className="bp-panel p-4">
-        <div className="font-mono text-sm" style={{ color: 'var(--urgent)' }}>⚠ {t('state.error')}</div>
+        <div className="flex items-center gap-1.5 font-mono text-sm" style={{ color: 'var(--urgent)' }}><TriangleAlert size={15} aria-hidden="true" /> {t('state.error')}</div>
         <Button variant="ghost" className="mt-3" onClick={load}>{t('state.retry')}</Button>
       </div>
     )

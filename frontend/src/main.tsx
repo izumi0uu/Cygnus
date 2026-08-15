@@ -4,16 +4,14 @@ import { BrowserRouter } from 'react-router-dom'
 import './index.css'
 import './i18n'
 import { ThemeProvider } from '@/lib/theme'
-import { ZoomProvider } from '@/lib/zoom'
 import App from './App.tsx'
+import { RouteErrorBoundary } from '@/components/ErrorBoundary'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ThemeProvider>
       <BrowserRouter>
-        <ZoomProvider>
-          <App />
-        </ZoomProvider>
+        <RouteErrorBoundary><App /></RouteErrorBoundary>
       </BrowserRouter>
     </ThemeProvider>
   </StrictMode>,

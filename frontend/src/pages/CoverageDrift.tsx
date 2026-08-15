@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { TriangleAlert } from 'lucide-react'
 import { fetchDriftSurface, type DriftSurface, type DriftContext } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Stat } from '@/components/Stat'
@@ -31,7 +32,7 @@ export default function CoverageDrift() {
   if (error)
     return (
       <div className="bp-panel p-4">
-        <div className="font-mono text-sm" style={{ color: 'var(--urgent)' }}>⚠ {t('state.error')}</div>
+        <div className="flex items-center gap-1.5 font-mono text-sm" style={{ color: 'var(--urgent)' }}><TriangleAlert size={15} aria-hidden="true" /> {t('state.error')}</div>
         <Button variant="ghost" className="mt-3" onClick={load}>{t('state.retry')}</Button>
       </div>
     )
@@ -43,6 +44,7 @@ export default function CoverageDrift() {
 
   return (
     <>
+      <h1 className="sr-only">{t('nav.drift')}</h1>
       <ObservationBanner observation={data.observation} />
       {rows.length > 0 ? <p className="mb-3 font-mono text-[12px] leading-relaxed text-muted-foreground">{data.summary}</p> : null}
 

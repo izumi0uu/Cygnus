@@ -38,7 +38,7 @@ function Roll({ text, variants, color }: { text: string; variants: Variants; col
     >
       <h1
         className="select-none whitespace-nowrap text-[20vw] uppercase leading-none"
-        style={{ color, fontFamily: "'Thunder', system-ui, sans-serif", letterSpacing: '0.05em' }}
+        style={{ color, fontFamily: 'var(--font-display)', letterSpacing: '0.05em' }}
       >
         {chars.map((ch, i) => (
           <motion.span
@@ -198,7 +198,9 @@ export default function Landing() {
             {t('landing.enter')} →
           </Link>
           <a
-            href="#"
+            href="/docs"
+            target="_blank"
+            rel="noreferrer"
             className="rounded-full border px-6 py-3 text-sm transition-colors hover:border-white/40"
             style={{ borderColor: BORDER, color: '#F2EEE6' }}
           >

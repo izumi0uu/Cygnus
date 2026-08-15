@@ -1,12 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ShieldAlert, Plus, Minus, Ban } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import { ArrowLeft, ArrowRight, ShieldAlert, Plus, Minus, Ban } from 'lucide-react'
 import { fetchPublishPreview, type PublishPreviewSurface, type BlastRadiusImpact } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Stat } from '@/components/Stat'
 import { useVocab } from '@/lib/vocab'
 import { CmdButton } from '@/components/CmdButton'
 import { PageSkeleton } from '@/components/Skeleton'
+import { ApiError } from '@/lib/authApi'
+import { RequestErrorState } from '@/components/RequestState'
 
 // Publish becomes blast-radius control before any outward command.
 // Sourced from the publish-preview surface: channel gate matrix, impacts,
@@ -24,30 +27,68 @@ const EFFECT_COLOR: Record<string, string> = {
   conflict: 'var(--urgent)',
 }
 
+function isEmptyPublishIntake(error: unknown, objectRef: string | undefined) {
+  return !objectRef
+    && error instanceof ApiError
+    && error.status === 404
+    && error.message.includes('no persisted publish intake records')
+}
+
 export default function AudiencePublish() {
   const { t } = useTranslation()
   const v = useVocab()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const objectRef = searchParams.get('object_ref') || undefined
   const [data, setData] = useState<PublishPreviewSurface | null>(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<unknown>(null)
+  const requestKey = useRef(0)
 
-  const load = () => {
+  const load = useCallback(() => {
+    const key = ++requestKey.current
     setLoading(true)
     setError(null)
-    fetchPublishPreview().then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false))
-  }
+    setData(null)
+    fetchPublishPreview(objectRef)
+      .then((next) => {
+        if (key === requestKey.current) setData(next)
+      })
+      .catch((nextError: unknown) => {
+        if (key === requestKey.current) setError(nextError)
+      })
+      .finally(() => {
+        if (key === requestKey.current) setLoading(false)
+      })
+  }, [objectRef])
+
   useEffect(() => {
-    fetchPublishPreview().then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false))
-  }, [])
+    let active = true
+    queueMicrotask(() => { if (active) load() })
+    return () => {
+      active = false
+      requestKey.current += 1
+    }
+  }, [load])
+
+  const gotoObject = (ref: string) => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      next.set('object_ref', ref)
+      return next
+    }, { replace: true })
+  }
 
   if (loading) return <PageSkeleton />
-  if (error)
+  if (error && isEmptyPublishIntake(error, objectRef)) {
     return (
-      <div className="bp-panel p-4">
-        <div className="font-mono text-sm" style={{ color: 'var(--urgent)' }}>⚠ {t('state.error')}</div>
-        <Button variant="ghost" className="mt-3" onClick={load}>{t('state.retry')}</Button>
-      </div>
+      <section aria-labelledby="publish-empty-heading" className="bp-panel p-5">
+        <h1 id="publish-empty-heading" className="font-mono text-base font-bold">{t('pub.emptyTitle')}</h1>
+        <p className="mt-2 font-mono text-xs leading-relaxed text-muted-foreground">{t('pub.emptyNote')}</p>
+        <Button type="button" variant="ghost" className="mt-4" onClick={load}>{t('state.retry')}</Button>
+      </section>
     )
+  }
+  if (error) return <RequestErrorState error={error} onRetry={load} />
   if (!data) return null
 
   const sf = data.situation_frame
@@ -59,10 +100,10 @@ export default function AudiencePublish() {
       {/* hero — blast-radius briefing */}
       <section className="relative mb-4 overflow-hidden bp-panel p-5 pl-[22px]">
         <span className="absolute inset-y-0 left-0 w-[3px] bg-primary" />
-        <div className="flex items-start gap-4">
+        <div className="flex flex-col items-start gap-4 sm:flex-row">
           <span className="bp-tol bp-tol-urgent mt-0.5 shrink-0">{t('pub.blastRadius')}</span>
           <div className="min-w-0">
-            <h2 className="font-mono text-[18px] font-bold leading-tight">{data.headline}</h2>
+            <h1 className="font-mono text-lg font-bold leading-tight">{data.headline}</h1>
             <p className="mt-1.5 max-w-[80ch] font-mono text-[12px] leading-relaxed text-muted-foreground">{data.summary}</p>
             <div className="mt-2 flex flex-wrap items-center gap-2 font-mono text-[11px] text-muted-foreground">
               <span className="bp-tol bp-tol-flat">{t('pub.truthBoundary')}</span>
@@ -75,6 +116,30 @@ export default function AudiencePublish() {
           </div>
         </div>
       </section>
+
+      <nav aria-label={t('pub.candidateNavigation')} className="mb-4 flex flex-wrap items-center gap-2 bp-panel px-3 py-2.5">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={!data.previous_object_ref}
+          onClick={() => data.previous_object_ref && gotoObject(data.previous_object_ref)}
+        >
+          <ArrowLeft aria-hidden="true" size={14} /> {t('pub.previous')}
+        </Button>
+        <span className="font-mono text-xs text-muted-foreground sm:mx-auto">
+          {t('pub.position', { current: data.selected_position + 1, total: data.total_items })}
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={!data.next_object_ref}
+          onClick={() => data.next_object_ref && gotoObject(data.next_object_ref)}
+        >
+          {t('pub.next')} <ArrowRight aria-hidden="true" size={14} />
+        </Button>
+      </nav>
 
       {/* stat tiles */}
       <div className="mb-4 flex flex-wrap gap-2.5">

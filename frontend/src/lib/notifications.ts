@@ -33,19 +33,28 @@ const SEV_RANK: Record<NotifSeverity, number> = {
   low: 0,
 }
 
-const ROUTE_BY_RISK: Record<string, { to: string; navKey: string }> = {
-  source_blindness: { to: '/console/sources', navKey: 'sources' },
-  drift: { to: '/console/drift', navKey: 'drift' },
-  audience_mismatch: { to: '/console/audience', navKey: 'audience' },
-  ticket_pressure: { to: '/console/queue', navKey: 'reviewQueue' },
-  policy_conflict: { to: '/console/queue', navKey: 'reviewQueue' },
-  owner_gap: { to: '/console/queue', navKey: 'reviewQueue' },
-  review_assignment: { to: '/console/queue', navKey: 'reviewQueue' },
-  review_feedback: { to: '/console/queue', navKey: 'reviewQueue' },
-  review_approved: { to: '/console/queue', navKey: 'reviewQueue' },
-  review_withdrawn: { to: '/console/queue', navKey: 'reviewQueue' },
+// Exact-target routing: every risk kind resolves to the surface that owns it
+// plus the strongest pointer that surface actually consumes. Queue-owned kinds
+// select by `?risk=` (matches the review queue's risk_id exactly when a riskId
+// is known). Audience-publish consumes `?object_ref=`. Sources and drift
+// surfaces have no selection param yet, so they route to their base surface —
+// the deep link stays lossless, and the exact-target gap is tracked for the
+// page owners.
+const ROUTE_BY_RISK: Record<string, { base: string; navKey: string; selectBy: 'risk' | 'object_ref' | 'none' }> = {
+  source_blindness: { base: '/console/sources', navKey: 'sources', selectBy: 'none' },
+  drift: { base: '/console/drift', navKey: 'drift', selectBy: 'none' },
+  audience_mismatch: { base: '/console/audience', navKey: 'audience', selectBy: 'object_ref' },
+  ticket_pressure: { base: '/console/queue', navKey: 'reviewQueue', selectBy: 'risk' },
+  policy_conflict: { base: '/console/queue', navKey: 'reviewQueue', selectBy: 'risk' },
+  owner_gap: { base: '/console/queue', navKey: 'reviewQueue', selectBy: 'risk' },
+  review_assignment: { base: '/console/queue', navKey: 'reviewQueue', selectBy: 'risk' },
+  review_feedback: { base: '/console/queue', navKey: 'reviewQueue', selectBy: 'risk' },
+  review_approved: { base: '/console/queue', navKey: 'reviewQueue', selectBy: 'risk' },
+  review_withdrawn: { base: '/console/queue', navKey: 'reviewQueue', selectBy: 'risk' },
 }
-const FALLBACK_ROUTE = { to: '/console/queue', navKey: 'reviewQueue' }
+const FALLBACK_ROUTE = { base: '/console/queue', navKey: 'reviewQueue', selectBy: 'risk' as const }
+
+export type RouteTarget = { riskId?: string; objectRef?: string }
 
 const EVENT_META: Record<string, { kind: string; severity: NotifSeverity }> = {
   submitted: { kind: 'review_assignment', severity: 'medium' },
@@ -56,8 +65,16 @@ const EVENT_META: Record<string, { kind: string; severity: NotifSeverity }> = {
   withdrawn: { kind: 'review_withdrawn', severity: 'low' },
 }
 
-export function routeForRisk(riskType: string): { to: string; navKey: string } {
-  return ROUTE_BY_RISK[riskType] ?? FALLBACK_ROUTE
+export function routeForRisk(riskType: string, target?: RouteTarget): { to: string; navKey: string } {
+  const route = ROUTE_BY_RISK[riskType] ?? FALLBACK_ROUTE
+  if (route.selectBy === 'none') return { to: route.base, navKey: route.navKey }
+  const id = target
+    ? route.selectBy === 'risk'
+      ? (target.riskId ?? target.objectRef)
+      : (target.objectRef ?? target.riskId)
+    : undefined
+  const to = id ? `${route.base}?${route.selectBy}=${encodeURIComponent(id)}` : route.base
+  return { to, navKey: route.navKey }
 }
 
 function toNotification(record: PersistedNotification): CygnusNotification {
@@ -66,7 +83,7 @@ function toNotification(record: PersistedNotification): CygnusNotification {
     kind: 'governance_notification',
     severity: 'medium' as const,
   }
-  const route = routeForRisk(meta.kind)
+  const route = routeForRisk(meta.kind, { objectRef: record.target_id })
   return {
     id: record.id,
     kind: meta.kind,

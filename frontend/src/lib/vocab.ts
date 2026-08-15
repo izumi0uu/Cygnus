@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AffectedAudience } from '@/lib/api'
 
@@ -185,44 +186,48 @@ function pick(dict: Record<string, Pair>, key: string, zh: boolean): string {
 
 export function useVocab() {
   const { i18n } = useTranslation()
-  const zh = i18n.language.startsWith('zh')
-  const audienceSegment = (a: AffectedAudience): string => {
-    const parts: string[] = [pick(VISIBILITY, a.visibility, zh)]
-    a.product_lines.forEach((x) => parts.push(pick(PRODUCT_LINE, x, zh)))
-    a.plans.forEach((x) => parts.push(pick(PLAN, x, zh)))
-    a.regions.forEach((x) => parts.push(pick(REGION, x, zh)))
-    a.languages.forEach((x) => parts.push(humanize(x)))
-    if (a.is_global) parts.push(pick(REGION, 'global', zh))
-    return parts.join(' · ')
-  }
-  const audienceFacets = (a: AffectedAudience): string[] => {
-    const out: string[] = []
-    a.product_lines.forEach((x) => out.push(pick(PRODUCT_LINE, x, zh)))
-    a.plans.forEach((x) => out.push(pick(PLAN, x, zh)))
-    a.regions.forEach((x) => out.push(pick(REGION, x, zh)))
-    a.languages.forEach((x) => out.push(humanize(x)))
-    if (a.is_global) out.push(pick(REGION, 'global', zh))
-    return out
-  }
-  return {
-    riskType: (k: string) => pick(RISK_TYPE, k, zh),
-    command: (k: string) => pick(COMMAND, k, zh),
-    surface: (k: string) => pick(SURFACE, k, zh),
-    objectType: (k: string) => pick(OBJECT_TYPE, k, zh),
-    lifecycle: (k: string) => pick(LIFECYCLE, k, zh),
-    assignmentState: (k: string) => pick(ASSIGNMENT_STATE, k, zh),
-    freshness: (k: string) => pick(FRESHNESS, k, zh),
-    evidenceSourceType: (k: string) => pick(EVIDENCE_SOURCE_TYPE, k, zh),
-    visibility: (k: string) => pick(VISIBILITY, k, zh),
-    blastEffect: (k: string) => pick(BLAST_EFFECT, k, zh),
-    propStatus: (k: string) => pick(PROP_STATUS, k, zh),
-    recoveryAssessment: (k: string) => pick(RECOVERY_ASSESSMENT, k, zh),
-    recoveryDecision: (k: string) => pick(RECOVERY_DECISION, k, zh),
-    feedbackSignal: (k: string) => pick(FEEDBACK_SIGNAL, k, zh),
-    truthPlane: (k: string) => pick(TRUTH_PLANE, k, zh),
-    severity: (k: string) => pick(SEVERITY, k, zh),
-    metricStatus: (k: string) => pick(METRIC_STATUS, k, zh),
-    audienceSegment,
-    audienceFacets,
-  }
+  const language = i18n.resolvedLanguage ?? i18n.language
+
+  return useMemo(() => {
+    const zh = language.startsWith('zh')
+    const audienceSegment = (a: AffectedAudience): string => {
+      const parts: string[] = [pick(VISIBILITY, a.visibility, zh)]
+      a.product_lines.forEach((x) => parts.push(pick(PRODUCT_LINE, x, zh)))
+      a.plans.forEach((x) => parts.push(pick(PLAN, x, zh)))
+      a.regions.forEach((x) => parts.push(pick(REGION, x, zh)))
+      a.languages.forEach((x) => parts.push(humanize(x)))
+      if (a.is_global) parts.push(pick(REGION, 'global', zh))
+      return parts.join(' · ')
+    }
+    const audienceFacets = (a: AffectedAudience): string[] => {
+      const out: string[] = []
+      a.product_lines.forEach((x) => out.push(pick(PRODUCT_LINE, x, zh)))
+      a.plans.forEach((x) => out.push(pick(PLAN, x, zh)))
+      a.regions.forEach((x) => out.push(pick(REGION, x, zh)))
+      a.languages.forEach((x) => out.push(humanize(x)))
+      if (a.is_global) out.push(pick(REGION, 'global', zh))
+      return out
+    }
+    return {
+      riskType: (k: string) => pick(RISK_TYPE, k, zh),
+      command: (k: string) => pick(COMMAND, k, zh),
+      surface: (k: string) => pick(SURFACE, k, zh),
+      objectType: (k: string) => pick(OBJECT_TYPE, k, zh),
+      lifecycle: (k: string) => pick(LIFECYCLE, k, zh),
+      assignmentState: (k: string) => pick(ASSIGNMENT_STATE, k, zh),
+      freshness: (k: string) => pick(FRESHNESS, k, zh),
+      evidenceSourceType: (k: string) => pick(EVIDENCE_SOURCE_TYPE, k, zh),
+      visibility: (k: string) => pick(VISIBILITY, k, zh),
+      blastEffect: (k: string) => pick(BLAST_EFFECT, k, zh),
+      propStatus: (k: string) => pick(PROP_STATUS, k, zh),
+      recoveryAssessment: (k: string) => pick(RECOVERY_ASSESSMENT, k, zh),
+      recoveryDecision: (k: string) => pick(RECOVERY_DECISION, k, zh),
+      feedbackSignal: (k: string) => pick(FEEDBACK_SIGNAL, k, zh),
+      truthPlane: (k: string) => pick(TRUTH_PLANE, k, zh),
+      severity: (k: string) => pick(SEVERITY, k, zh),
+      metricStatus: (k: string) => pick(METRIC_STATUS, k, zh),
+      audienceSegment,
+      audienceFacets,
+    }
+  }, [language])
 }

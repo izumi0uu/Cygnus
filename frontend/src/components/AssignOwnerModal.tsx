@@ -71,6 +71,19 @@ export default function AssignOwnerModal({
   }, [onClose])
   useFocusTrap(ref, true, tryClose)
 
+  // The ReviewQueue drawer has its own document-level focus trap. Capture
+  // Escape first so it cannot dismiss an in-flight durable assignment.
+  useEffect(() => {
+    const interceptEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      tryClose()
+    }
+    document.addEventListener('keydown', interceptEscape, true)
+    return () => document.removeEventListener('keydown', interceptEscape, true)
+  }, [tryClose])
+
   // Initial focus lands on the first editable field (the trap's default is the
   // header close button, which is a poor starting point for a form).
   useEffect(() => {

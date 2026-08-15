@@ -218,9 +218,7 @@ def verify_delta_bundle(
 ) -> RestoreVerification | None:
     if not artifact.ahead_commits:
         return None
-    restore_root = Path(
-        tempfile.mkdtemp(prefix="cygnus-arkon-restore-ahead-", dir="/private/tmp")
-    )
+    restore_root = Path(tempfile.mkdtemp(prefix="cygnus-arkon-restore-ahead-"))
     restore_repo = restore_root / "repo"
     subprocess.check_call(["git", "clone", "--quiet", str(repo), str(restore_repo)])
     run_git_quiet(restore_repo, "checkout", artifact.base_commit)
@@ -266,9 +264,7 @@ def verify_patch_series(
     patch_files = sorted(Path(artifact.patches_dir).glob("*.patch"))
     if not patch_files:
         return None
-    restore_root = Path(
-        tempfile.mkdtemp(prefix="cygnus-arkon-restore-patch-", dir="/private/tmp")
-    )
+    restore_root = Path(tempfile.mkdtemp(prefix="cygnus-arkon-restore-patch-"))
     subprocess.check_call(["git", "clone", "--quiet", str(repo), str(restore_root)])
     run_git_quiet(restore_root, "checkout", artifact.base_commit)
     subprocess.check_call(
@@ -312,9 +308,7 @@ def verify_worktree_state(
     if not artifact.status_lines:
         return None
 
-    restore_root = Path(
-        tempfile.mkdtemp(prefix="cygnus-arkon-restore-worktree-", dir="/private/tmp")
-    )
+    restore_root = Path(tempfile.mkdtemp(prefix="cygnus-arkon-restore-worktree-"))
     restore_repo = restore_root / "repo"
     subprocess.check_call(["git", "clone", "--quiet", str(repo), str(restore_repo)])
     run_git_quiet(restore_repo, "checkout", artifact.head_commit)
@@ -384,7 +378,7 @@ def main() -> int:
     parser.add_argument("repo", help="Path to the external git checkout to preserve.")
     parser.add_argument(
         "--output-dir",
-        help="Exact output directory. Defaults to a timestamped /private/tmp location.",
+        help="Exact output directory. Defaults to a timestamped system temporary directory.",
     )
     parser.add_argument(
         "--base-ref",
@@ -412,7 +406,7 @@ def main() -> int:
         output_root = Path(args.output_dir).expanduser().resolve()
     else:
         output_root = (
-            Path("/private/tmp")
+            Path(tempfile.gettempdir())
             / f"cygnus-arkon-preserve-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
         )
 

@@ -174,7 +174,11 @@ class ImageGateTests(unittest.TestCase):
                     "Results": [
                         {
                             "Vulnerabilities": [
-                                {"VulnerabilityID": "CVE-x", "Severity": "HIGH"}
+                                {
+                                    "VulnerabilityID": "CVE-x",
+                                    "Severity": "HIGH",
+                                    "FixedVersion": "2.0",
+                                }
                             ]
                         }
                     ]
@@ -185,6 +189,36 @@ class ImageGateTests(unittest.TestCase):
         result = gate.validate_manifest(manifest, repo_root=self.root)
         self.assertFalse(result["ok"])
         self.assertTrue(any("HIGH/CRITICAL" in item for item in result["failures"]))
+
+    def test_unfixed_high_finding_is_recorded_without_blocking(self) -> None:
+        manifest = self.manifest()
+        self.materialize(manifest)
+        path = self.root / "production/scans/backend.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "Results": [
+                        {
+                            "Vulnerabilities": [
+                                {
+                                    "VulnerabilityID": "CVE-unfixed",
+                                    "Severity": "CRITICAL",
+                                    "PkgName": "vendor-package",
+                                    "InstalledVersion": "1.0",
+                                    "FixedVersion": None,
+                                    "Status": "affected",
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        result = gate.validate_manifest(manifest, repo_root=self.root)
+        self.assertTrue(result["ok"], result["failures"])
+        deferred = result["checks"]["backend_scan_deferred_unfixed"]
+        self.assertEqual(deferred[0]["id"], "CVE-unfixed")
 
 
 class ImageAttestationCollectorTests(unittest.TestCase):

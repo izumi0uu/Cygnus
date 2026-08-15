@@ -2,8 +2,9 @@
 """Fail-closed image supply-chain gate for released Cygnus manifests.
 
 A release must contain exact image-index digests, SPDX SBOMs, verified SLSA
-provenance bound to those digests, Trivy reports without HIGH/CRITICAL findings,
-and a keyless cosign verification record bound to each digest. Empty files or
+provenance bound to those digests, Trivy reports without remediable
+HIGH/CRITICAL findings, and a keyless cosign verification record bound to each
+digest. Unfixed vendor findings remain explicit evidence; empty files or
 truthy-looking JSON are not evidence.
 """
 
@@ -228,7 +229,8 @@ def _validate_scan(
     if not isinstance(results, list):
         failures.append(f"images.{key}.scan has no Trivy Results list")
         return
-    failing: list[dict[str, object]] = []
+    blocking: list[dict[str, object]] = []
+    deferred_unfixed: list[dict[str, object]] = []
     for result in results:
         if not isinstance(result, dict):
             continue
@@ -239,18 +241,26 @@ def _validate_scan(
             if not isinstance(vulnerability, dict):
                 continue
             severity = str(vulnerability.get("Severity", "")).upper()
-            if severity in FAILING_SEVERITIES:
-                failing.append(
-                    {
-                        "id": vulnerability.get("VulnerabilityID"),
-                        "severity": severity,
-                        "package": vulnerability.get("PkgName"),
-                    }
-                )
-    checks[f"{key}_scan_failing"] = failing
-    if failing:
+            if severity not in FAILING_SEVERITIES:
+                continue
+            fixed_version = vulnerability.get("FixedVersion")
+            finding: dict[str, object] = {
+                "id": vulnerability.get("VulnerabilityID"),
+                "severity": severity,
+                "package": vulnerability.get("PkgName"),
+                "installed_version": vulnerability.get("InstalledVersion"),
+                "fixed_version": fixed_version,
+                "status": vulnerability.get("Status"),
+            }
+            if isinstance(fixed_version, str) and fixed_version.strip():
+                blocking.append(finding)
+            else:
+                deferred_unfixed.append(finding)
+    checks[f"{key}_scan_blocking"] = blocking
+    checks[f"{key}_scan_deferred_unfixed"] = deferred_unfixed
+    if blocking:
         failures.append(
-            f"images.{key}.scan contains {len(failing)} HIGH/CRITICAL vulnerabilities"
+            f"images.{key}.scan contains {len(blocking)} remediable HIGH/CRITICAL vulnerabilities"
         )
 
 

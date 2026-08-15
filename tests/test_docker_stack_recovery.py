@@ -633,7 +633,7 @@ class DockerStackRecoveryTests(unittest.TestCase):
         self.assertIn('io.cygnus.image.immutable="true"', backend_text)
 
         self.assertIn("node:22.15.1-bookworm-slim@sha256:", frontend_text)
-        self.assertIn("nginx:1.27.5-alpine@sha256:", frontend_text)
+        self.assertIn("nginx:1.30.4-alpine3.24@sha256:", frontend_text)
         self.assertIn("package-lock.json", frontend_text)
         self.assertIn("npm ci --no-audit --no-fund", frontend_text)
         self.assertIn("AS prod", frontend_text)

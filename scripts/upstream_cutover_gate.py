@@ -28,7 +28,7 @@ FORBIDDEN_EXTERNAL_CHECKOUT_PATTERNS = (
     re.compile(r"(?:^|[\"'=\s])\.\./[^\"'\s]*arkon(?:[\"'\s]|$)"),
     re.compile(r"(?:^|[\"'=\s])/[^\"'\s]*/arkon(?:[\"'\s]|$)"),
 )
-IGNORED_CODE_PARTS = {"dist", "__pycache__"}
+IGNORED_CODE_PARTS = {"dist", "node_modules", "__pycache__"}
 REMOVED_COMPAT_FILES = (
     "cygnus/api/__init__.py",
     "cygnus/api/app.py",

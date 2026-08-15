@@ -72,6 +72,17 @@ class UpstreamCutoverGateTests(unittest.TestCase):
                 any("forbidden upstream residue" in item for item in failures)
             )
 
+    def test_gate_ignores_installed_frontend_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dependency = root / "frontend/node_modules/example/index.js"
+            dependency.parent.mkdir(parents=True)
+            dependency.write_text("import arkon\n", encoding="utf-8")
+
+            failures = upstream_cutover_gate.scan_forbidden_code_residue(root)
+
+            self.assertEqual(failures, [])
+
     def test_gate_detects_reintroduced_legacy_api_package(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

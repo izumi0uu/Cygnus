@@ -11,6 +11,10 @@ import sys
 from pathlib import Path
 from typing import TypedDict, cast
 
+ONE_SHOT_SERVICES = frozenset(
+    {"migrator"}
+)  # Runs before the long-lived services and is not part of their peak.
+
 
 class HostCapacityResult(TypedDict):
     ok: bool
@@ -20,6 +24,7 @@ class HostCapacityResult(TypedDict):
     available_cpus: int
     required_cpus: float
     required_bytes: int
+    concurrent_services: list[str]
     service_limits_bytes: dict[str, int]
     service_limits_cpus: dict[str, float]
 
@@ -113,8 +118,13 @@ def validate(
         failures.append(str(exc))
         total = 0
         available = 0
-    required = sum(service_limits.values())
-    required_cpus = sum(service_cpu_limits.values())
+    concurrent_services = sorted(
+        name for name in services if name not in ONE_SHOT_SERVICES
+    )
+    required = sum(service_limits.get(name, 0) for name in concurrent_services)
+    required_cpus = sum(
+        service_cpu_limits.get(name, 0.0) for name in concurrent_services
+    )
     if available_cpus <= 0:
         failures.append("host logical CPU count is unavailable")
     elif services and required_cpus > available_cpus:
@@ -142,6 +152,7 @@ def validate(
         "available_bytes": available,
         "required_bytes": required,
         "service_limits_bytes": service_limits,
+        "concurrent_services": concurrent_services,
         "service_limits_cpus": service_cpu_limits,
     }
 
